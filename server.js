@@ -9,7 +9,7 @@ import {botOpening,botDiscard} from './src/bots.js';
 import {safeSecretMatch,debugOnly,debugSteal} from './src/debug.js';
 const root=dirname(fileURLToPath(import.meta.url));
 const app=express();app.disable('x-powered-by');
-app.get('/health',(req,res)=>res.json({ok:true,rooms:rooms.size}));
+app.get('/health',(req,res)=>res.json({ok:true,rooms:rooms.size,release:process.env.GAME_RELEASE||'dev'}));
 app.use(express.static(join(root,'dist'),{index:'index.html'}));
 app.get('*',(req,res)=>res.sendFile(join(root,'dist','index.html')));
 const httpServer=createServer(app);

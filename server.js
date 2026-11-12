@@ -51,6 +51,30 @@ const cleanName=n=>String(n||'Misafir').replace(/[<>]/g,'').trim().slice(0,20)||
 const ackErr=(ack,e)=>ack?.({ok:false,error:e?.message||String(e)});
 const ackOK=(ack,p={})=>ack?.({ok:true,...p});
 const socketFind=sock=>{const {code,token}=sock.data||{};const room=rooms.get(code);const player=room?.players.find(p=>p.token===token);return {room,player};};
+function closeRoom(room,message){
+ if(room.botTimer){clearTimeout(room.botTimer);room.botTimer=null;}
+ rooms.delete(room.code);
+ for(const p of room.players){
+  if(!p.socketId)continue;
+  const client=io.sockets.sockets.get(p.socketId);
+  if(client){client.emit('room:closed',{message});client.leave(room.code);client.data={};}
+  p.socketId=null;
+ }
+}
+function leaveRoom(sock,room,player){
+ sock.leave(room.code);sock.data={};player.socketId=null;
+ if(room.phase!=='lobby'){
+  // Playing a four-seat game without all seats would permanently stall the turn.
+  closeRoom(room,'Bir oyuncu masadan ayrıldığı için maç sona erdi. Yeni masa kurabilirsin.');
+  return;
+ }
+ room.players=room.players.filter(p=>p!==player);
+ if(!room.players.length){closeRoom(room,'Oda kapandı.');return;}
+ room.players.forEach((p,i)=>p.seat=i);
+ room.hostSeat=0;
+ room.lastMove=`${player.name} masadan ayrıldı.`;
+ notify(room);
+}
 function notify(room){for(const p of room.players){if(p.socketId)io.to(p.socketId).emit('state',stateFor(room,p));}}
 function checkTurn(room,p){if(room.phase!=='playing')throw Error('Oyun devam etmiyor.');if(room.turn!==p.seat)throw Error('Sıra sende değil.');}
 function checkDrawing(room){if(!room.drawn)throw Error('Önce taş çekmelisin.');}
@@ -63,6 +87,7 @@ function bindSocket(sock,room,p){if(p.bot)throw Error('Bot oturumuna bağlanıla
 function doAction(sock,ack,fn){try{const {room,player}=socketFind(sock);if(!room||!player)throw Error('Odaya bağlı değilsin.');fn(room,player);notify(room);ackOK(ack);scheduleBots(room);}catch(e){ackErr(ack,e);}}
 io.on('connection',sock=>{
  sock.on('room:create',(data={},ack)=>{try{
+   if(socketFind(sock).player)throw Error('Zaten bir masadasın. Önce mevcut masadan ayrıl.');
    let c;do{c=code()}while(rooms.has(c));
    const p={seat:0,name:cleanName(data.name),token:token(),socketId:sock.id,hand:[],total:0,openedKind:null,openValue:0,roundPenalty:0};
    const s=data.settings||{};const settings={folding:!!s.folding,teams:!!s.teams,practice:!!s.practice,rounds:[3,5,11].includes(Number(s.rounds))?Number(s.rounds):5};
@@ -70,6 +95,7 @@ io.on('connection',sock=>{
    rooms.set(c,room);bindSocket(sock,room,p);notify(room);ackOK(ack,{code:c,token:p.token});
  }catch(e){ackErr(ack,e)}});
  sock.on('room:join',(data={},ack)=>{try{
+   if(socketFind(sock).player)throw Error('Zaten bir masadasın. Önce mevcut masadan ayrıl.');
    const c=String(data.code||'').toUpperCase().trim();const room=rooms.get(c);if(!room)throw Error('Oda bulunamadı.');
    let p=data.token?room.players.find(p=>p.token===data.token):null;
    if(!p){if(room.settings.practice)throw Error('Bu oda özel bot test odası.');if(room.phase!=='lobby')throw Error('Oyun başladı; yeni oyuncu katılamaz.');if(room.players.length>=4)throw Error('Oda dolu.');
@@ -77,7 +103,7 @@ io.on('connection',sock=>{
    }
    bindSocket(sock,room,p);notify(room);ackOK(ack,{code:c,token:p.token});
  }catch(e){ackErr(ack,e)}});
- sock.on('room:leave',(_,ack)=>{try{const {room,player}=socketFind(sock);if(room&&player&&player.socketId===sock.id){player.socketId=null;sock.leave(room.code);if(room.settings.practice&&player.seat===room.hostSeat){if(room.botTimer)clearTimeout(room.botTimer);rooms.delete(room.code);}else notify(room);}sock.data={};ackOK(ack);}catch(e){ackErr(ack,e)}});
+ sock.on('room:leave',(_,ack)=>{try{const {room,player}=socketFind(sock);if(room&&player&&player.socketId===sock.id)leaveRoom(sock,room,player);else sock.data={};ackOK(ack);}catch(e){ackErr(ack,e)}});
  sock.on('room:settings',(data={},ack)=>doAction(sock,ack,(r,p)=>{if(r.phase!=='lobby'||p.seat!==r.hostSeat)throw Error('Bu ayarları sadece oda sahibi değiştirebilir.');r.settings.folding=!!data.folding;r.settings.teams=!!data.teams;r.settings.rounds=[3,5,11].includes(Number(data.rounds))?Number(data.rounds):5;}));
  sock.on('room:start',(_,ack)=>doAction(sock,ack,(r,p)=>{if(p.seat!==r.hostSeat)throw Error('Odayı yalnız kurucu başlatabilir.');if(r.phase!=='lobby')throw Error('Oyun zaten başladı.');if(r.settings.practice){while(r.players.length<4)r.players.push(botPlayer(r.players.length));}
    if(r.players.length!==4)throw Error('Başlamak için 4 oyuncu gerekli.');if(r.players.some(x=>!x.socketId&&!x.bot))throw Error('Tüm oyuncular bağlı olmalı.');r.round=1;setupRound(r);}));

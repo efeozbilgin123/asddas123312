@@ -1,169 +1,40 @@
-<h2 align="centre"> 𝙕𝙖𝙞𝙙 𝙑𝙤𝙞𝙘𝙚 𝙋𝙡𝙖𝙮𝙚𝙧🔥</h2>
+# 101 CLUB — 3D Multiplayer 101 Okey
 
-### ᴢᴀɪᴅ ᴠᴄ ᴘʟᴀʏᴇʀ ɪꜱ ᴀ ᴛᴇʟᴇɢʀᴀᴍ ᴘʀᴏᴊᴇᴄᴛ ʙᴀꜱᴇᴅ ᴏɴ ᴘʏʀᴏɢʀᴀᴍ ꜰᴏʀ ᴘʟᴀʏ ᴍᴜꜱɪᴄꜱ ɪɴ ᴠᴄ ᴄʜᴀᴛꜱ...
+Browser-based 101 Okey, with a Three.js 3D table, real-time Socket.IO rooms, 4-player seating, optional *katlamalı* and *eşli* variants, tile drawing/discarding, meld opening and extension, couples, round totals, and in-room chat.
 
-<p align="center"><a href="https://t.me/Superior_Bots"><img src="https://telegra.ph/file/c4e036012053c3eb85e80.jpg" width="300"></a></p>
-<p align="center">
-    <a href="https://www.python.org/" alt="made-with-python"> <img src="https://img.shields.io/badge/Made%20with-Python-black.svg?style=flat-square&logo=python&logoColor=blue&color=red" /></a>
+## Run locally
 
-## 🅡🅔🅟🅞 🅢🅣🅐🅣🅢
-![github card](https://github-readme-stats.vercel.app/api/pin/?username=ITZ-ZAID&repo=Zaid-Vc-Player&theme=dark)
+Requirements: Node.js 20+
 
-<h3>ʀᴇQᴜɪʀᴇᴍᴇɴᴛꜱ 📝</h3>
-
-- FFmpeg
-- NodeJS [nodesource.com](https://nodesource.com/)
-- Python 3.8+ or 3.7
-- [PyTgCallss](https://github.com/ITZ-ZAID/calls)
-
-#
-
-<p align="center">Deploy with Cloner Bot</p>
-
-<p align="center"><a href="https://github.com/ITZ-ZAID/Zaid-Vc-Player/tree/clone"> <img src="https://img.shields.io/badge/Cloner%20Branch-blue?style=for-the-badge&logo=github" width="220" height="38.45"/></a></p>
-
-
-#
-
-<p align="center">𝐆𝐞𝐧𝐞𝐫𝐚𝐭𝐞 𝐒𝐭𝐫𝐢𝐧𝐠 𝐒𝐞𝐬𝐬𝐢𝐨𝐧</p>
-
-<p align="center"><a href="https://replit.com/@Itz-zaid/Generator"> <img src="https://img.shields.io/badge/String%20Session-black?style=for-the-badge&logo=replit" width="220" height="38.45"/></a></p>
-
-
-#
-
-<p align="center">𝐇𝐞𝐫𝐨𝐤𝐮 𝐃𝐞𝐩𝐥𝐨𝐲𝐦𝐞𝐧𝐭 𝐓𝐮𝐭𝐨𝐫𝐢𝐚𝐥</p>
-
-<p align="center"><a href="https://youtu.be/nQAyresJTC0"> <img src="https://img.shields.io/badge/Youtube%20Deploy-red?style=for-the-badge&logo=youtube" width="220" height="38.45"/></a></p>
-
-## ᴄᴏᴍᴍᴀɴᴅꜱ 
-
-[CLICK HERE](https://t.me/SUPERIOR_BOTS/160)
-
-
-## ꜰᴇᴀᴛᴜʀᴇꜱ ᴡɪᴛʜ ᴀɪ 🔥️
-
-> Here is the given all Features.. !
-
-<details>
-    <summary><b> Click here to expand » </b></summary>
-
-- **ᴘʟᴀʏ ᴍᴜꜱɪᴄ ɪɴ ᴛᴇʟᴇɢʀᴀᴍ ɢʀᴏᴜᴘ ᴠᴏɪᴄᴇ ᴄʜᴀᴛꜱ!** (ꜱᴜᴘᴘᴏʀᴛꜱ ᴍᴜʟᴛɪᴘʟᴇ ɢʀᴏᴜᴘꜱ)
-- **ꜱᴜᴘᴘᴏʀᴛꜱ Qᴜᴇᴜᴇꜱ!**
-- **ᴄᴏɴᴛʀᴏʟ ʙʏ ʙᴜᴛᴛᴏɴꜱ ᴏʀ ᴄᴏᴍᴍᴀɴᴅꜱ**
-- **ꜱᴇᴀʀᴄʜ ꜰᴏʀ ʏᴏᴜᴛᴜʙᴇ ᴠɪᴅᴇᴏꜱ ɪɴʟɪɴᴇ!**
-- **ᴅᴏᴡɴʟᴏᴀᴅ ʏᴛ ꜱᴏɴɢꜱ ʙʏ ɪᴛ'ꜱ ɴᴀᴍᴇ!**
-- **ᴅᴏᴡɴʟᴏᴀᴅ ʏᴛ ᴠɪᴅᴇᴏꜱ ʙʏ ɪᴛ'ꜱ ɴᴀᴍᴇ!**
-- **ɢᴇᴛ ʟʏʀɪᴄꜱ ᴏꜰ ʏᴏᴜʀ ꜱᴏɴɢ!**
-- **ᴊᴏɪɴ & ʟᴇᴀᴠᴇ ꜱᴛʀᴇᴀᴍᴇʀ ᴀᴄᴄᴏᴜɴᴛ ᴜꜱɪɴɢ ᴀ ᴄᴏᴍᴍᴀɴᴅ**
-- **ᴄᴏᴏʟ ꜱᴛᴀʀᴛꜱ ᴘʟᴜɴɢɪɴꜱ**
-- **Spam**
-- **Reply Raid**
-- **Love Raid**
-- **Voice Raid**
-- **Video Raid**
-- **Skip, Pause, Resume, Stop feature**
-- **YouTube/Local/Live/m3u8 ʟɪɴᴋ stream support**
-- **Control With Button support**
-- **Volume Control**
-- **Userbot Auto Join**
-- **Multi Assistant**
-</details>
-
-## 🔎 ꜱᴜᴘᴘᴏʀᴛ ɪɴʟɪɴᴇ ꜱᴇᴀʀᴄʜ
-
-## ᴅᴇᴘʟᴏʏ
-
-ᴛᴏ ʙᴇ ꜱᴀꜰᴇ ꜰᴏʀᴋ ᴛʜɪꜱ ʀᴇᴘᴏ ᴀɴᴅ ᴛʜᴇɴ ᴘʀᴇꜱꜱ ᴅᴇᴘʟᴏʏ ʙᴜᴛᴛᴏɴ ꜰʀᴏᴍ ᴛʜᴇ ꜰᴏʀᴋᴇᴅ ʀᴇᴘᴏ 
-
-[ꜰᴏʀᴋ ᴅᴇᴘʟᴏʏ ɪꜱ ʜɪɢʜʟʏ ʀᴇᴄᴏᴍᴍᴇɴᴅᴇᴅ](https://telegra.ph/file/5bcf79f948ca06030640c.mp4)
-
-<p align="center"><a href="https://my.scalingo.com/deploy?template=https://github.com/ITZ-ZAID/Zaid-Vc-Player"> <img src="https://cdn.scalingo.com/deploy/button.svg" width="220" height="38.45"/></a></p>
-
-> Click on buttons below to expand and  detailed explanation process. !
-
-
-<details>
-    <summary><b> Detailed Heroku Depoyment Process » </b></summary>
-
-<img src="https://telegra.ph/file/97e6de197eba98d2caba5.jpg" align="right" width="350" height="700"/>
-
-### 🚀 Deploy Process
-- Click on the deploy button above and login to your [heroku account](https://heroku.com/login) .
-- Fill your values there.
-- If you don't know how to get config vars : [Please refer here](https://github.com/ITZ-ZAID/Zaid-Vc-Player/blob/main/sample.env)
-- Make sure you fill correct values.
-- Click on **Deploy** button.
-- Please wait till the app gets deployed on heroku. Deploying can take upto **2-3 mins**..
-- When your app is successfully deployed, click on **Manage App** button.
-
-
-### 🚀 Booting Process
-- Search for **Resources** Tab inside your app. ( Check Image for more details)
-- Click on the **Pencil Icon** under resources section.
-- Turn **on** the **switch** present there near pencil icon.
-- Congrats your Music Bot is now **Booting**.
-
-
-### 🚀 Checking Logs
-- After Turning on your booting .
-- Click on the **More Button** present at top right corner .
-- Click on the **View Logs** button from the drop down menu.
-- You check your logs there!
-- Click on save button there at bottom to save your logs and forward it to us on [@Bot_Support](https://t.me/Superior_Support) if you face any problem
-
-</details>
-
-
-## 🚀 Okteto Deployment
-
-<h4>Click the button below to deploy on Okteto!</h4>
-<p align="center"><a href="https://cloud.okteto.com/deploy?repository=https://github.com/ITZ-ZAID/Zaid-Vc-Player"><img src="https://img.shields.io/badge/Deploy%20To%20Okteto-informational?style=for-the-badge&logo=Okteto" width="200""/></a>
-
-## Workflows hosting
-
-<h4>Click the button below to import this code. How to host? Simply import this code then fill your vars in config.py then go to Actions and check build logs!</h4>
-<p align="center"><a href="https://github.com/new/import"><img src="https://img.shields.io/badge/Workflow%20Deploy-black?style=for-the-badge&logo=github" width="200""/></a>
-
-
-## ᴅᴇᴘʟᴏʏ ᴏɴ ʀᴀɪʟᴡᴀʏ 🚄
-ꜰᴏʀ ᴅᴇᴘʟᴏʏ ᴏɴ ʀᴀɪʟᴡᴀʏ ᴍᴀᴋᴇ [Necessary Variables Here](https://github.com/ITZ-ZAID/Zaid-Vc-Player), ᴜ ʜᴀᴠᴇ ᴛᴏ ꜰɪʟʟ.
-
-<p align="center"><a href="https://railway.app/new/template?template=https://github.com/ITZ-ZAID/Music-Deploy&envs=SESSION_NAME,BOT_TOKEN,GROUP_SUPPORT,UPDATES_CHANNEL,API_ID,API_HASH,SUDO_USERS,DURATION_LIMIT"> <img src="https://img.shields.io/badge/Deploy%20To%20Railway-black?style=for-the-badge&logo=railway" width="220" height="38.45"/></a></p>
-
-
-<h2 align="center">
-   Install Locally Or On A VPS
-</h2>
-
-
-```console
-Zaid@Windows~ $ git clone https://github.com/ITZ-ZAID/Zaid-Vc-Player
-Zaid@Windows~ $ cd Zaid-Vc-Player
-Zaid@Windows~ $ bash setup
-Zaid@Windows~ $ cp sample.env .env
+```bash
+npm install
+npm run build
+npm start
 ```
 
-<h3 align="center">
-    Edit <b>.env</b> with your own values and Run Bot
-</h3>
+Open http://localhost:3001 in up to four separate browser windows/devices. Enter a nickname, create a room, and share the 6-character room code. Local dev with HMR: `npm run dev` (open the Vite address shown in the terminal; Vite config proxies Socket.IO to the server).
 
-```console
-Zaid@Windows~ $ screen
-Zaid@Windows~ $ python3 main.py
-```
+## Online deployment
 
-### ꜱᴘᴇᴄɪᴀʟ ᴄʀᴇᴀᴅɪᴛꜱ 💖
-- Callsmusic
-- Veez
-- PyroGram
--xyz ⚡
+Deploy as a **Node Web Service** on Render:
+- Build: `npm install && npm run build`
+- Start: `npm start`
+- Free plan supported (sleep/wake is normal; rooms are kept in memory only).
+- Region: Frankfurt for Turkey/EU.
 
-#
+## Room rules
 
-<p align="center">𝐒𝐮𝐩𝐩𝐨𝐫𝐭 / 𝐂𝐡𝐚𝐧𝐧𝐞𝐥 ----> </p>
+- Host configures **Folding** (`katlamalı`, next opener needs one more point than previous opposing opening, similarly with pairs), **Partners** (`eşli`, opposite seats are one team), and 3/5/11 rounds before starting.
+- 104 numbered tiles + two false jokers. Indicator determines the wildcard tile. 22 tiles for starter and 21 for others.
+- Opens with 101+ meld points or 5+ identical pairs. Pure runs are consecutive from 1 through 13 (no circular wrapping), or sets have 3–4 distinct colors of equal value. Okey is a wildcard, and fake joker functions as the printed tile of the okey face.
+- Turns: draw stock or discard (except starter), optionally open/lay off, discard. Discard from last player must be used in an opening if player was still closed.
+- Round ends when a player discards their last tile, or stock runs out. Players who never opened score +202, others score remaining tiles, the winner gets -101 or -202 for pairs, and their partner receives the same benefit in partner mode.
+- Socket connection tokens allow browser refresh/rejoin to the same seat.
 
-<p align="center"><a href="https://t.me/TheSupportChat"><img src="https://img.shields.io/badge/ᴛᴇʟᴇɢʀᴀᴍ-𝐒𝐮𝐩𝐩𝐨𝐫𝐭-black?&style=for-the-badge&logo=telegram" width="220" height="38.45"></a></p>
-<p align="center"><a href="https://t.me/TheUpdatesChannel"><img src="https://img.shields.io/badge/ᴛᴇʟᴇɢʀᴀᴍ-𝐔𝐩𝐝𝐚𝐭𝐞𝐬-black?&style=for-the-badge&logo=telegram" width="220" height="38.45"></a></p>
+### MVP limitations
 
-#
+This is a playable foundation, not every regional/tournament rule. No bots, ranked accounts, tournament penalties, joker retrieval from the table, or advanced automated rearrangement. In-memory rooms disappear when the server restarts, including on Render Free sleep. Game owner starts each new round. More complex house rules (such as **12-13-1**, **siler**, and mandatory play penalties) should be added before calling it a tournament-accurate version.
+
+## Testing
+
+`npm test` runs the rule-engine tests. For real multiplayer testing, open four sessions with different browser storage profiles. Server validates all actions, so a user cannot see another player's hand via the client state endpoint.

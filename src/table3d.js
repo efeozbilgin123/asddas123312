@@ -190,7 +190,7 @@ export function createTable3D(node,{getState,getOrder,getSelected,onSelect,onDra
     if(x+span>4.55){x=-5.8;row++;z=-1.75+row*.95;}
     if(row>4)break;
     m.tiles.forEach((t,j)=>{
-     const tile=tileMesh(t,x+j*.61,.21+(m.id===activeMeld?.18:0),z,
+     const tile=tileMesh(t,x+j*.61,.21+(m.id===activeMeld ? .18 : 0),z,
       {action:'meld',id:m.id,scale:.98});
      tile.userData.meldId=m.id;
     });
@@ -210,7 +210,7 @@ export function createTable3D(node,{getState,getOrder,getSelected,onSelect,onDra
  function highlightMeld(id){
   activeMeld=id;
   for(const mesh of dynamic.children)if(mesh.userData?.meldId)
-   mesh.position.y=mesh.userData.meldId===id?.37:.21;
+   mesh.position.y=mesh.userData.meldId===id ? .37 : .21;
   requestDraw();
  }
  const raycaster=new THREE.Raycaster(),mouse=new THREE.Vector2();

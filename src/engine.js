@@ -90,7 +90,7 @@ export function settle(state,winnerSeat=null,lastDiscard=null){
 }
 export function stateFor(state,player){
  return {code:state.code,phase:state.phase,settings:state.settings,round:state.round,hostSeat:state.hostSeat,
-   players:state.players.map(p=>({seat:p.seat,name:p.name,online:!!p.socketId,count:p.hand.length,total:p.total,openedKind:p.openedKind,openValue:p.openValue,roundPenalty:p.roundPenalty})),
+   players:state.players.map(p=>({seat:p.seat,name:p.name,online:!!p.socketId||!!p.bot,bot:!!p.bot,count:p.hand.length,total:p.total,openedKind:p.openedKind,openValue:p.openValue,roundPenalty:p.roundPenalty})),
    you:player?.seat??null,hand:player?player.hand.map(publicTile):[],turn:state.turn,drawn:state.drawn,starter:state.starter,
    stockCount:state.stock?.length??0,indicator:state.indicator,okey:state.okey,discards:state.discard.map(publicTile),
    melds:state.melds.map(m=>({...m})),lastMove:state.lastMove,winner:state.winner,lastResult:state.lastResult,

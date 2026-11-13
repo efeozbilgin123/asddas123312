@@ -62,6 +62,20 @@
         </svg>
         <span>Müzik</span>
       </button>
+      <button type="button" id="btn-tv" class="btn btn--quiet btn--sm" hidden title="Kahvehane televizyonu">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <rect x="2" y="7" width="20" height="15" rx="2" ry="2"/>
+          <polyline points="17 2 12 7 7 2"/>
+        </svg>
+        <span>TV</span>
+      </button>
+      <button type="button" id="btn-cozy-prefs" class="btn btn--quiet btn--sm" hidden title="Ortam, atmosfer, ıstaka ve taş görünümü">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41"/>
+        </svg>
+        <span>Masa &amp; Ortam</span>
+      </button>
       <button type="button" id="btn-sound" class="btn btn--quiet btn--sm" aria-pressed="false" title="Ses efektleri">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M11 5L6 9H2v6h4l5 4V5z"/>
@@ -212,6 +226,23 @@
                 <option value="navy">Gece Laciverti</option>
               </select>
             </div>
+            <div class="field field--inline">
+              <label for="opt-atmosphere">Ortam atmosferi</label>
+              <select id="opt-atmosphere">
+                <option value="rainy" selected>Yağmurlu Gece</option>
+                <option value="afternoon">Akşamüstü Altın Saat</option>
+                <option value="midnight">Gece Yarısı Ev Modu</option>
+              </select>
+            </div>
+            <div class="field field--inline">
+              <label for="opt-ambiance">Ortam sesi</label>
+              <select id="opt-ambiance">
+                <option value="rain" selected>Dışarıda Yağmur</option>
+                <option value="ocakbasi">Ocakbaşı &amp; Çay Kazanı</option>
+                <option value="fireplace">Kuzine / Şömine</option>
+                <option value="none">Sessiz</option>
+              </select>
+            </div>
             <label class="check">
               <input id="opt-islek" type="checkbox" checked>
               <span>İşlek taş cezası (+101)</span>
@@ -288,6 +319,7 @@
             <span id="wait-room-code" class="code-badge num"></span>
             <button type="button" id="btn-wait-orders" class="btn btn--quiet btn--sm">Çay &amp; İkram</button>
             <button type="button" id="btn-wait-music" class="btn btn--quiet btn--sm">Ortak Müzik</button>
+            <button type="button" id="btn-wait-tv" class="btn btn--quiet btn--sm">TV</button>
             <button type="button" id="btn-copy-code" class="btn btn--quiet btn--sm">Davet Linki Kopyala</button>
           </div>
         </div>
@@ -327,11 +359,30 @@
               <option value="90">90 sn</option>
             </select>
           </div>
+          <div class="field field--inline">
+            <label for="wait-atmosphere">Atmosfer</label>
+            <select id="wait-atmosphere">
+              <option value="rainy">Yağmurlu Gece</option>
+              <option value="afternoon">Akşamüstü Altın Saat</option>
+              <option value="midnight">Gece Yarısı Ev Modu</option>
+            </select>
+          </div>
+          <div class="field field--inline">
+            <label for="wait-ambiance">Ortam sesi</label>
+            <select id="wait-ambiance">
+              <option value="rain">Dışarıda Yağmur</option>
+              <option value="ocakbasi">Ocakbaşı &amp; Çay Kazanı</option>
+              <option value="fireplace">Kuzine / Şömine</option>
+              <option value="none">Sessiz</option>
+            </select>
+          </div>
           <label class="check">
             <input id="wait-islek" type="checkbox">
             <span>İşlek taş cezası</span>
           </label>
         </div>
+
+        <p id="wait-ambiance-pill" class="wait-ambiance-pill" hidden></p>
 
         <div class="wait-footer">
           <p id="wait-status-msg" class="field__help" aria-live="polite"></p>
@@ -451,6 +502,35 @@
       <div id="music-player-host" class="music-dock__body"></div>
     </aside>
 
+    <!-- Persistent Shared Kahvehane TV PIP Dock -->
+    <aside id="tv-dock" class="tv-dock is-minimized" hidden aria-label="Ortak kahvehane televizyonu">
+      <div class="tv-dock__bar">
+        <div class="tv-dock__meta">
+          <span id="tv-live-badge" class="pill pill--warn tv-dock__badge">CANLI</span>
+          <div class="tv-dock__text">
+            <strong id="tv-title" class="tv-dock__title">Kahvehane TV</strong>
+            <span id="tv-updated-by" class="tv-dock__sub">Masayla senkronize</span>
+          </div>
+        </div>
+        <div class="tv-dock__controls">
+          <button type="button" id="tv-switch-btn" class="btn btn--quiet btn--sm">Kanal</button>
+          <button type="button" id="tv-toggle" class="btn btn--quiet btn--sm" aria-expanded="false">Büyüt</button>
+          <a id="tv-external-link" class="btn btn--quiet btn--sm" href="#" target="_blank" rel="noopener noreferrer" hidden>Aç</a>
+          <button type="button" id="tv-stop" class="btn btn--quiet btn--sm">Kapat</button>
+        </div>
+      </div>
+      <div id="tv-player-host" class="tv-dock__body"></div>
+    </aside>
+
+    <!-- Cozy Cat Pet Reaction Toast -->
+    <div id="cat-toast" class="cat-toast" role="status" aria-live="polite" hidden>
+      <img id="cat-toast-img" class="cat-toast__img" src="/assets/cat-1.jpg" alt="Kahvehane kedisi">
+      <div class="cat-toast__body">
+        <strong id="cat-toast-title">Pamuk</strong>
+        <span id="cat-toast-text">mırıldanıyor!</span>
+      </div>
+    </div>
+
     <!-- Collapsible Room Chat & Table Nudge Drawer -->
     <aside id="chat-drawer" class="chat-drawer" hidden aria-label="Masa sohbeti ve sataşmalar">
       <div class="chat-drawer__head">
@@ -526,6 +606,7 @@
           <tfoot id="yazboz-tfoot"></tfoot>
         </table>
       </div>
+      <div id="yazboz-adisyon" class="adisyon-receipt" hidden></div>
     </div>
   </dialog>
 
@@ -546,6 +627,104 @@
       </div>
       <p id="order-status-msg" class="field__help" aria-live="polite"></p>
       <div id="order-menu-grid"></div>
+    </div>
+  </dialog>
+
+  <!-- Kahvehane Live TV Dialog -->
+  <dialog id="dialog-tv" class="dialog">
+    <div class="dialog__head">
+      <h2>Kahvehane Televizyonu</h2>
+      <button type="button" class="btn btn--quiet btn--sm" data-close-dialog="dialog-tv">Kapat</button>
+    </div>
+    <div class="dialog__body">
+      <p class="lead">Duvar televizyonunu tüm masa için canlı yayına veya sevilen Yeşilçam filmlerine ayarlayın. Yayın odadaki herkesle senkronize edilir.</p>
+      <div class="music-presets">
+        <span class="music-presets__label">Hazır TV Kanalları</span>
+        <div id="tv-presets-grid" class="music-presets__grid"></div>
+      </div>
+      <form id="tv-form" class="lobby-form" novalidate>
+        <div class="field">
+          <label for="tv-url-input">Kanal adı veya YouTube / canlı yayın bağlantısı</label>
+          <input id="tv-url-input" type="text" placeholder="Örn. TRT 1 Canlı veya YouTube canlı yayın linki" required>
+          <p id="tv-url-help" class="field__help" aria-live="polite"></p>
+        </div>
+        <div class="field">
+          <label for="tv-title-input">Ekran başlığı (isteğe bağlı)</label>
+          <input id="tv-title-input" type="text" maxlength="64" placeholder="Örn. Akşam Maçı">
+        </div>
+        <div class="dialog__actions">
+          <button type="button" id="btn-tv-stop" class="btn btn--quiet">TV Kapat</button>
+          <button type="submit" id="btn-tv-play" class="btn btn--primary">Televizyonu Aç</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- Cozy Room Atmosphere, Ambiance & Rack/Tile Finish Dialog -->
+  <dialog id="dialog-cozy" class="dialog">
+    <div class="dialog__head">
+      <h2>Masa &amp; Ortam Ayarları</h2>
+      <button type="button" class="btn btn--quiet btn--sm" data-close-dialog="dialog-cozy">Kapat</button>
+    </div>
+    <div class="dialog__body">
+      <section id="cozy-host-section" class="cozy-section" hidden>
+        <div class="cozy-section__head">
+          <strong>Oda Atmosferi &amp; Ortam Sesi</strong>
+          <span class="pill pill--ok">Oda Kurucusu</span>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="cozy-atmosphere">Pencere ve ışık atmosferi</label>
+            <select id="cozy-atmosphere">
+              <option value="rainy">Yağmurlu Gece</option>
+              <option value="afternoon">Akşamüstü Altın Saat</option>
+              <option value="midnight">Gece Yarısı Ev Modu</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="cozy-ambiance">Ortam sesi</label>
+            <select id="cozy-ambiance">
+              <option value="rain">Dışarıda Yağmur</option>
+              <option value="ocakbasi">Ocakbaşı &amp; Çay Kazanı</option>
+              <option value="fireplace">Kuzine / Şömine</option>
+              <option value="none">Sessiz</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section id="cozy-guest-note" class="cozy-guest-note" hidden>
+        <strong id="cozy-guest-summary">Mevcut ortam: Yağmurlu Gece · Dışarıda Yağmur</strong>
+        <p class="field__help">Oda atmosferini ve ortam sesini yalnızca odayı kuran oyuncu değiştirebilir.</p>
+      </section>
+
+      <section class="cozy-section">
+        <div class="cozy-section__head">
+          <strong>Kendi Ortam Sesi Seviyeniz</strong>
+          <button type="button" id="btn-ambiance-mute" class="btn btn--quiet btn--sm" aria-pressed="false">Ortam Sesi: Açık</button>
+        </div>
+        <div class="cozy-slider-row">
+          <label for="cozy-ambiance-vol">Arka plan ses düzeyi</label>
+          <input id="cozy-ambiance-vol" class="cozy-range" type="range" min="0" max="100" value="25">
+          <span id="cozy-ambiance-vol-val" class="num">25%</span>
+        </div>
+      </section>
+
+      <section class="cozy-section">
+        <div class="cozy-section__head">
+          <strong>Istaka Ahşabı</strong>
+          <span class="field__help">Kişisel görünüm tercihi</span>
+        </div>
+        <div id="cozy-rack-theme" class="theme-pills" role="group" aria-label="Istaka ahşabı seçimi"></div>
+      </section>
+
+      <section class="cozy-section">
+        <div class="cozy-section__head">
+          <strong>Taş Yüzeyi &amp; Dokusu</strong>
+          <span class="field__help">Kişisel görünüm tercihi</span>
+        </div>
+        <div id="cozy-tile-theme" class="theme-pills" role="group" aria-label="Taş dokusu seçimi"></div>
+      </section>
     </div>
   </dialog>
 
@@ -595,6 +774,7 @@
           <tbody id="round-tbody"></tbody>
         </table>
       </div>
+      <div id="round-adisyon" class="adisyon-receipt" hidden></div>
       <div class="dialog__actions">
         <button type="button" id="btn-round-leave" class="btn btn--quiet">Masadan Ayrıl</button>
         <button type="button" id="btn-next-round" class="btn btn--primary" hidden>Sonraki El</button>

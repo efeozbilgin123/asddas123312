@@ -4,7 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Server } from 'socket.io';
-import { findAutoplayTrack, resolveMusicInput } from './musicResolver.js';
+import { findAutoplayTrack, resolveMusicInput, resolveTvInput } from './musicResolver.js';
 import { RoomManager } from './roomManager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -39,6 +39,19 @@ app.post('/api/music/resolve', async (req, res) => {
   } catch (err) {
     console.error('[/api/music/resolve] error:', err);
     res.status(500).json({ ok: false, error: 'Parça çözümlenirken sunucu hatası oluştu.' });
+  }
+});
+
+app.post('/api/tv/resolve', async (req, res) => {
+  try {
+    const channelId = req.body?.channelId || '';
+    const query = req.body?.url || req.body?.query || '';
+    const title = req.body?.title || '';
+    const resolved = await resolveTvInput(query, title, { channelId });
+    res.json(resolved);
+  } catch (err) {
+    console.error('[/api/tv/resolve] error:', err);
+    res.status(500).json({ ok: false, error: 'TV yayını çözümlenirken sunucu hatası oluştu.' });
   }
 });
 
@@ -308,6 +321,33 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack(res);
   });
 
+  safeOn('room:tvSet', async (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    let res;
+    if (data?.tvPayload && typeof data.tvPayload === 'object') {
+      res = roomManager.setRoomTv({
+        roomCode: code,
+        playerId,
+        tvPayload: data.tvPayload
+      });
+    } else {
+      res = await roomManager.resolveAndSetRoomTv({
+        roomCode: code,
+        playerId,
+        channelId: data?.channelId || '',
+        url: data?.url || '',
+        title: data?.title || ''
+      });
+    }
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:tvStop', (_data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.stopRoomTv({ roomCode: code, playerId });
+    if (typeof ack === 'function') ack(res);
+  });
+
   safeOn('room:orderTreat', (data, ack) => {
     const code = roomManager.playerToRoom.get(playerId);
     const res = roomManager.orderTreat({
@@ -319,12 +359,28 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack(res);
   });
 
+  safeOn('room:orderSip', (_data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.sipDrink({ roomCode: code, playerId });
+    if (typeof ack === 'function') ack(res);
+  });
+
   safeOn('room:orderClear', (data, ack) => {
     const code = roomManager.playerToRoom.get(playerId);
     const res = roomManager.clearSeatOrder({
       roomCode: code,
       playerId,
       target: data?.target || 'self'
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:catPet', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.petCat({
+      roomCode: code,
+      playerId,
+      catIndex: data?.catIndex
     });
     if (typeof ack === 'function') ack(res);
   });

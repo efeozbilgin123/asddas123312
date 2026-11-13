@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { isOkeyTile } from '../../shared/tiles.js';
-import { isPresetAvatar } from '../../shared/presets.js';
+import { isPresetAvatar, TILE_THEMES } from '../../shared/presets.js';
 
 const TILE_INK = {
   red: '#C8222B',
@@ -9,10 +9,12 @@ const TILE_INK = {
   yellow: '#B87200'
 };
 
+const TILE_THEME_MAP = new Map(TILE_THEMES.map((t) => [t.id, t]));
+
 const faceCache = new Map();
 const avatarCache = new Map();
 const feltTextureCache = new Map();
-let cachedBackTexture = null;
+const backTextureCache = new Map();
 let cachedWoodTexture = null;
 let cachedBackdropTexture = null;
 
@@ -153,21 +155,24 @@ export function createSpeechBubbleTexture(name, text) {
   return tex;
 }
 
-export function getTileBackTexture() {
-  if (cachedBackTexture) return cachedBackTexture;
+export function getTileBackTexture(theme = 'ivory') {
+  const palette = TILE_THEME_MAP.get(theme) || TILE_THEME_MAP.get('ivory');
+  const key = palette?.id || 'ivory';
+  if (backTextureCache.has(key)) return backTextureCache.get(key);
+
   const canvas = document.createElement('canvas');
   canvas.width = 256;
   canvas.height = 360;
   const ctx = canvas.getContext('2d');
 
   const bg = ctx.createLinearGradient(0, 0, 256, 360);
-  bg.addColorStop(0, '#EEE6D4');
-  bg.addColorStop(1, '#E1D5BD');
+  bg.addColorStop(0, palette?.top || '#EEE6D4');
+  bg.addColorStop(1, palette?.bottom || '#E1D5BD');
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, 256, 360);
 
   // Soft chamfer frame
-  ctx.strokeStyle = '#CFC1A5';
+  ctx.strokeStyle = palette?.border || '#CFC1A5';
   ctx.lineWidth = 6;
   ctx.beginPath();
   ctx.roundRect(16, 16, 224, 328, 14);
@@ -187,7 +192,7 @@ export function getTileBackTexture() {
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  cachedBackTexture = tex;
+  backTextureCache.set(key, tex);
   return tex;
 }
 
@@ -212,9 +217,11 @@ export function getTileFaceTexture(tile, okeyTarget, options = {}) {
   const isOkey = isOkeyTile(tile, okeyTarget);
   const selected = Boolean(options.selected);
   const mustUse = Boolean(options.mustUse);
+  const palette = TILE_THEME_MAP.get(options.tileTheme) || TILE_THEME_MAP.get('ivory');
+  const themeKey = palette?.id || 'ivory';
   const key = tile.isFakeOkey
-    ? `fake-v2-${selected}-${mustUse}`
-    : `v2-${tile.color}-${tile.number}-${isOkey}-${selected}-${mustUse}`;
+    ? `fake-v3-${themeKey}-${selected}-${mustUse}`
+    : `v3-${themeKey}-${tile.color}-${tile.number}-${isOkey}-${selected}-${mustUse}`;
 
   if (faceCache.has(key)) return faceCache.get(key);
 
@@ -232,8 +239,8 @@ export function getTileFaceTexture(tile, okeyTarget, options = {}) {
     bg.addColorStop(0, '#FFFDF3');
     bg.addColorStop(1, '#F3E8C8');
   } else {
-    bg.addColorStop(0, '#FCF8EE');
-    bg.addColorStop(1, '#EFE6D1');
+    bg.addColorStop(0, palette?.top || '#FCF8EE');
+    bg.addColorStop(1, palette?.bottom || '#EFE6D1');
   }
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, 320, 450);
@@ -245,7 +252,7 @@ export function getTileFaceTexture(tile, okeyTarget, options = {}) {
       ? '#2563EB'
       : isOkey
         ? '#C5962C'
-        : '#DDD2BC';
+        : palette?.border || '#DDD2BC';
   ctx.lineWidth = selected || mustUse ? 11 : isOkey ? 8 : 5;
   ctx.beginPath();
   ctx.roundRect(14, 14, 292, 422, 16);
@@ -262,9 +269,9 @@ export function getTileFaceTexture(tile, okeyTarget, options = {}) {
 
   // Sculpted lower circular dimple (oyuk)
   const dimpleShadow = ctx.createRadialGradient(160, 322, 8, 160, 322, 56);
-  dimpleShadow.addColorStop(0, '#DDD0B8');
-  dimpleShadow.addColorStop(0.68, '#EAE0CB');
-  dimpleShadow.addColorStop(0.92, '#F7F1E2');
+  dimpleShadow.addColorStop(0, palette?.border || '#DDD0B8');
+  dimpleShadow.addColorStop(0.68, palette?.bottom || '#EAE0CB');
+  dimpleShadow.addColorStop(0.92, palette?.top || '#F7F1E2');
   dimpleShadow.addColorStop(1, 'rgba(239, 230, 209, 0)');
   ctx.fillStyle = dimpleShadow;
   ctx.beginPath();
@@ -597,62 +604,177 @@ export function getMenuBoardTexture() {
   return tex;
 }
 
-export function getWallClockTexture() {
-  if (interiorCache.has('clock')) return interiorCache.get('clock');
+export function createLiveClockTexture() {
   const canvas = document.createElement('canvas');
   canvas.width = 256;
   canvas.height = 256;
   const ctx = canvas.getContext('2d');
-
-  ctx.fillStyle = '#F6EEDF';
-  ctx.beginPath();
-  ctx.arc(128, 128, 120, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.strokeStyle = '#3E2618';
-  ctx.lineWidth = 8;
-  ctx.beginPath();
-  ctx.arc(128, 128, 114, 0, Math.PI * 2);
-  ctx.stroke();
-
-  for (let i = 0; i < 12; i += 1) {
-    const ang = (i * Math.PI) / 6;
-    const x1 = 128 + Math.sin(ang) * 90;
-    const y1 = 128 - Math.cos(ang) * 90;
-    const x2 = 128 + Math.sin(ang) * 102;
-    const y2 = 128 - Math.cos(ang) * 102;
-    ctx.strokeStyle = '#241710';
-    ctx.lineWidth = i % 3 === 0 ? 5 : 2.5;
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.stroke();
-  }
-
-  // Hour hand (~9:40 evening ambiance)
-  ctx.strokeStyle = '#1E140E';
-  ctx.lineWidth = 7;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(128, 128);
-  ctx.lineTo(74, 108);
-  ctx.stroke();
-
-  // Minute hand
-  ctx.lineWidth = 5;
-  ctx.beginPath();
-  ctx.moveTo(128, 128);
-  ctx.lineTo(188, 72);
-  ctx.stroke();
-
-  ctx.fillStyle = '#B58B3B';
-  ctx.beginPath();
-  ctx.arc(128, 128, 8, 0, Math.PI * 2);
-  ctx.fill();
-
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  interiorCache.set('clock', tex);
+
+  function draw(date = new Date()) {
+    ctx.clearRect(0, 0, 256, 256);
+    ctx.fillStyle = '#F6EEDF';
+    ctx.beginPath();
+    ctx.arc(128, 128, 120, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#3E2618';
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.arc(128, 128, 114, 0, Math.PI * 2);
+    ctx.stroke();
+
+    for (let i = 0; i < 12; i += 1) {
+      const ang = (i * Math.PI) / 6;
+      const x1 = 128 + Math.sin(ang) * 90;
+      const y1 = 128 - Math.cos(ang) * 90;
+      const x2 = 128 + Math.sin(ang) * 102;
+      const y2 = 128 - Math.cos(ang) * 102;
+      ctx.strokeStyle = '#241710';
+      ctx.lineWidth = i % 3 === 0 ? 5 : 2.5;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+
+    const secs = date.getSeconds();
+    const mins = date.getMinutes() + secs / 60;
+    const hours = (date.getHours() % 12) + mins / 60;
+
+    const hourAng = (hours * Math.PI) / 6;
+    ctx.strokeStyle = '#1E140E';
+    ctx.lineWidth = 7;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(128, 128);
+    ctx.lineTo(128 + Math.sin(hourAng) * 58, 128 - Math.cos(hourAng) * 58);
+    ctx.stroke();
+
+    const minAng = (mins * Math.PI) / 30;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(128, 128);
+    ctx.lineTo(128 + Math.sin(minAng) * 82, 128 - Math.cos(minAng) * 82);
+    ctx.stroke();
+
+    const secAng = (secs * Math.PI) / 30;
+    ctx.strokeStyle = '#B83227';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(128 - Math.sin(secAng) * 14, 128 + Math.cos(secAng) * 14);
+    ctx.lineTo(128 + Math.sin(secAng) * 92, 128 - Math.cos(secAng) * 92);
+    ctx.stroke();
+
+    ctx.fillStyle = '#B58B3B';
+    ctx.beginPath();
+    ctx.arc(128, 128, 8, 0, Math.PI * 2);
+    ctx.fill();
+
+    tex.needsUpdate = true;
+  }
+
+  draw(new Date());
+  return { texture: tex, update: draw };
+}
+
+export function getWallClockTexture() {
+  if (interiorCache.has('clock')) return interiorCache.get('clock');
+  const { texture } = createLiveClockTexture();
+  interiorCache.set('clock', texture);
+  return texture;
+}
+
+export function createTvScreenTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 320;
+  const ctx = canvas.getContext('2d');
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+
+  function draw(tvState = null) {
+    const grad = ctx.createLinearGradient(0, 0, 512, 320);
+    if (tvState && tvState.embedUrl) {
+      grad.addColorStop(0, '#102438');
+      grad.addColorStop(0.55, '#1B3A54');
+      grad.addColorStop(1, '#0F1A26');
+    } else {
+      grad.addColorStop(0, '#181311');
+      grad.addColorStop(1, '#0C0908');
+    }
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 512, 320);
+
+    // Subtle CRT scanlines
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.035)';
+    for (let y = 0; y < 320; y += 6) {
+      ctx.fillRect(0, y, 512, 2);
+    }
+
+    ctx.strokeStyle = 'rgba(242, 201, 107, 0.42)';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(18, 18, 476, 284);
+
+    if (tvState && tvState.embedUrl) {
+      // Live TV badge
+      ctx.fillStyle = tvState.isLive ? '#DC2626' : '#D97706';
+      ctx.beginPath();
+      ctx.roundRect(38, 36, 118, 36, 8);
+      ctx.fill();
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = '800 18px "Plus Jakarta Sans", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(tvState.isLive ? '● CANLI TV' : '▶ YAYIN', 97, 54);
+
+      const title = String(tvState.title || 'Kahvehane TV').slice(0, 28);
+      ctx.fillStyle = '#F8F2E4';
+      ctx.font = '800 32px "Plus Jakarta Sans", sans-serif';
+      ctx.fillText(title, 256, 152);
+
+      const who = tvState.updatedBy ? `Açan: ${String(tvState.updatedBy).slice(0, 18)}` : 'Masayla senkronize';
+      ctx.fillStyle = '#E6B85C';
+      ctx.font = '600 20px "Plus Jakarta Sans", sans-serif';
+      ctx.fillText(who, 256, 205);
+
+      ctx.fillStyle = 'rgba(248, 242, 228, 0.65)';
+      ctx.font = '600 17px "Plus Jakarta Sans", sans-serif';
+      ctx.fillText('Kanal değiştirmek için tıkla', 256, 258);
+    } else {
+      ctx.fillStyle = '#E6B85C';
+      ctx.font = '800 34px "Plus Jakarta Sans", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('KAHVEHANE TV', 256, 128);
+
+      ctx.fillStyle = 'rgba(245, 239, 226, 0.72)';
+      ctx.font = '600 21px "Plus Jakarta Sans", sans-serif';
+      ctx.fillText('Yayın açmak için tıkla', 256, 178);
+
+      ctx.fillStyle = 'rgba(230, 184, 92, 0.55)';
+      ctx.font = '600 17px "Plus Jakarta Sans", sans-serif';
+      ctx.fillText('TRT 1 · Haber · Spor · Yeşilçam', 256, 222);
+    }
+
+    tex.needsUpdate = true;
+  }
+
+  draw(null);
+  return { texture: tex, update: draw };
+}
+
+export function getCatPortraitTexture(catId = 'cat-1') {
+  const safeId = ['cat-1', 'cat-2', 'cat-3'].includes(catId) ? catId : 'cat-1';
+  const key = `portrait-${safeId}`;
+  if (interiorCache.has(key)) return interiorCache.get(key);
+  const tex = textureLoader.load(`/assets/${safeId}.jpg`, (loaded) => {
+    loaded.needsUpdate = true;
+  });
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  interiorCache.set(key, tex);
   return tex;
 }
 
@@ -740,54 +862,117 @@ export function getWallArtTexture(variant = 0) {
   return tex;
 }
 
-export function getWindowNightTexture() {
-  if (interiorCache.has('window')) return interiorCache.get('window');
+export function getWindowAtmosphereTexture(atmosphere = 'rainy') {
+  const mode = ['rainy', 'afternoon', 'midnight'].includes(atmosphere) ? atmosphere : 'rainy';
+  const key = `window-${mode}`;
+  if (interiorCache.has(key)) return interiorCache.get(key);
+
   const canvas = document.createElement('canvas');
   canvas.width = 384;
   canvas.height = 512;
   const ctx = canvas.getContext('2d');
 
-  const sky = ctx.createLinearGradient(0, 0, 0, 512);
-  sky.addColorStop(0, '#0E172A');
-  sky.addColorStop(0.65, '#1D293E');
-  sky.addColorStop(1, '#3B2C24');
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, 384, 512);
+  if (mode === 'afternoon') {
+    const sky = ctx.createLinearGradient(0, 0, 0, 512);
+    sky.addColorStop(0, '#5E7FA6');
+    sky.addColorStop(0.45, '#D48A5A');
+    sky.addColorStop(0.8, '#F6BE6E');
+    sky.addColorStop(1, '#9A5434');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, 384, 512);
 
-  // Soft amber streetlamp glow outside the kahvehane
-  const bokehs = [
-    [95, 340, 68, 'rgba(255, 180, 82, 0.42)'],
-    [285, 365, 58, 'rgba(255, 166, 70, 0.36)'],
-    [192, 410, 42, 'rgba(255, 224, 150, 0.25)']
-  ];
-  for (const [bx, by, br, col] of bokehs) {
-    const g = ctx.createRadialGradient(bx, by, 4, bx, by, br);
-    g.addColorStop(0, col);
-    g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g;
+    const sunGlow = ctx.createRadialGradient(255, 195, 16, 255, 195, 150);
+    sunGlow.addColorStop(0, 'rgba(255, 248, 210, 0.92)');
+    sunGlow.addColorStop(0.4, 'rgba(255, 192, 102, 0.55)');
+    sunGlow.addColorStop(1, 'rgba(255, 140, 60, 0)');
+    ctx.fillStyle = sunGlow;
     ctx.beginPath();
-    ctx.arc(bx, by, br, 0, Math.PI * 2);
+    ctx.arc(255, 195, 150, 0, Math.PI * 2);
     ctx.fill();
-  }
 
-  // Silhouetted street buildings + rain droplets
-  ctx.fillStyle = '#090D16';
-  ctx.fillRect(0, 390, 384, 122);
-  ctx.fillRect(16, 290, 88, 110);
-  ctx.fillRect(272, 310, 96, 100);
+    ctx.fillStyle = '#382018';
+    ctx.fillRect(0, 398, 384, 114);
+    ctx.fillRect(18, 310, 84, 96);
+    ctx.fillRect(280, 326, 92, 82);
+  } else if (mode === 'midnight') {
+    const sky = ctx.createLinearGradient(0, 0, 0, 512);
+    sky.addColorStop(0, '#050814');
+    sky.addColorStop(0.65, '#0D1529');
+    sky.addColorStop(1, '#1A2033');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, 384, 512);
 
-  ctx.fillStyle = 'rgba(215, 232, 255, 0.22)';
-  for (let i = 0; i < 65; i += 1) {
-    const rx = (i * 73) % 380;
-    const ry = (i * 107) % 490;
+    // Stars
+    ctx.fillStyle = 'rgba(244, 246, 255, 0.72)';
+    for (let i = 0; i < 48; i += 1) {
+      const sx = (i * 89 + 23) % 368 + 8;
+      const sy = (i * 53 + 19) % 290 + 12;
+      const sr = i % 5 === 0 ? 2.1 : 1.1;
+      ctx.beginPath();
+      ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Crescent moon
+    ctx.fillStyle = '#F7E7B4';
     ctx.beginPath();
-    ctx.ellipse(rx, ry, 1.5, 4.5, 0.15, 0, Math.PI * 2);
+    ctx.arc(112, 116, 26, 0, Math.PI * 2);
     ctx.fill();
+    ctx.fillStyle = '#080D1C';
+    ctx.beginPath();
+    ctx.arc(124, 108, 23, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#070A12';
+    ctx.fillRect(0, 392, 384, 120);
+    ctx.fillRect(14, 300, 92, 100);
+    ctx.fillRect(268, 318, 98, 92);
+  } else {
+    const sky = ctx.createLinearGradient(0, 0, 0, 512);
+    sky.addColorStop(0, '#0E172A');
+    sky.addColorStop(0.65, '#1D293E');
+    sky.addColorStop(1, '#3B2C24');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, 384, 512);
+
+    const bokehs = [
+      [95, 340, 68, 'rgba(255, 180, 82, 0.42)'],
+      [285, 365, 58, 'rgba(255, 166, 70, 0.36)'],
+      [192, 410, 42, 'rgba(255, 224, 150, 0.25)']
+    ];
+    for (const [bx, by, br, col] of bokehs) {
+      const g = ctx.createRadialGradient(bx, by, 4, bx, by, br);
+      g.addColorStop(0, col);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(bx, by, br, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = '#090D16';
+    ctx.fillRect(0, 390, 384, 122);
+    ctx.fillRect(16, 290, 88, 110);
+    ctx.fillRect(272, 310, 96, 100);
+
+    ctx.fillStyle = 'rgba(215, 232, 255, 0.22)';
+    for (let i = 0; i < 65; i += 1) {
+      const rx = (i * 73) % 380;
+      const ry = (i * 107) % 490;
+      ctx.beginPath();
+      ctx.ellipse(rx, ry, 1.5, 4.5, 0.15, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  interiorCache.set('window', tex);
+  interiorCache.set(key, tex);
   return tex;
 }
+
+export function getWindowNightTexture() {
+  return getWindowAtmosphereTexture('rainy');
+}
+
 

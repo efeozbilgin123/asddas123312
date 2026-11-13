@@ -1755,3 +1755,134 @@ test('LocalSingleplayerClient handles chatSend, nudge cooldown, musicQueueMove, 
   assert.equal(shuffled.music.queueItems[0].title, 'C');
   assert.equal(shuffled.music.queueItems[1].title, 'A');
 });
+
+test('GameSession tracks matchStats and computeKahveAwards builds awards and itemized Adisyon receipt', async () => {
+  const { computeKahveAwards } = await import('../shared/presets.js');
+  const session = new GameSession({
+    roomCode: 'ADIS',
+    seatsConfig: [
+      { playerId: 'p0', name: 'Efe', isBot: false },
+      { playerId: 'p1', name: 'Serhat', isBot: false },
+      { playerId: 'p2', name: 'Arhan', isBot: false },
+      { playerId: 'p3', name: 'Zeynep', isBot: false }
+    ],
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
+    onStateChange: () => {}
+  });
+
+  session.startRound();
+  session.okeyTarget = { color: 'red', number: 5 };
+  session.currentSeat = 0;
+  session.turnPhase = 'play';
+
+  // Seat 0 opens and finishes from hand (elden) using Okey as final discard
+  const finishOkey = { id: 'ok-fin', color: 'red', number: 5, copy: 0, isFakeOkey: false };
+  session.seats[0].hand = [
+    { id: 'r1', color: 'blue', number: 11, copy: 0, isFakeOkey: false },
+    { id: 'r2', color: 'blue', number: 12, copy: 0, isFakeOkey: false },
+    { id: 'r3', color: 'blue', number: 13, copy: 0, isFakeOkey: false },
+    { id: 'b1', color: 'black', number: 11, copy: 0, isFakeOkey: false },
+    { id: 'b2', color: 'black', number: 12, copy: 0, isFakeOkey: false },
+    { id: 'b3', color: 'black', number: 13, copy: 0, isFakeOkey: false },
+    { id: 'y1', color: 'yellow', number: 10, copy: 0, isFakeOkey: false },
+    { id: 'y2', color: 'yellow', number: 11, copy: 0, isFakeOkey: false },
+    { id: 'y3', color: 'yellow', number: 12, copy: 0, isFakeOkey: false },
+    finishOkey
+  ];
+
+  assert.equal(
+    session.openHand(0, [['r1', 'r2', 'r3'], ['b1', 'b2', 'b3'], ['y1', 'y2', 'y3']], 'series').ok,
+    true
+  );
+  assert.equal(session.discardTile(0, finishOkey.id).ok, true);
+
+  const view = session.getClientView(0);
+  assert.equal(view.seats[0].matchStats.eldenFinishes, 1);
+  assert.equal(view.seats[0].matchStats.okeyFinishes, 1);
+
+  const adisyon = computeKahveAwards({
+    seats: view.seats,
+    socialStats: [
+      { treatsOrdered: 2, sipsTaken: 4, catsPetted: 0 },
+      { treatsOrdered: 0, sipsTaken: 0, catsPetted: 3 },
+      { treatsOrdered: 0, sipsTaken: 0, catsPetted: 0 },
+      { treatsOrdered: 0, sipsTaken: 0, catsPetted: 0 }
+    ],
+    teamMode: 'solo'
+  });
+
+  assert.ok(adisyon);
+  assert.equal(adisyon.winnerSeat, 0);
+  assert.ok(adisyon.awards.some((a) => a.badge === 'Masanın Ağası' && a.name === 'Efe'));
+  assert.ok(adisyon.awards.some((a) => a.badge === 'El Ustası' && a.name === 'Efe'));
+  assert.ok(adisyon.awards.some((a) => a.badge === 'Gönlü Bol' && a.name === 'Efe'));
+  assert.ok(adisyon.awards.some((a) => a.badge === 'Çay Tiriyakisi' && a.name === 'Efe'));
+  assert.ok(adisyon.awards.some((a) => a.badge === 'Kedi Dostu' && a.name === 'Serhat'));
+  // Kuver 80 + 2 treats * 25 (50) + 4 sips * 5 (20) = 150
+  assert.equal(adisyon.billTotal, 150);
+  assert.ok(adisyon.receiptFooter.includes('150 TL'));
+
+  session.destroy();
+});
+
+test('LocalSingleplayerClient handles live cozy options, TV set/stop, drink sip/refill, and cat petting', (ctx) => {
+  const states = [];
+  const client = new LocalSingleplayerClient({
+    playerName: 'Efe',
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60, roomAtmosphere: 'afternoon', roomAmbiance: 'ocakbasi' },
+    onState: (room) => states.push(room)
+  });
+  ctx.after(() => client.destroy());
+
+  client.emitRoomState();
+  assert.equal(states[states.length - 1].options.roomAtmosphere, 'afternoon');
+  assert.equal(states[states.length - 1].options.roomAmbiance, 'ocakbasi');
+
+  let optRes = null;
+  client.action('room:options', { roomAtmosphere: 'midnight', roomAmbiance: 'fireplace' }, (r) => { optRes = r; });
+  assert.equal(optRes.ok, true);
+  assert.equal(states[states.length - 1].options.roomAtmosphere, 'midnight');
+  assert.equal(states[states.length - 1].options.roomAmbiance, 'fireplace');
+
+  let tvSet = null;
+  client.action('room:tvSet', {
+    tvPayload: {
+      channelId: 'trt1',
+      title: 'TRT 1 Canlı',
+      videoId: 'abc123def45',
+      embedUrl: 'https://www.youtube.com/embed/abc123def45?autoplay=1',
+      isLive: true
+    }
+  }, (r) => { tvSet = r; });
+  assert.equal(tvSet.ok, true);
+  assert.equal(states[states.length - 1].tv.channelId, 'trt1');
+
+  let tvStop = null;
+  client.action('room:tvStop', {}, (r) => { tvStop = r; });
+  assert.equal(tvStop.ok, true);
+  assert.equal(states[states.length - 1].tv, null);
+
+  let ord = null;
+  client.action('room:orderTreat', { itemId: 'cay', target: 'self' }, (r) => { ord = r; });
+  assert.equal(ord.ok, true);
+  assert.equal(ord.orders[0].drink.sipsRemaining, 4);
+
+  for (let i = 3; i >= 0; i -= 1) {
+    let sipRes = null;
+    client.action('room:orderSip', {}, (r) => { sipRes = r; });
+    assert.equal(sipRes.ok, true);
+    assert.equal(sipRes.action, 'sip');
+    assert.equal(sipRes.sipsRemaining, i);
+  }
+  let refillRes = null;
+  client.action('room:orderSip', {}, (r) => { refillRes = r; });
+  assert.equal(refillRes.ok, true);
+  assert.equal(refillRes.action, 'refill');
+  assert.equal(refillRes.sipsRemaining, 4);
+
+  let petRes = null;
+  client.action('room:catPet', { catIndex: 0 }, (r) => { petRes = r; });
+  assert.equal(petRes.ok, true);
+  assert.equal(petRes.payload.cat.name, 'Pamuk');
+  assert.equal(states[states.length - 1].socialStats[0].catsPetted, 1);
+});

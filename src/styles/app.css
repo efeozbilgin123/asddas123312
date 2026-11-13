@@ -1749,6 +1749,383 @@ body {
   border-top: 2px solid var(--color-rule);
 }
 
+/* Shared Kahvehane TV PIP Dock */
+.tv-dock {
+  position: fixed;
+  bottom: 162px;
+  right: var(--space-md);
+  z-index: var(--z-sticky);
+  width: min(352px, calc(100% - var(--space-lg)));
+  display: grid;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-stock);
+  background: var(--color-paper);
+  border: 1px solid var(--color-rule);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.52);
+  contain: layout paint;
+  transform: translateZ(0);
+}
+
+.tv-dock[hidden] {
+  display: none;
+}
+
+.tv-dock__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.tv-dock__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+  flex: 1 1 150px;
+}
+
+.tv-dock__badge {
+  min-height: 18px;
+  padding: 0 6px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.tv-dock__text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.tv-dock__title {
+  font-size: var(--text-xs);
+  line-height: 1.25;
+  color: var(--color-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tv-dock__sub {
+  font-size: 0.68rem;
+  color: var(--color-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tv-dock__controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.tv-dock__body {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-input);
+  overflow: hidden;
+  background: #0B0E14;
+}
+
+.tv-dock__body iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+.tv-dock.is-minimized {
+  width: auto;
+  max-width: min(340px, calc(100% - var(--space-lg)));
+}
+
+.tv-dock.is-minimized .tv-dock__body {
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  width: 240px;
+  height: 135px;
+  opacity: 0.01;
+  pointer-events: none;
+}
+
+/* Cat Pet Toast */
+.cat-toast {
+  position: fixed;
+  bottom: 164px;
+  left: var(--space-md);
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  max-width: min(340px, calc(100% - var(--space-lg)));
+  padding: 8px 12px;
+  border-radius: var(--radius-stock);
+  background: var(--color-paper);
+  border: 1.5px solid var(--color-accent);
+  box-shadow: var(--shadow-card);
+  pointer-events: none;
+}
+
+.cat-toast[hidden] {
+  display: none;
+}
+
+.cat-toast__img {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--color-accent);
+  flex-shrink: 0;
+}
+
+.cat-toast__body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cat-toast__body strong {
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+}
+
+.cat-toast__body span {
+  font-size: var(--text-xs);
+  color: var(--color-ink);
+  line-height: 1.3;
+}
+
+/* Cozy Settings Dialog & Waiting Ambiance Pill */
+.wait-ambiance-pill {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-input);
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-rule);
+  font-size: var(--text-xs);
+  color: var(--color-ink-2);
+}
+
+.wait-ambiance-pill[hidden] {
+  display: none;
+}
+
+.cozy-section {
+  display: grid;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-stock);
+  background: var(--color-card);
+  border: 1px solid var(--color-rule);
+}
+
+.cozy-section[hidden] {
+  display: none;
+}
+
+.cozy-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xs);
+}
+
+.cozy-guest-note {
+  display: grid;
+  gap: 4px;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-stock);
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-rule);
+  font-size: var(--text-xs);
+}
+
+.cozy-guest-note[hidden] {
+  display: none;
+}
+
+.cozy-slider-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--text-xs);
+}
+
+.cozy-slider-row label {
+  color: var(--color-ink-2);
+  white-space: nowrap;
+}
+
+.cozy-range {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.theme-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.theme-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-rule);
+  background: var(--color-paper-2);
+  color: var(--color-ink);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color var(--dur-micro) var(--ease-snap), background-color var(--dur-micro) var(--ease-snap);
+}
+
+.theme-pill:hover {
+  border-color: var(--color-accent);
+  background: var(--color-paper-3);
+}
+
+.theme-pill.is-active {
+  border-color: var(--color-accent);
+  background: var(--color-mint-deep);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.theme-pill__swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  flex-shrink: 0;
+}
+
+/* Kahvehane Adisyon Fişi & Awards */
+.adisyon-receipt {
+  display: grid;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border-radius: var(--radius-stock);
+  background: #F4EAD3;
+  color: #241911;
+  border: 1px dashed #8B6E4B;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  font-family: var(--font-outlier);
+}
+
+.adisyon-receipt[hidden] {
+  display: none;
+}
+
+.adisyon-receipt__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-xs);
+  padding-bottom: 6px;
+  border-bottom: 1.5px dashed #8B6E4B;
+}
+
+.adisyon-receipt__head strong {
+  font-size: var(--text-sm);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.adisyon-receipt__sub {
+  font-size: 0.72rem;
+  color: #6B5136;
+}
+
+.adisyon-awards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.adisyon-award {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(139, 110, 75, 0.12);
+  border: 1px solid rgba(139, 110, 75, 0.28);
+  font-family: var(--font-sans);
+}
+
+.adisyon-award__badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #7D3B16;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.adisyon-award__name {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: #1F140D;
+}
+
+.adisyon-award__detail {
+  font-size: 0.7rem;
+  color: #5C4630;
+}
+
+.adisyon-items {
+  display: grid;
+  gap: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed #8B6E4B;
+  font-size: var(--text-xs);
+}
+
+.adisyon-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.adisyon-line__qty {
+  color: #6B5136;
+  font-size: 0.7rem;
+}
+
+.adisyon-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding-top: 6px;
+  border-top: 1.5px dashed #8B6E4B;
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.adisyon-footer {
+  margin: 0;
+  padding-top: 4px;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: #7D2E16;
+  text-align: center;
+}
+
 @media (max-width: 60rem) {
   .topbar {
     top: var(--space-xs);
@@ -1760,6 +2137,16 @@ body {
     left: var(--space-xs);
     width: calc(100% - var(--space-md));
   }
+  .tv-dock {
+    bottom: 186px;
+    right: var(--space-xs);
+    width: min(290px, calc(100% - var(--space-md)));
+  }
+  .cat-toast {
+    bottom: 186px;
+    left: var(--space-xs);
+    max-width: calc(100% - var(--space-md));
+  }
   .chat-drawer {
     top: calc(var(--space-xs) + 96px);
     right: var(--space-xs);
@@ -1769,7 +2156,8 @@ body {
   .wait-seats,
   .team-summary-grid,
   .order-menu-grid,
-  .music-presets__grid {
+  .music-presets__grid,
+  .adisyon-awards {
     grid-template-columns: minmax(0, 1fr);
   }
   .lobby-panel,

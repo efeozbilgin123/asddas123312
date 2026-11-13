@@ -8,6 +8,10 @@ import {
   isDiscardPlayableOnTable
 } from '../shared/rules.js';
 import {
+  normalizeRoomAmbiance,
+  normalizeRoomAtmosphere
+} from '../shared/presets.js';
+import {
   computeOkeyTarget,
   createDeck,
   isOkeyTile,
@@ -32,7 +36,9 @@ export class GameSession {
       islekPenalty: options?.islekPenalty !== false,
       turnSeconds: [45, 60, 90].includes(Number(options?.turnSeconds))
         ? Number(options.turnSeconds)
-        : 60
+        : 60,
+      roomAtmosphere: normalizeRoomAtmosphere(options?.roomAtmosphere),
+      roomAmbiance: normalizeRoomAmbiance(options?.roomAmbiance)
     };
     this.onStateChange = onStateChange;
 
@@ -75,7 +81,13 @@ export class GameSession {
       openMode: null, // 'series' | 'pairs'
       openedPoints: 0,
       roundPenalties: 0,
-      totalScore: 0
+      totalScore: 0,
+      matchStats: {
+        eldenFinishes: 0,
+        okeyFinishes: 0,
+        pairsOpens: 0,
+        islekCount: 0
+      }
     }));
 
     this.turnTimer = null;
@@ -515,6 +527,9 @@ export class GameSession {
     seat.opened = true;
     seat.openMode = mode === 'pairs' ? 'pairs' : 'series';
     seat.openedPoints = totalPoints;
+    if (seat.openMode === 'pairs' && seat.matchStats) {
+      seat.matchStats.pairsOpens += 1;
+    }
 
     for (const g of validatedGroups) {
       this.meldCounter += 1;
@@ -727,6 +742,9 @@ export class GameSession {
       !isFinalWin &&
       !okeyDiscardPenalty &&
       isDiscardPlayableOnTable(tile, this.tableMelds, this.okeyTarget);
+    if (islekPlayable && seat.matchStats) {
+      seat.matchStats.islekCount += 1;
+    }
     let islekTriggered = false;
     if (islekPlayable && this.options.islekPenalty) {
       seat.roundPenalties += 101;
@@ -743,6 +761,11 @@ export class GameSession {
       const finishedFromPairs = seat.openMode === 'pairs';
       const finishedFromHand = this.openedThisTurn;
       this.openedThisTurn = false;
+
+      if (seat.matchStats) {
+        if (finishedFromHand) seat.matchStats.eldenFinishes += 1;
+        if (isOkeyFinish) seat.matchStats.okeyFinishes += 1;
+      }
 
       const tags = [];
       if (finishedFromPairs) tags.push('çiftten');
@@ -909,6 +932,12 @@ export class GameSession {
         openedPoints: s.openedPoints,
         roundPenalties: s.roundPenalties,
         totalScore: s.totalScore,
+        matchStats: s.matchStats ? { ...s.matchStats } : {
+          eldenFinishes: 0,
+          okeyFinishes: 0,
+          pairsOpens: 0,
+          islekCount: 0
+        },
         hand: s.seatIndex === viewerSeatIndex ? s.hand : null
       }))
     };

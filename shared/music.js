@@ -17,6 +17,22 @@ export function buildYouTubeEmbedUrl(videoId, listId = '', origin = '') {
   return `https://www.youtube.com/embed/${videoId}?${params.toString()}`;
 }
 
+export function buildTvEmbedUrl(videoId, origin = '') {
+  const params = new URLSearchParams({
+    autoplay: '1',
+    enablejsapi: '1',
+    rel: '0',
+    playsinline: '1',
+    iv_load_policy: '3',
+    modestbranding: '1',
+    vq: 'medium'
+  });
+  if (origin && /^https?:\/\//i.test(origin)) {
+    params.set('origin', origin);
+  }
+  return `https://www.youtube.com/embed/${videoId}?${params.toString()}`;
+}
+
 export function parseMusicUrl(rawUrl, customTitle = '') {
   const trimmed = String(rawUrl || '').trim();
   if (!trimmed) {
@@ -116,6 +132,18 @@ export function parseMusicUrl(rawUrl, customTitle = '') {
         embedUrl: `https://www.youtube.com/embed/videoseries?list=${encodeURIComponent(listId)}&autoplay=1&enablejsapi=1&playsinline=1&iv_load_policy=3&vq=small`
       };
     }
+
+    return {
+      ok: true,
+      provider: 'youtube_channel',
+      kind: 'bot',
+      needsResolution: true,
+      channelUrl: parsed.toString(),
+      query: parsed.pathname.replace(/^\/+|\/live$/gi, '').replace(/^@/, ''),
+      title: cleanTitle || 'YouTube Canlı',
+      originalUrl: parsed.toString(),
+      embedUrl: null
+    };
   }
 
   // Spotify (resolved server-side like a Discord music bot, never opens Spotify player)

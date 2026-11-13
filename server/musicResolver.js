@@ -1,4 +1,5 @@
-import { buildYouTubeEmbedUrl, parseMusicUrl } from '../shared/music.js';
+import { buildTvEmbedUrl, buildYouTubeEmbedUrl, parseMusicUrl } from '../shared/music.js';
+import { TV_CHANNELS } from '../shared/presets.js';
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -238,7 +239,9 @@ export function extractYouTubeCandidatesFromHtml(html, query = '') {
     .filter((t) => t.length >= 3);
 
   const wantsRemix = /\b(remix|cover|karaoke|slowed|sped|live|konser|akustik|acoustic)\b/i.test(qLower);
-  const wantsLongMix = /\b(mix|hour|saat|playlist|set)\b/i.test(qLower);
+  const wantsLongOrLive = /\b(mix|hour|saat|playlist|set|canlı|canli|live|yayın|yayin|tv|film|sinema|4k|şömine|somine)\b/i.test(
+    qLower
+  );
 
   return candidates
     .map((c, idx) => {
@@ -250,6 +253,8 @@ export function extractYouTubeCandidatesFromHtml(html, query = '') {
       if (chLower.endsWith('- topic') || chLower.includes('topic')) score += 45;
       if (/\b(official audio|provided to youtube|audio)\b/i.test(tLower)) score += 22;
       if (/\b(lyrics|lyric video|sözleri)\b/i.test(tLower)) score += 12;
+      if (wantsLongOrLive && c.durationSeconds == null) score += 28;
+      if (wantsLongOrLive && /\b(canlı|canli|live|yayın|yayin)\b/i.test(tLower)) score += 18;
 
       for (const tok of qTokens) {
         if (tLower.includes(tok) || chLower.includes(tok)) score += 6;
@@ -260,7 +265,7 @@ export function extractYouTubeCandidatesFromHtml(html, query = '') {
       }
       if (c.durationSeconds != null) {
         if (c.durationSeconds < 45) score -= 45;
-        if (!wantsLongMix && c.durationSeconds > 900) score -= 35;
+        if (!wantsLongOrLive && c.durationSeconds > 900) score -= 35;
       }
 
       return { ...c, score };
@@ -586,4 +591,136 @@ export async function findAutoplayTrack(seedTrack, { excludeVideoIds = [], fetch
     resolved: true
   };
 }
+
+export async function resolveTvInput(rawInput, customTitle = '', { channelId = '', fetchImpl = globalThis.fetch } = {}) {
+  const cleanChannelId = String(channelId || '').trim();
+  const preset = cleanChannelId ? TV_CHANNELS.find((c) => c.id === cleanChannelId) : null;
+
+  const queryInput = preset ? preset.query : String(rawInput || '').trim();
+  const displayTitle = String(customTitle || '').trim() || preset?.title || '';
+
+  if (!queryInput) {
+    return { ok: false, error: 'Lütfen bir kanal seçin veya video bağlantısı / arama girin.' };
+  }
+
+  const parsed = parseMusicUrl(queryInput, displayTitle);
+  if (!parsed.ok) return parsed;
+
+  if (parsed.provider === 'youtube' && parsed.videoId) {
+    return {
+      ok: true,
+      tv: {
+        channelId: preset?.id || null,
+        provider: 'youtube',
+        kind: 'iframe',
+        title: displayTitle || parsed.title || 'TV Kanalı',
+        videoId: parsed.videoId,
+        fallbackVideoIds: [],
+        originalUrl: parsed.originalUrl || `https://www.youtube.com/watch?v=${parsed.videoId}`,
+        embedUrl: buildTvEmbedUrl(parsed.videoId),
+        isLive: Boolean(preset)
+      }
+    };
+  }
+
+  if (parsed.provider === 'youtube_channel' && typeof fetchImpl === 'function') {
+    let videoId = '';
+    try {
+      const html = await fetchTextWithTimeout(parsed.channelUrl, fetchImpl);
+      const canonMatch = html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([A-Za-z0-9_-]{11})"/i);
+      if (canonMatch) {
+        videoId = canonMatch[1];
+      } else {
+        const liveMatch = html.match(/"videoId":"([A-Za-z0-9_-]{11})"[^}]{0,300}"isLive":true/i);
+        if (liveMatch) {
+          videoId = liveMatch[1];
+        } else {
+          const anyMatch = html.match(/"videoId":"([A-Za-z0-9_-]{11})"/);
+          if (anyMatch) videoId = anyMatch[1];
+        }
+      }
+    } catch {
+      videoId = '';
+    }
+
+    if (videoId) {
+      return {
+        ok: true,
+        tv: {
+          channelId: preset?.id || null,
+          provider: 'youtube',
+          kind: 'iframe',
+          title: displayTitle || parsed.title || 'Canlı Yayın',
+          videoId,
+          fallbackVideoIds: [],
+          originalUrl: `https://www.youtube.com/watch?v=${videoId}`,
+          embedUrl: buildTvEmbedUrl(videoId),
+          isLive: true
+        }
+      };
+    }
+
+    const fallbackSearch = `${parsed.query || displayTitle || 'canlı tv'} canlı yayın`;
+    const yt = await searchYouTubeAudio(fallbackSearch, { fetchImpl });
+    if (yt && yt.videoIds.length > 0) {
+      return {
+        ok: true,
+        tv: {
+          channelId: preset?.id || null,
+          provider: 'youtube',
+          kind: 'iframe',
+          title: displayTitle || yt.matchedTitle || 'Canlı Yayın',
+          videoId: yt.videoIds[0],
+          fallbackVideoIds: yt.videoIds.slice(1),
+          originalUrl: `https://www.youtube.com/watch?v=${yt.videoIds[0]}`,
+          embedUrl: buildTvEmbedUrl(yt.videoIds[0]),
+          isLive: true
+        }
+      };
+    }
+    return { ok: false, error: 'YouTube kanalı canlı yayını bulunamadı.' };
+  }
+
+  if (parsed.provider === 'search' || parsed.provider === 'spotify') {
+    const searchQuery = parsed.query || parsed.title;
+    const yt = await searchYouTubeAudio(searchQuery, { fetchImpl });
+    if (!yt || yt.videoIds.length === 0) {
+      return { ok: false, error: `"${searchQuery}" için TV yayını bulunamadı.` };
+    }
+    return {
+      ok: true,
+      tv: {
+        channelId: preset?.id || null,
+        provider: 'youtube',
+        kind: 'iframe',
+        title: displayTitle || yt.matchedTitle || searchQuery,
+        videoId: yt.videoIds[0],
+        fallbackVideoIds: yt.videoIds.slice(1),
+        originalUrl: `https://www.youtube.com/watch?v=${yt.videoIds[0]}`,
+        embedUrl: buildTvEmbedUrl(yt.videoIds[0]),
+        isLive: Boolean(preset)
+      }
+    };
+  }
+
+  if (parsed.embedUrl) {
+    return {
+      ok: true,
+      tv: {
+        channelId: preset?.id || null,
+        provider: parsed.provider,
+        kind: parsed.kind || 'iframe',
+        title: displayTitle || parsed.title || 'TV Yayını',
+        videoId: null,
+        fallbackVideoIds: [],
+        originalUrl: parsed.originalUrl,
+        embedUrl: parsed.embedUrl,
+        isLive: Boolean(preset)
+      }
+    };
+  }
+
+  return { ok: false, error: 'Bu yayın bağlantısı TV oynatıcıda desteklenmiyor.' };
+}
+
 

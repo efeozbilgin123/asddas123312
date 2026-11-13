@@ -1,7 +1,15 @@
 import { GameSession } from '../../shared/gameSession.js';
 import { createEmptyOrders, KAHVE_MENU_MAP } from '../../shared/menu.js';
 import { buildYouTubeEmbedUrl, parseMusicUrl, summarizeMusicQueue } from '../../shared/music.js';
-import { KAHVE_QUICK_CHATS, pickRandomBotAvatar, pickRandomBotName } from '../../shared/presets.js';
+import {
+  createEmptySocialStats,
+  KAHVE_CATS,
+  KAHVE_QUICK_CHATS,
+  normalizeRoomAmbiance,
+  normalizeRoomAtmosphere,
+  pickRandomBotAvatar,
+  pickRandomBotName
+} from '../../shared/presets.js';
 
 const LOCAL_QUICK_CHAT_MAP = new Map(KAHVE_QUICK_CHATS.map((q) => [q.id, q]));
 
@@ -13,9 +21,12 @@ export class LocalSingleplayerClient {
     this.musicQueueIndex = 0;
     this.musicAutoplay = true;
     this.musicHistory = [];
+    this.tv = null;
     this.orders = createEmptyOrders();
     this.lastOrder = null;
     this.orderSeq = 0;
+    this.socialStats = createEmptySocialStats();
+    this.catPetSeq = 0;
     this.chatHistory = [];
     this.chatSeq = 0;
     this.nudgeSeq = 0;
@@ -49,10 +60,16 @@ export class LocalSingleplayerClient {
       };
     });
 
+    const normalizedOptions = {
+      ...(options && typeof options === 'object' ? options : {}),
+      roomAtmosphere: normalizeRoomAtmosphere(options?.roomAtmosphere),
+      roomAmbiance: normalizeRoomAmbiance(options?.roomAmbiance)
+    };
+
     this.session = new GameSession({
       roomCode: 'TEK1',
       seatsConfig,
-      options,
+      options: normalizedOptions,
       onStateChange: () => {
         this.emitRoomState();
       }
@@ -79,8 +96,10 @@ export class LocalSingleplayerClient {
       isHost: true,
       isLocal: true,
       music: this.music,
+      tv: this.tv,
       orders: this.orders,
       lastOrder: this.lastOrder,
+      socialStats: this.socialStats,
       chatHistory: this.chatHistory,
       options: this.session.options,
       viewerSeatIndex: this.viewerSeatIndex,
@@ -496,6 +515,46 @@ export class LocalSingleplayerClient {
         this.emitRoomState();
         res = { ok: true };
         break;
+      case 'room:options': {
+        const opts = data?.options || data || {};
+        if (opts.roomAtmosphere !== undefined) {
+          this.session.options.roomAtmosphere = normalizeRoomAtmosphere(opts.roomAtmosphere);
+        }
+        if (opts.roomAmbiance !== undefined) {
+          this.session.options.roomAmbiance = normalizeRoomAmbiance(opts.roomAmbiance);
+        }
+        this.emitRoomState();
+        res = { ok: true, options: this.session.options };
+        break;
+      }
+      case 'room:tvSet': {
+        const tvPayload = data?.tvPayload;
+        if (!tvPayload || typeof tvPayload !== 'object' || !tvPayload.embedUrl) {
+          res = { ok: false, error: 'TV yayını çözümlenemedi.' };
+          break;
+        }
+        this.tv = {
+          channelId: tvPayload.channelId || null,
+          provider: tvPayload.provider || 'youtube',
+          kind: tvPayload.kind || 'iframe',
+          title: String(tvPayload.title || 'TV Kanalı').slice(0, 64),
+          videoId: tvPayload.videoId || null,
+          fallbackVideoIds: Array.isArray(tvPayload.fallbackVideoIds) ? tvPayload.fallbackVideoIds.slice(0, 5) : [],
+          originalUrl: tvPayload.originalUrl || '',
+          embedUrl: String(tvPayload.embedUrl),
+          isLive: Boolean(tvPayload.isLive),
+          updatedBy: this.playerName,
+          updatedAt: Date.now()
+        };
+        this.emitRoomState();
+        res = { ok: true, tv: this.tv };
+        break;
+      }
+      case 'room:tvStop':
+        this.tv = null;
+        this.emitRoomState();
+        res = { ok: true, tv: null };
+        break;
       case 'room:orderTreat': {
         const item = KAHVE_MENU_MAP.get(String(data?.itemId || ''));
         if (!item) {
@@ -526,11 +585,15 @@ export class LocalSingleplayerClient {
             label: item.label,
             shortLabel: item.shortLabel,
             category: item.category,
+            sipsRemaining: item.category === 'drink' ? 4 : undefined,
             fromSeat: this.viewerSeatIndex,
             fromName: this.playerName,
             servedAt
           };
           this.orders[seatIdx] = slot;
+        }
+        if (this.socialStats[this.viewerSeatIndex]) {
+          this.socialStats[this.viewerSeatIndex].treatsOrdered += targetIndices.length;
         }
         const targetName =
           target === 'all'
@@ -550,7 +613,33 @@ export class LocalSingleplayerClient {
           servedAt
         };
         this.emitRoomState();
-        res = { ok: true, orders: this.orders, lastOrder: this.lastOrder };
+        res = { ok: true, orders: this.orders, lastOrder: this.lastOrder, socialStats: this.socialStats };
+        break;
+      }
+      case 'room:orderSip': {
+        const slot = this.orders[this.viewerSeatIndex];
+        const drink = slot?.drink;
+        if (!drink) {
+          res = { ok: false, error: 'Masanızda içilecek bir bardak yok.' };
+          break;
+        }
+        const curSips = Number.isFinite(Number(drink.sipsRemaining)) ? Number(drink.sipsRemaining) : 4;
+        let action = 'sip';
+        if (curSips > 0) {
+          drink.sipsRemaining = Math.max(0, curSips - 1);
+          if (this.socialStats[this.viewerSeatIndex]) {
+            this.socialStats[this.viewerSeatIndex].sipsTaken += 1;
+          }
+        } else {
+          drink.sipsRemaining = 4;
+          drink.refilledAt = Date.now();
+          action = 'refill';
+          if (this.socialStats[this.viewerSeatIndex]) {
+            this.socialStats[this.viewerSeatIndex].treatsOrdered += 1;
+          }
+        }
+        this.emitRoomState();
+        res = { ok: true, action, sipsRemaining: drink.sipsRemaining, orders: this.orders, socialStats: this.socialStats };
         break;
       }
       case 'room:orderClear': {
@@ -560,7 +649,31 @@ export class LocalSingleplayerClient {
           this.orders[this.viewerSeatIndex] = { drink: null, food: null };
         }
         this.emitRoomState();
-        res = { ok: true, orders: this.orders };
+        res = { ok: true, orders: this.orders, socialStats: this.socialStats };
+        break;
+      }
+      case 'room:catPet': {
+        const idx = Number(data?.catIndex);
+        const cat = Number.isInteger(idx) ? KAHVE_CATS[idx] : null;
+        if (!cat) {
+          res = { ok: false, error: 'Geçersiz kedi seçimi.' };
+          break;
+        }
+        if (this.socialStats[this.viewerSeatIndex]) {
+          this.socialStats[this.viewerSeatIndex].catsPetted += 1;
+        }
+        this.catPetSeq += 1;
+        const payload = {
+          id: this.catPetSeq,
+          catIndex: idx,
+          cat,
+          seatIndex: this.viewerSeatIndex,
+          name: this.playerName,
+          socialStats: this.socialStats,
+          at: Date.now()
+        };
+        this.emitRoomState();
+        res = { ok: true, payload };
         break;
       }
       case 'room:chatSend': {

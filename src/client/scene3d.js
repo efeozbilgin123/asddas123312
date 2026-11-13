@@ -1,11 +1,15 @@
 import * as THREE from 'three';
 import { canLayoffTile } from '../../shared/melds.js';
+import { KAHVE_CATS, RACK_THEMES, TILE_THEMES } from '../../shared/presets.js';
 import { isOkeyTile } from '../../shared/tiles.js';
 import { soundFX } from './sound.js';
 import {
+  createLiveClockTexture,
   createNameplateTexture,
   createSpeechBubbleTexture,
+  createTvScreenTexture,
   getAvatarTexture,
+  getCatPortraitTexture,
   getDiscardPadTexture,
   getFeltTexture,
   getKahveBackdropTexture,
@@ -14,8 +18,7 @@ import {
   getTileBackTexture,
   getTileFaceTexture,
   getWallArtTexture,
-  getWallClockTexture,
-  getWindowNightTexture,
+  getWindowAtmosphereTexture,
   getWoodTexture
 } from './textures.js';
 
@@ -208,6 +211,9 @@ export class OkeyTable3D {
     this.pointer = new THREE.Vector2();
     this.lastHoverCheckTime = 0;
     this.interactables = [];
+    this.envInteractables = [];
+    this.envDisposableGeoms = [];
+    this.envDisposableMats = [];
     this.rackSlotMeshes = [];
     this.handSlotData = new Array(RACK_COLS * RACK_ROWS).fill(null);
     this.selectedTileIds = new Set();
@@ -230,6 +236,24 @@ export class OkeyTable3D {
     this.lastTableTileIds = new Set();
     this.lastHandIds = new Set();
 
+    this.tileTheme = 'ivory';
+    this.rackTheme = 'walnut';
+    this.roomAtmosphere = 'rainy';
+    this.tvState = null;
+    this.tvUpdater = null;
+    this.tvScreenMesh = null;
+    this.clockUpdater = null;
+    this.lastClockSec = -1;
+    this.envLights = {};
+    this.windowMats = [];
+    this.rainGroup = null;
+    this.rainDrops = [];
+    this.hearthGroup = null;
+    this.hearthLight = null;
+    this.hearthEmbers = [];
+    this.catModels = [];
+    this.rackWoodMat = null;
+
     // Cached geometries and materials to eliminate per-click / per-frame GC stalls
     this.tileGeom = createRoundedTileGeometry(TILE_W, TILE_H, TILE_D, 0.038, 0.015);
     this.sideTileMat = new THREE.MeshStandardMaterial({
@@ -238,7 +262,7 @@ export class OkeyTable3D {
       metalness: 0.04
     });
     this.backTileMat = new THREE.MeshStandardMaterial({
-      map: getTileBackTexture(),
+      map: getTileBackTexture(this.tileTheme),
       roughness: 0.3,
       metalness: 0.04
     });
@@ -607,6 +631,8 @@ export class OkeyTable3D {
     rimLight.position.set(-10, 9, -12);
     this.scene.add(rimLight);
 
+    this.envLights = { hemi, pendantLight, keyLight, rimLight };
+
     // Herringbone/plank walnut parquet floor + ornate central rug
     const floorMat = new THREE.MeshStandardMaterial({
       map: getParquetTexture(),
@@ -668,8 +694,10 @@ export class OkeyTable3D {
     const artMat0 = new THREE.MeshStandardMaterial({ map: getWallArtTexture(0), roughness: 0.6 });
     const artMat1 = new THREE.MeshStandardMaterial({ map: getWallArtTexture(1), roughness: 0.72 });
     const menuMat = new THREE.MeshStandardMaterial({ map: getMenuBoardTexture(), roughness: 0.75 });
-    const clockMat = new THREE.MeshBasicMaterial({ map: getWallClockTexture() });
-    const windowMat = new THREE.MeshBasicMaterial({ map: getWindowNightTexture() });
+    this.clockUpdater = createLiveClockTexture();
+    const clockMat = new THREE.MeshBasicMaterial({ map: this.clockUpdater.texture });
+    const windowMat = new THREE.MeshBasicMaterial({ map: getWindowAtmosphereTexture(this.roomAtmosphere) });
+    this.windowMats = [windowMat];
     const photoMat = new THREE.MeshStandardMaterial({ map: getKahveBackdropTexture(), roughness: 0.65 });
     const sconceMat = new THREE.MeshStandardMaterial({
       color: '#FFE4A3',
@@ -737,7 +765,7 @@ export class OkeyTable3D {
       this.scene.add(wallGroup);
     });
 
-    // Classic Round Wall Clock on North back wall (left of Ocakbaşı)
+    // Ticking Round Wall Clock on North back wall (left of Ocakbaşı)
     const clockGroup = new THREE.Group();
     clockGroup.position.set(-7.6, 7.6, -roomHalf + 0.24);
     const clockCase = new THREE.Mesh(
@@ -751,8 +779,32 @@ export class OkeyTable3D {
     clockGroup.add(clockFace);
     this.scene.add(clockGroup);
 
-    // Rain-kissed Evening Windows on East & West walls with velvet drapes
+    // Wall-mounted Kahvehane TV on North back wall (right of Ocakbaşı, clickable)
+    this.tvUpdater = createTvScreenTexture();
+    const tvGroup = new THREE.Group();
+    tvGroup.position.set(7.6, 7.6, -roomHalf + 0.28);
+    const tvChassisMat = new THREE.MeshStandardMaterial({ color: '#181412', roughness: 0.45, metalness: 0.25 });
+    const tvBezel = new THREE.Mesh(new THREE.BoxGeometry(5.3, 3.35, 0.24), tvChassisMat);
+    tvGroup.add(tvBezel);
+    const tvScreenMat = new THREE.MeshBasicMaterial({ map: this.tvUpdater.texture });
+    const tvScreen = new THREE.Mesh(new THREE.PlaneGeometry(4.85, 2.95), tvScreenMat);
+    tvScreen.position.z = 0.135;
+    tvScreen.userData = { kind: 'tv' };
+    tvGroup.add(tvScreen);
+    this.tvScreenMesh = tvScreen;
+    this.envInteractables.push(tvScreen);
+    this.envDisposableMats.push(clockMat, tvChassisMat, tvScreenMat);
+    this.scene.add(tvGroup);
+
+    // Atmosphere Windows on East & West walls with velvet drapes
     const curtainMat = new THREE.MeshStandardMaterial({ color: '#53191B', roughness: 0.88 });
+    const rainGroup = new THREE.Group();
+    const rainGeo = new THREE.BoxGeometry(0.03, 0.36, 0.03);
+    const rainMat = new THREE.MeshBasicMaterial({ color: '#B7D5FF', transparent: true, opacity: 0.35 });
+    this.envDisposableGeoms.push(rainGeo);
+    this.envDisposableMats.push(windowMat, rainMat);
+    this.rainDrops = [];
+
     [-1, 1].forEach((side) => {
       [-5.5, 5.5].forEach((wz) => {
         const winGroup = new THREE.Group();
@@ -783,9 +835,50 @@ export class OkeyTable3D {
           winGroup.add(drape);
         }
 
+        for (let r = 0; r < 10; r += 1) {
+          const drop = new THREE.Mesh(rainGeo, rainMat);
+          const localX = ((r * 37) % 40) / 10 - 2.0;
+          const baseY = ((r * 19) % 48) / 10 - 2.4;
+          drop.position.set(
+            side * (roomHalf - 0.3),
+            2.1 + baseY,
+            wz + (side === -1 ? -localX : localX)
+          );
+          rainGroup.add(drop);
+          this.rainDrops.push({ mesh: drop, minY: -0.4, maxY: 4.6, speed: 4.5 + (r % 3) * 1.4 });
+        }
+
         this.scene.add(winGroup);
       });
     });
+    this.rainGroup = rainGroup;
+    this.scene.add(rainGroup);
+
+    // Cozy Kuzine / Fireplace in Back-Left Corner (activated prominently in midnight/rainy)
+    const hearthGroup = new THREE.Group();
+    hearthGroup.position.set(-21.2, -2.35, -19.2);
+    hearthGroup.rotation.y = Math.PI / 4;
+    const stoveMat = new THREE.MeshStandardMaterial({ color: '#1B1918', roughness: 0.48, metalness: 0.55 });
+    const stoveBody = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.9, 1.5), stoveMat);
+    stoveBody.position.y = 1.45;
+    hearthGroup.add(stoveBody);
+    const stovePipe = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 12.2, 12), stoveMat);
+    stovePipe.position.set(0, 8.2, -0.2);
+    hearthGroup.add(stovePipe);
+    const emberMat = new THREE.MeshBasicMaterial({ color: '#FF6A1A' });
+    const emberGeo = new THREE.PlaneGeometry(1.1, 0.72);
+    const firebox = new THREE.Mesh(emberGeo, emberMat);
+    firebox.position.set(0, 1.05, 0.77);
+    hearthGroup.add(firebox);
+    const hearthLight = new THREE.PointLight('#FF772B', 8, 22, 1.5);
+    hearthLight.position.set(0, 1.35, 1.6);
+    hearthGroup.add(hearthLight);
+    this.hearthGroup = hearthGroup;
+    this.hearthLight = hearthLight;
+    this.hearthEmbers = [firebox];
+    this.envDisposableGeoms.push(emberGeo);
+    this.envDisposableMats.push(stoveMat, emberMat);
+    this.scene.add(hearthGroup);
 
     // Ceiling & Exposed Timber Beams
     const ceiling = new THREE.Mesh(
@@ -853,18 +946,152 @@ export class OkeyTable3D {
     this.buildSideKahveTable(-17.4, 10.2, -0.15, true);
     this.buildSideKahveTable(17.4, 10.2, 0.2, false);
 
+    // 3 Real Kahvehane Cats (Pamuk, Fındık, Kömür) on Cozy Cushions with Real-Photo Portraits
+    this.buildKahvehaneCats(wainscotMat, trimBrassMat);
+
     // Potted Kahvehane Ficus Plants in Room Corners
     this.buildPottedPlant(-23.2, -23.2, 1.15);
     this.buildPottedPlant(23.2, -23.2, 1.1);
     this.buildPottedPlant(-23.2, 22.8, 1.05);
     this.buildPottedPlant(23.2, 22.8, 1.1);
 
-    // Hanging Brass Mosaic Pendant Lamps over center & corner tables (emissive globes, single central PointLight)
+    // Hanging Brass Mosaic Pendant Lamps over center & corner tables
     this.buildPendantLamp(0, 10.4, 0, 1.25, false);
     this.buildPendantLamp(-16.2, 7.2, -15.2, 1.05, false);
     this.buildPendantLamp(16.2, 7.2, -15.2, 1.05, false);
     this.buildPendantLamp(-17.4, 7.2, 10.2, 1.0, false);
     this.buildPendantLamp(17.4, 7.2, 10.2, 1.0, false);
+
+    this.setRoomAtmosphere(this.roomAtmosphere);
+  }
+
+  buildKahvehaneCats(woodMat, brassMat) {
+    const spots = [
+      { pos: [-10.8, -1.05, 5.4], rotY: 0.75 },
+      { pos: [10.8, -1.05, 5.0], rotY: -0.78 },
+      { pos: [-10.8, -1.05, -6.2], rotY: 0.48 }
+    ];
+    this.catModels = [];
+
+    KAHVE_CATS.forEach((cat, idx) => {
+      const spot = spots[idx];
+      if (!spot) return;
+
+      const root = new THREE.Group();
+      root.position.set(...spot.pos);
+      root.rotation.y = spot.rotY;
+
+      // Woven wooden cat stool + plush velvet cushion
+      const stool = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.05, 1.22, 14), woodMat);
+      stool.position.y = -0.68;
+      root.add(stool);
+
+      const cushionMat = new THREE.MeshStandardMaterial({
+        color: idx === 0 ? '#782224' : idx === 1 ? '#265341' : '#352A54',
+        roughness: 0.85
+      });
+      const cushion = new THREE.Mesh(new THREE.CylinderGeometry(0.96, 1.02, 0.24, 16), cushionMat);
+      cushion.position.y = 0.04;
+      cushion.castShadow = true;
+      root.add(cushion);
+
+      // Sculpted stylized Persian / Tabby cat
+      const furMat = new THREE.MeshStandardMaterial({ color: cat.furColor, roughness: 0.82 });
+      const earInnerMat = new THREE.MeshStandardMaterial({ color: '#E8A8AE', roughness: 0.75 });
+      const eyeMat = new THREE.MeshBasicMaterial({ color: cat.eyeColor });
+      const noseMat = new THREE.MeshBasicMaterial({ color: idx === 2 ? '#4D3B3F' : '#DC8C92' });
+
+      const catGroup = new THREE.Group();
+      catGroup.position.y = 0.2;
+
+      const scale = idx === 1 ? 0.84 : 1.0; // Fındık is a cute kitten
+      catGroup.scale.setScalar(scale);
+
+      const body = new THREE.Mesh(new THREE.SphereGeometry(0.46, 14, 12), furMat);
+      body.scale.set(0.95, 0.85, 1.18);
+      body.position.set(0, 0.26, 0);
+      body.castShadow = true;
+      catGroup.add(body);
+
+      const head = new THREE.Group();
+      head.position.set(0, 0.62, 0.32);
+      const skull = new THREE.Mesh(new THREE.SphereGeometry(0.32, 14, 12), furMat);
+      skull.scale.set(1.06, 0.96, 0.96);
+      head.add(skull);
+
+      for (const sx of [-0.18, 0.18]) {
+        const ear = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.22, 4), furMat);
+        ear.position.set(sx, 0.28, -0.02);
+        ear.rotation.z = sx < 0 ? 0.25 : -0.25;
+        ear.rotation.y = Math.PI / 4;
+        head.add(ear);
+
+        const inner = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.12, 4), earInnerMat);
+        inner.position.set(sx, 0.26, 0.04);
+        inner.rotation.z = ear.rotation.z;
+        head.add(inner);
+
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), eyeMat);
+        eye.position.set(sx * 0.68, 0.04, 0.27);
+        head.add(eye);
+      }
+
+      const nose = new THREE.Mesh(new THREE.SphereGeometry(0.036, 8, 8), noseMat);
+      nose.position.set(0, -0.04, 0.31);
+      head.add(nose);
+
+      // Cute brass collar tag
+      const collar = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.03, 6, 14), cushionMat);
+      collar.rotation.x = Math.PI / 2;
+      collar.position.set(0, 0.42, 0.22);
+      catGroup.add(collar);
+      const bell = new THREE.Mesh(new THREE.SphereGeometry(0.048, 8, 8), brassMat);
+      bell.position.set(0, 0.39, 0.44);
+      catGroup.add(bell);
+
+      catGroup.add(head);
+
+      const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 0.62, 8), furMat);
+      tail.position.set(0.22, 0.3, -0.46);
+      tail.rotation.x = -0.82;
+      tail.rotation.z = -0.45;
+      catGroup.add(tail);
+
+      root.add(catGroup);
+
+      // Small framed real photo stand next to the cat cushion
+      const frameGroup = new THREE.Group();
+      frameGroup.position.set(0.86, 0.34, -0.28);
+      frameGroup.rotation.y = -0.22;
+      const frameBack = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.76, 0.06), brassMat);
+      frameGroup.add(frameBack);
+      const photoMat = new THREE.MeshBasicMaterial({ map: getCatPortraitTexture(cat.id) });
+      const photoPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.66), photoMat);
+      photoPlane.position.z = 0.036;
+      frameGroup.add(photoPlane);
+      root.add(frameGroup);
+
+      // Generous invisible click hitbox over cat + portrait
+      const hitbox = new THREE.Mesh(
+        new THREE.CylinderGeometry(1.1, 1.1, 1.65, 10),
+        new THREE.MeshBasicMaterial({ visible: false })
+      );
+      hitbox.position.y = 0.62;
+      hitbox.userData = { kind: 'cat', catIndex: idx };
+      root.add(hitbox);
+
+      this.envInteractables.push(hitbox);
+      this.catModels.push({
+        catIndex: idx,
+        head,
+        tail,
+        catGroup,
+        reactionTimer: 0,
+        phase: idx * 2.1
+      });
+      this.envDisposableMats.push(cushionMat, furMat, earInnerMat, eyeMat, noseMat, photoMat, hitbox.material);
+      this.scene.add(root);
+    });
   }
 
   buildTable() {
@@ -910,6 +1137,48 @@ export class OkeyTable3D {
       cap.position.set(cx, -0.33, cz);
       this.scene.add(cap);
     }
+
+    // Cozy Table Corner Props (clear of racks, discards, and order glasses/plates)
+    // 1. Nazar Boncuğu medallion on wooden rim front-left
+    const nazarGroup = new THREE.Group();
+    nazarGroup.position.set(-8.45, 0.03, 8.45);
+    const nazarBlue = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.28, 0.3, 0.05, 20),
+      new THREE.MeshStandardMaterial({ color: '#1444A8', roughness: 0.18 })
+    );
+    const nazarWhite = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.18, 0.18, 0.056, 18),
+      new THREE.MeshBasicMaterial({ color: '#F8FAFC' })
+    );
+    const nazarCyan = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.11, 0.11, 0.06, 16),
+      new THREE.MeshBasicMaterial({ color: '#38BDF8' })
+    );
+    const nazarPupil = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.055, 0.055, 0.064, 14),
+      new THREE.MeshBasicMaterial({ color: '#090D16' })
+    );
+    nazarGroup.add(nazarBlue, nazarWhite, nazarCyan, nazarPupil);
+    this.envDisposableMats.push(nazarBlue.material, nazarWhite.material, nazarCyan.material, nazarPupil.material);
+    this.scene.add(nazarGroup);
+
+    // 2. Classic Wooden Kahvehane Napkin Dispenser (Peçetelik) on far-right wooden rim
+    const peceteGroup = new THREE.Group();
+    peceteGroup.position.set(8.45, 0.01, -8.45);
+    peceteGroup.rotation.y = -0.5;
+    const peceteWood = new THREE.MeshStandardMaterial({ map: getWoodTexture(), color: '#6E4226', roughness: 0.5 });
+    const peceteBase = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.08, 0.38), peceteWood);
+    peceteBase.position.y = 0.04;
+    const peceteWall1 = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.34, 0.06), peceteWood);
+    peceteWall1.position.set(0, 0.22, 0.16);
+    const peceteWall2 = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.34, 0.06), peceteWood);
+    peceteWall2.position.set(0, 0.22, -0.16);
+    const napkinMat = new THREE.MeshStandardMaterial({ color: '#FAF6ED', roughness: 0.9 });
+    const napkins = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.42, 0.22), napkinMat);
+    napkins.position.set(0, 0.28, 0);
+    peceteGroup.add(peceteBase, peceteWall1, peceteWall2, napkins);
+    this.envDisposableMats.push(peceteWood, napkinMat);
+    this.scene.add(peceteGroup);
 
     // Flat table drag plane
     this.tableDragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.95);
@@ -984,12 +1253,14 @@ export class OkeyTable3D {
   }
 
   buildRacks() {
-    const rackWoodMat = new THREE.MeshStandardMaterial({
+    const initialRackTheme = RACK_THEMES.find((r) => r.id === this.rackTheme) || RACK_THEMES[0];
+    this.rackWoodMat = new THREE.MeshStandardMaterial({
       map: getWoodTexture(),
-      color: '#CFA076',
+      color: initialRackTheme?.rackColor || '#CFA076',
       roughness: 0.44,
       metalness: 0.05
     });
+    const rackWoodMat = this.rackWoodMat;
     const brassMat = new THREE.MeshStandardMaterial({
       color: '#C7A049',
       roughness: 0.34,
@@ -1104,13 +1375,14 @@ export class OkeyTable3D {
     let faceMat = this.backTileMat;
     if (faceUp) {
       const isOkey = isOkeyTile(tile, okeyTarget);
+      const themeKey = this.tileTheme || 'ivory';
       const cacheKey = tile.isFakeOkey
-        ? `fake-${selected}-${mustUse}`
-        : `${tile.color}-${tile.number}-${isOkey}-${selected}-${mustUse}`;
+        ? `fake-${themeKey}-${selected}-${mustUse}`
+        : `${themeKey}-${tile.color}-${tile.number}-${isOkey}-${selected}-${mustUse}`;
       faceMat = this.tileFaceMatCache.get(cacheKey);
       if (!faceMat) {
         faceMat = new THREE.MeshStandardMaterial({
-          map: getTileFaceTexture(tile, okeyTarget, { selected, mustUse }),
+          map: getTileFaceTexture(tile, okeyTarget, { selected, mustUse, tileTheme: themeKey }),
           roughness: 0.22,
           metalness: 0.04
         });
@@ -1340,11 +1612,12 @@ export class OkeyTable3D {
     }
   }
 
-  buildOrderMesh(itemId) {
+  buildOrderMesh(itemId, { sipsRemaining = 4, interactive = false } = {}) {
     const g = new THREE.Group();
     const porcelainMat = new THREE.MeshStandardMaterial({ color: '#F6F2EA', roughness: 0.18 });
     const brassMat = new THREE.MeshStandardMaterial({ color: '#C79B42', roughness: 0.28, metalness: 0.78 });
     const silverMat = new THREE.MeshStandardMaterial({ color: '#D4DCE2', roughness: 0.22, metalness: 0.85 });
+    const sipFrac = THREE.MathUtils.clamp(Number(sipsRemaining ?? 4) / 4, 0, 1);
 
     if (itemId === 'cay' || itemId === 'oralet') {
       const saucer = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.28, 0.04, 24), porcelainMat);
@@ -1359,25 +1632,28 @@ export class OkeyTable3D {
       saucerAccent.position.y = 0.042;
       g.add(saucerAccent);
 
-      // Ince belli lathe liquid + glass profile
-      const liquidColor = itemId === 'oralet' ? '#F27D16' : '#8F1E09';
-      const liquidPts = [
-        new THREE.Vector2(0.01, 0.05),
-        new THREE.Vector2(0.14, 0.05),
-        new THREE.Vector2(0.18, 0.16),
-        new THREE.Vector2(0.13, 0.28),
-        new THREE.Vector2(0.17, 0.38),
-        new THREE.Vector2(0.01, 0.38)
-      ];
-      const liquid = new THREE.Mesh(
-        new THREE.LatheGeometry(liquidPts, 20),
-        new THREE.MeshStandardMaterial({
-          color: liquidColor,
-          emissive: itemId === 'oralet' ? '#5A2400' : '#260500',
-          roughness: 0.12
-        })
-      );
-      g.add(liquid);
+      if (sipFrac > 0.01) {
+        const liquidColor = itemId === 'oralet' ? '#F27D16' : '#8F1E09';
+        const liquidPts = [
+          new THREE.Vector2(0.01, 0.05),
+          new THREE.Vector2(0.14, 0.05),
+          new THREE.Vector2(0.18, 0.16),
+          new THREE.Vector2(0.13, 0.28),
+          new THREE.Vector2(0.17, 0.38),
+          new THREE.Vector2(0.01, 0.38)
+        ];
+        const liquid = new THREE.Mesh(
+          new THREE.LatheGeometry(liquidPts, 20),
+          new THREE.MeshStandardMaterial({
+            color: liquidColor,
+            emissive: itemId === 'oralet' ? '#5A2400' : '#260500',
+            roughness: 0.12
+          })
+        );
+        liquid.scale.set(1, 0.12 + sipFrac * 0.88, 1);
+        g.add(liquid);
+        this.addSteamEffect(g, 0.5);
+      }
 
       const glassPts = [
         new THREE.Vector2(0.145, 0.045),
@@ -1405,8 +1681,6 @@ export class OkeyTable3D {
       const sugar = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, 0.08), porcelainMat);
       sugar.position.set(-0.22, 0.07, 0.12);
       g.add(sugar);
-
-      this.addSteamEffect(g, 0.5);
     } else if (itemId === 'kahve') {
       const saucer = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.3, 0.04, 24), brassMat);
       saucer.position.y = 0.02;
@@ -1416,12 +1690,15 @@ export class OkeyTable3D {
       cup.position.y = 0.18;
       g.add(cup);
 
-      const foam = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.19, 0.19, 0.03, 18),
-        new THREE.MeshStandardMaterial({ color: '#4E2B17', roughness: 0.45 })
-      );
-      foam.position.y = 0.31;
-      g.add(foam);
+      if (sipFrac > 0.01) {
+        const foam = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.19, 0.19, 0.03, 18),
+          new THREE.MeshStandardMaterial({ color: '#4E2B17', roughness: 0.45 })
+        );
+        foam.position.y = 0.1 + sipFrac * 0.21;
+        g.add(foam);
+        this.addSteamEffect(g, 0.38);
+      }
 
       const handle = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.024, 8, 16, Math.PI), porcelainMat);
       handle.rotation.z = -Math.PI / 2;
@@ -1434,8 +1711,6 @@ export class OkeyTable3D {
       );
       lokum.position.set(-0.24, 0.085, 0.12);
       g.add(lokum);
-
-      this.addSteamEffect(g, 0.38);
     } else if (itemId === 'gazoz') {
       const bottlePts = [
         new THREE.Vector2(0.01, 0.0),
@@ -1449,9 +1724,9 @@ export class OkeyTable3D {
       const bottle = new THREE.Mesh(
         new THREE.LatheGeometry(bottlePts, 20),
         new THREE.MeshStandardMaterial({
-          color: '#88C8A8',
+          color: sipFrac > 0.01 ? '#88C8A8' : '#C6E2D4',
           transparent: true,
-          opacity: 0.78,
+          opacity: sipFrac > 0.01 ? 0.78 : 0.45,
           roughness: 0.1
         })
       );
@@ -1464,9 +1739,11 @@ export class OkeyTable3D {
       label.position.y = 0.24;
       g.add(label);
 
-      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.04, 16), brassMat);
-      cap.position.y = 0.83;
-      g.add(cap);
+      if (sipFrac > 0.99) {
+        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.04, 16), brassMat);
+        cap.position.y = 0.83;
+        g.add(cap);
+      }
     } else if (itemId === 'tost') {
       const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.56, 0.42, 0.05, 24), porcelainMat);
       plate.position.y = 0.025;
@@ -1553,6 +1830,17 @@ export class OkeyTable3D {
       }
     }
 
+    if (interactive) {
+      const hitMesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.55, 0.55, 0.9, 10),
+        new THREE.MeshBasicMaterial({ visible: false })
+      );
+      hitMesh.position.y = 0.42;
+      hitMesh.userData = { kind: 'myDrink' };
+      g.add(hitMesh);
+      g.userData.drinkHitMesh = hitMesh;
+    }
+
     return g;
   }
 
@@ -1577,6 +1865,7 @@ export class OkeyTable3D {
       this.disposeOrderObject(child);
     }
     this.steamParticles = [];
+    this.myDrinkHitMesh = null;
 
     if (!Array.isArray(this.currentOrders)) return;
 
@@ -1594,9 +1883,16 @@ export class OkeyTable3D {
       const anchor = slotsByRel[rel];
 
       if (seatOrders.drink?.itemId) {
-        const mesh = this.buildOrderMesh(seatOrders.drink.itemId);
+        const isMine = rel === 0;
+        const mesh = this.buildOrderMesh(seatOrders.drink.itemId, {
+          sipsRemaining: seatOrders.drink.sipsRemaining ?? 4,
+          interactive: isMine
+        });
         mesh.position.set(...anchor.drink);
         this.orderGroup.add(mesh);
+        if (isMine && mesh.userData?.drinkHitMesh) {
+          this.myDrinkHitMesh = mesh.userData.drinkHitMesh;
+        }
       }
       if (seatOrders.food?.itemId) {
         const mesh = this.buildOrderMesh(seatOrders.food.itemId);
@@ -2388,7 +2684,12 @@ export class OkeyTable3D {
       }
 
       this.raycaster.setFromCamera(this.pointer, this.camera);
-      const hits = this.raycaster.intersectObjects(this.interactables, false);
+      const clickTargets = [
+        ...this.interactables,
+        ...(this.myDrinkHitMesh ? [this.myDrinkHitMesh] : []),
+        ...this.envInteractables
+      ];
+      const hits = this.raycaster.intersectObjects(clickTargets, false);
       if (hits.length === 0) return;
 
       const hit = hits[0].object;
@@ -2420,6 +2721,13 @@ export class OkeyTable3D {
         if (selected.length === 1) {
           this.callbacks.onLayoffTile?.(selected[0].id, data.meldId);
         }
+      } else if (data.kind === 'myDrink') {
+        this.callbacks.onDrinkClick?.();
+      } else if (data.kind === 'cat') {
+        this.triggerCatReaction(data.catIndex);
+        this.callbacks.onCatClick?.(data.catIndex);
+      } else if (data.kind === 'tv') {
+        this.callbacks.onTvClick?.();
       }
     };
 
@@ -2527,7 +2835,12 @@ export class OkeyTable3D {
 
       this.updatePointer(e.clientX, e.clientY);
       this.raycaster.setFromCamera(this.pointer, this.camera);
-      const hits = this.raycaster.intersectObjects(this.interactables, false);
+      const hoverTargets = [
+        ...this.interactables,
+        ...(this.myDrinkHitMesh ? [this.myDrinkHitMesh] : []),
+        ...this.envInteractables
+      ];
+      const hits = this.raycaster.intersectObjects(hoverTargets, false);
       this.canvas.style.cursor = hits.length > 0 ? 'pointer' : 'default';
     };
 
@@ -2737,6 +3050,138 @@ export class OkeyTable3D {
     }
   }
 
+  triggerCatReaction(catIndex = 0) {
+    const target = this.catModels.find((c) => c.catIndex === Number(catIndex));
+    if (target) {
+      target.reactionTimer = 1.65;
+    }
+  }
+
+  setTvState(tvState = null) {
+    this.tvState = tvState || null;
+    this.tvUpdater?.update(this.tvState);
+  }
+
+  setRoomAtmosphere(atmosphere = 'rainy') {
+    const valid = atmosphere === 'afternoon' || atmosphere === 'midnight' ? atmosphere : 'rainy';
+    this.roomAtmosphere = valid;
+    const winTex = getWindowAtmosphereTexture(valid);
+    for (const mat of this.windowMats) {
+      mat.map = winTex;
+      mat.needsUpdate = true;
+    }
+    if (this.rainGroup) {
+      this.rainGroup.visible = valid === 'rainy';
+    }
+    if (valid === 'afternoon') {
+      this.scene.background?.set('#2A1A10');
+      if (this.scene.fog) this.scene.fog.color.set('#2A1A10');
+      if (this.envLights?.hemi) {
+        this.envLights.hemi.color.set('#FFE2B0');
+        this.envLights.hemi.groundColor.set('#4A2B18');
+        this.envLights.hemi.intensity = 1.32;
+      }
+      if (this.envLights?.pendantLight) {
+        this.envLights.pendantLight.color.set('#FFD699');
+        this.envLights.pendantLight.intensity = 44;
+      }
+      if (this.envLights?.keyLight) {
+        this.envLights.keyLight.color.set('#FFD091');
+        this.envLights.keyLight.intensity = 1.55;
+      }
+      if (this.envLights?.rimLight) {
+        this.envLights.rimLight.color.set('#FFB36B');
+        this.envLights.rimLight.intensity = 0.48;
+      }
+      if (this.hearthLight) {
+        this.hearthLight.intensity = 3.5;
+      }
+    } else if (valid === 'midnight') {
+      this.scene.background?.set('#0E0908');
+      if (this.scene.fog) this.scene.fog.color.set('#0E0908');
+      if (this.envLights?.hemi) {
+        this.envLights.hemi.color.set('#C9B8E8');
+        this.envLights.hemi.groundColor.set('#1F140E');
+        this.envLights.hemi.intensity = 0.92;
+      }
+      if (this.envLights?.pendantLight) {
+        this.envLights.pendantLight.color.set('#FFC57A');
+        this.envLights.pendantLight.intensity = 48;
+      }
+      if (this.envLights?.keyLight) {
+        this.envLights.keyLight.color.set('#FFE4BA');
+        this.envLights.keyLight.intensity = 1.0;
+      }
+      if (this.envLights?.rimLight) {
+        this.envLights.rimLight.color.set('#7A8FD6');
+        this.envLights.rimLight.intensity = 0.38;
+      }
+      if (this.hearthLight) {
+        this.hearthLight.intensity = 15;
+      }
+    } else {
+      this.scene.background?.set('#160E09');
+      if (this.scene.fog) this.scene.fog.color.set('#160E09');
+      if (this.envLights?.hemi) {
+        this.envLights.hemi.color.set('#FFEBD2');
+        this.envLights.hemi.groundColor.set('#2B1C13');
+        this.envLights.hemi.intensity = 1.15;
+      }
+      if (this.envLights?.pendantLight) {
+        this.envLights.pendantLight.color.set('#FFD18C');
+        this.envLights.pendantLight.intensity = 52;
+      }
+      if (this.envLights?.keyLight) {
+        this.envLights.keyLight.color.set('#FFF0D4');
+        this.envLights.keyLight.intensity = 1.25;
+      }
+      if (this.envLights?.rimLight) {
+        this.envLights.rimLight.color.set('#CBD8FF');
+        this.envLights.rimLight.intensity = 0.32;
+      }
+      if (this.hearthLight) {
+        this.hearthLight.intensity = 8;
+      }
+    }
+  }
+
+  setRackTheme(themeId = 'walnut') {
+    const preset = RACK_THEMES.find((r) => r.id === themeId) || RACK_THEMES[0];
+    if (!preset) return;
+    this.rackTheme = preset.id;
+    if (this.rackWoodMat) {
+      this.rackWoodMat.color.set(preset.rackColor);
+      this.rackWoodMat.needsUpdate = true;
+    }
+    if (this.coverWoodMat) {
+      this.coverWoodMat.color.set(preset.color);
+      this.coverWoodMat.needsUpdate = true;
+    }
+  }
+
+  setTileTheme(themeId = 'ivory') {
+    const preset = TILE_THEMES.find((t) => t.id === themeId) || TILE_THEMES[0];
+    if (!preset || this.tileTheme === preset.id) return;
+    this.tileTheme = preset.id;
+    if (this.sideTileMat) {
+      this.sideTileMat.color.set(preset.side);
+      this.sideTileMat.needsUpdate = true;
+    }
+    if (this.backTileMat) {
+      this.backTileMat.map = getTileBackTexture(preset.id);
+      this.backTileMat.needsUpdate = true;
+    }
+    for (const mat of this.tileFaceMatCache.values()) {
+      mat?.dispose();
+    }
+    this.tileFaceMatCache.clear();
+    if (this.demoMode) {
+      this.buildDemoSetup();
+    } else if (this.currentState) {
+      this.renderGameState(this.currentState, { skipSlotSync: true, instant: true });
+    }
+  }
+
   showSeatBubble(seatIndex, name, text, viewerSeatIndex = this.currentViewerIdx) {
     const rel = (Number(seatIndex) - Number(viewerSeatIndex || 0) + 4) % 4;
     if (rel === 0) return;
@@ -2830,6 +3275,62 @@ export class OkeyTable3D {
 
     if (this.demoMode && !this.reducedMotion) {
       this.targetSpherical.theta += dt * 0.08;
+    }
+
+    // Live ticking wall clock (updates once per second)
+    if (this.clockUpdater) {
+      const nowDate = new Date();
+      const sec = nowDate.getSeconds();
+      if (sec !== this.lastClockSec) {
+        this.lastClockSec = sec;
+        this.clockUpdater.update(nowDate);
+      }
+    }
+
+    // Gentle window raindrops when atmosphere is rainy
+    if (!this.reducedMotion && this.roomAtmosphere === 'rainy' && this.rainDrops.length > 0) {
+      for (const r of this.rainDrops) {
+        r.mesh.position.y -= r.speed * dt;
+        if (r.mesh.position.y < r.minY) {
+          r.mesh.position.y = r.maxY;
+        }
+      }
+    }
+
+    // Subtle kuzine hearth flicker
+    if (!this.reducedMotion && this.hearthLight) {
+      const baseHearth = this.roomAtmosphere === 'midnight'
+        ? 15
+        : this.roomAtmosphere === 'afternoon'
+          ? 3.5
+          : 8;
+      const t = performance.now() * 0.006;
+      this.hearthLight.intensity = baseHearth + Math.sin(t * 2.1) * 1.4 + Math.cos(t * 3.7) * 0.9;
+      for (const em of this.hearthEmbers) {
+        em.scale.setScalar(0.95 + Math.sin(t * 2.9) * 0.06);
+      }
+    }
+
+    // Kahvehane cats idle breathing + pet reaction wiggle
+    if (this.catModels.length > 0) {
+      for (const c of this.catModels) {
+        c.phase += dt * 1.8;
+        if (c.reactionTimer > 0) {
+          c.reactionTimer = Math.max(0, c.reactionTimer - dt);
+          if (!this.reducedMotion) {
+            const w = c.reactionTimer * 14;
+            c.head.rotation.z = Math.sin(w) * 0.24;
+            c.head.rotation.x = Math.cos(w * 0.7) * 0.14;
+            c.tail.rotation.z = -0.45 + Math.sin(w * 1.3) * 0.35;
+            c.catGroup.position.y = 0.2 + Math.abs(Math.sin(w * 0.5)) * 0.1;
+          }
+        } else {
+          c.head.rotation.z = this.reducedMotion ? 0 : Math.sin(c.phase * 0.6) * 0.05;
+          c.head.rotation.x = this.reducedMotion ? 0 : Math.cos(c.phase * 0.45) * 0.03;
+          c.tail.rotation.z = -0.45 + (this.reducedMotion ? 0 : Math.sin(c.phase * 1.2) * 0.14);
+          c.catGroup.position.y = 0.2;
+        }
+      }
     }
 
     // Smooth carried-tile interpolation during physical drag
@@ -2971,7 +3472,8 @@ export class OkeyTable3D {
       this.leftDiscardRingGeom,
       this.turnRingGeom,
       this.steamPuffGeom,
-      this.confettiGeom
+      this.confettiGeom,
+      ...this.envDisposableGeoms
     ];
     for (const g of staticGeoms) g?.dispose();
 
@@ -2981,6 +3483,7 @@ export class OkeyTable3D {
       this.rearCapMat,
       this.coverWoodMat,
       this.coverBrassMat,
+      this.rackWoodMat,
       this.gStandMat,
       this.meldTrayMatDefault,
       this.meldTrayMatLayoff,
@@ -2991,9 +3494,13 @@ export class OkeyTable3D {
       this.rightDiscardRingMat,
       this.tableFeltMat,
       ...this.sideFeltMats,
-      ...this.confettiMats
+      ...this.confettiMats,
+      ...this.envDisposableMats
     ];
     for (const m of staticMats) m?.dispose();
+
+    this.clockUpdater?.texture?.dispose();
+    this.tvUpdater?.texture?.dispose();
 
     for (const b of this.speechBubbles.values()) {
       b.sprite.material?.map?.dispose();

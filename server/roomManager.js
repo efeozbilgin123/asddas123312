@@ -1,13 +1,18 @@
 import { createEmptyOrders, KAHVE_MENU_MAP } from '../shared/menu.js';
-import { buildYouTubeEmbedUrl, parseMusicUrl, summarizeMusicQueue } from '../shared/music.js';
+import { buildTvEmbedUrl, buildYouTubeEmbedUrl, parseMusicUrl, summarizeMusicQueue } from '../shared/music.js';
 import {
+  createEmptySocialStats,
   isPresetAvatar,
+  KAHVE_CATS,
   KAHVE_QUICK_CHATS,
+  normalizeRoomAmbiance,
+  normalizeRoomAtmosphere,
   pickRandomBotAvatar,
   pickRandomBotName,
-  PRESET_AVATAR_COUNT
+  PRESET_AVATAR_COUNT,
+  TV_CHANNELS
 } from '../shared/presets.js';
-import { findAutoplayTrack, resolveMusicInput, resolveQueuedTrack } from './musicResolver.js';
+import { findAutoplayTrack, resolveMusicInput, resolveQueuedTrack, resolveTvInput } from './musicResolver.js';
 import { GameSession } from './gameSession.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -105,9 +110,12 @@ export class RoomManager {
       musicQueueIndex: 0,
       musicAutoplay: true,
       musicHistory: [],
+      tv: null,
       orders: createEmptyOrders(),
       lastOrder: null,
       orderSeq: 0,
+      socialStats: createEmptySocialStats(),
+      catPetSeq: 0,
       chatHistory: [],
       chatSeq: 0,
       nudgeSeq: 0,
@@ -121,7 +129,9 @@ export class RoomManager {
         islekPenalty: opts.islekPenalty !== false,
         turnSeconds: [45, 60, 90].includes(Number(opts.turnSeconds))
           ? Number(opts.turnSeconds)
-          : 60
+          : 60,
+        roomAtmosphere: normalizeRoomAtmosphere(opts.roomAtmosphere),
+        roomAmbiance: normalizeRoomAmbiance(opts.roomAmbiance)
       },
       seats,
       session: null
@@ -430,6 +440,11 @@ export class RoomManager {
       room.orders[mySeat.seatIndex] = room.orders[targetSeat.seatIndex];
       room.orders[targetSeat.seatIndex] = tmpOrder;
     }
+    if (Array.isArray(room.socialStats)) {
+      const tmpStat = room.socialStats[mySeat.seatIndex];
+      room.socialStats[mySeat.seatIndex] = room.socialStats[targetSeat.seatIndex];
+      room.socialStats[targetSeat.seatIndex] = tmpStat;
+    }
 
     this.broadcastRoomState(room);
     this.broadcastRoomsList();
@@ -442,27 +457,49 @@ export class RoomManager {
     if (room.hostPlayerId !== hostPlayerId) {
       return { ok: false, error: 'Yalnızca masa kurucusu ayarları değiştirebilir.' };
     }
-    if (room.status !== 'waiting') {
-      return { ok: false, error: 'Oyun devam ederken kurallar değiştirilemez.' };
-    }
     if (!options || typeof options !== 'object') {
       return { ok: false, error: 'Geçersiz ayar verisi.' };
     }
 
-    if (options.katlamali !== undefined) {
-      room.options.katlamali = Boolean(options.katlamali);
+    const ruleChanged =
+      (options.katlamali !== undefined && Boolean(options.katlamali) !== room.options.katlamali) ||
+      (options.teamMode !== undefined &&
+        (options.teamMode === 'paired' ? 'paired' : 'solo') !== room.options.teamMode) ||
+      (options.maxRounds !== undefined &&
+        [0, 3, 5, 7, 9].includes(Number(options.maxRounds)) &&
+        Number(options.maxRounds) !== room.options.maxRounds) ||
+      (options.islekPenalty !== undefined && Boolean(options.islekPenalty) !== room.options.islekPenalty) ||
+      (options.turnSeconds !== undefined &&
+        [45, 60, 90].includes(Number(options.turnSeconds)) &&
+        Number(options.turnSeconds) !== room.options.turnSeconds);
+
+    if (room.status !== 'waiting' && ruleChanged) {
+      return { ok: false, error: 'Oyun devam ederken kurallar değiştirilemez.' };
     }
-    if (options.teamMode !== undefined) {
-      room.options.teamMode = options.teamMode === 'paired' ? 'paired' : 'solo';
+
+    if (room.status === 'waiting') {
+      if (options.katlamali !== undefined) {
+        room.options.katlamali = Boolean(options.katlamali);
+      }
+      if (options.teamMode !== undefined) {
+        room.options.teamMode = options.teamMode === 'paired' ? 'paired' : 'solo';
+      }
+      if (options.maxRounds !== undefined && [0, 3, 5, 7, 9].includes(Number(options.maxRounds))) {
+        room.options.maxRounds = Number(options.maxRounds);
+      }
+      if (options.islekPenalty !== undefined) {
+        room.options.islekPenalty = Boolean(options.islekPenalty);
+      }
+      if ([45, 60, 90].includes(Number(options.turnSeconds))) {
+        room.options.turnSeconds = Number(options.turnSeconds);
+      }
     }
-    if (options.maxRounds !== undefined && [0, 3, 5, 7, 9].includes(Number(options.maxRounds))) {
-      room.options.maxRounds = Number(options.maxRounds);
+
+    if (options.roomAtmosphere !== undefined) {
+      room.options.roomAtmosphere = normalizeRoomAtmosphere(options.roomAtmosphere);
     }
-    if (options.islekPenalty !== undefined) {
-      room.options.islekPenalty = Boolean(options.islekPenalty);
-    }
-    if ([45, 60, 90].includes(Number(options.turnSeconds))) {
-      room.options.turnSeconds = Number(options.turnSeconds);
+    if (options.roomAmbiance !== undefined) {
+      room.options.roomAmbiance = normalizeRoomAmbiance(options.roomAmbiance);
     }
 
     this.broadcastRoomState(room);
@@ -968,6 +1005,71 @@ export class RoomManager {
     }
   }
 
+  broadcastRoomTv(room) {
+    for (const seat of room.seats) {
+      if (seat.type === 'human' && seat.playerId) {
+        this.io.to(`player:${seat.playerId}`).emit('room:tv', room.tv || null);
+      }
+    }
+  }
+
+  async resolveAndSetRoomTv({ roomCode, playerId, channelId = '', url = '', title = '', fetchImpl = globalThis.fetch }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    const sender = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
+    if (!sender) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+
+    const resolved = await resolveTvInput(url, title, { channelId, fetchImpl });
+    if (!resolved?.ok || !resolved.tv) {
+      return { ok: false, error: resolved?.error || 'TV yayını çözümlenemedi.' };
+    }
+
+    room.tv = {
+      ...resolved.tv,
+      updatedBy: sender.name || 'Oyuncu',
+      updatedAt: Date.now()
+    };
+    this.broadcastRoomTv(room);
+    return { ok: true, tv: room.tv };
+  }
+
+  setRoomTv({ roomCode, playerId, tvPayload }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    const sender = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
+    if (!sender) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+
+    if (!tvPayload || typeof tvPayload !== 'object' || !tvPayload.embedUrl) {
+      return { ok: false, error: 'Geçersiz TV yayın bilgisi.' };
+    }
+    room.tv = {
+      channelId: tvPayload.channelId || null,
+      provider: tvPayload.provider || 'youtube',
+      kind: tvPayload.kind || 'iframe',
+      title: String(tvPayload.title || 'TV Kanalı').slice(0, 64),
+      videoId: tvPayload.videoId || null,
+      fallbackVideoIds: Array.isArray(tvPayload.fallbackVideoIds) ? tvPayload.fallbackVideoIds.slice(0, 5) : [],
+      originalUrl: tvPayload.originalUrl || '',
+      embedUrl: tvPayload.videoId ? buildTvEmbedUrl(tvPayload.videoId) : String(tvPayload.embedUrl),
+      isLive: Boolean(tvPayload.isLive),
+      updatedBy: sender.name || 'Oyuncu',
+      updatedAt: Date.now()
+    };
+    this.broadcastRoomTv(room);
+    return { ok: true, tv: room.tv };
+  }
+
+  stopRoomTv({ roomCode, playerId }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    const sender = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
+    if (!sender) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+
+    room.tv = null;
+    this.broadcastRoomTv(room);
+    return { ok: true, tv: null };
+  }
+
   orderTreat({ roomCode, playerId, itemId, target = 'self' }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
@@ -978,6 +1080,7 @@ export class RoomManager {
     if (!item) return { ok: false, error: 'Geçersiz kahvehane siparişi.' };
 
     if (!Array.isArray(room.orders)) room.orders = createEmptyOrders();
+    if (!Array.isArray(room.socialStats)) room.socialStats = createEmptySocialStats();
 
     const targetIndices = [];
     if (target === 'all') {
@@ -1006,11 +1109,16 @@ export class RoomManager {
         label: item.label,
         shortLabel: item.shortLabel,
         category: item.category,
+        sipsRemaining: item.category === 'drink' ? 4 : undefined,
         fromSeat: sender.seatIndex,
         fromName: sender.name || 'Oyuncu',
         servedAt
       };
       room.orders[seatIdx] = slot;
+    }
+
+    if (room.socialStats[sender.seatIndex]) {
+      room.socialStats[sender.seatIndex].treatsOrdered += targetIndices.length;
     }
 
     const targetName =
@@ -1033,7 +1141,84 @@ export class RoomManager {
     };
 
     this.broadcastRoomOrders(room);
-    return { ok: true, orders: room.orders, lastOrder: room.lastOrder };
+    return { ok: true, orders: room.orders, lastOrder: room.lastOrder, socialStats: room.socialStats };
+  }
+
+  sipDrink({ roomCode, playerId }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    const sender = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
+    if (!sender) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+
+    if (!Array.isArray(room.orders)) room.orders = createEmptyOrders();
+    if (!Array.isArray(room.socialStats)) room.socialStats = createEmptySocialStats();
+
+    const slot = room.orders[sender.seatIndex];
+    const drink = slot?.drink;
+    if (!drink) {
+      return { ok: false, error: 'Masanızda içilecek bir bardak yok.' };
+    }
+
+    const curSips = Number.isFinite(Number(drink.sipsRemaining)) ? Number(drink.sipsRemaining) : 4;
+    let action = 'sip';
+    if (curSips > 0) {
+      drink.sipsRemaining = Math.max(0, curSips - 1);
+      if (room.socialStats[sender.seatIndex]) {
+        room.socialStats[sender.seatIndex].sipsTaken += 1;
+      }
+    } else {
+      drink.sipsRemaining = 4;
+      drink.refilledAt = Date.now();
+      action = 'refill';
+      if (room.socialStats[sender.seatIndex]) {
+        room.socialStats[sender.seatIndex].treatsOrdered += 1;
+      }
+    }
+
+    this.broadcastRoomOrders(room);
+    return {
+      ok: true,
+      action,
+      sipsRemaining: drink.sipsRemaining,
+      orders: room.orders,
+      socialStats: room.socialStats
+    };
+  }
+
+  petCat({ roomCode, playerId, catIndex }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    const sender = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
+    if (!sender) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+
+    const idx = Number(catIndex);
+    const cat = Number.isInteger(idx) ? KAHVE_CATS[idx] : null;
+    if (!cat) {
+      return { ok: false, error: 'Geçersiz kedi seçimi.' };
+    }
+
+    if (!Array.isArray(room.socialStats)) room.socialStats = createEmptySocialStats();
+    if (room.socialStats[sender.seatIndex]) {
+      room.socialStats[sender.seatIndex].catsPetted += 1;
+    }
+
+    room.catPetSeq = (room.catPetSeq || 0) + 1;
+    const payload = {
+      id: room.catPetSeq,
+      catIndex: idx,
+      cat,
+      seatIndex: sender.seatIndex,
+      name: sender.name || 'Oyuncu',
+      socialStats: room.socialStats,
+      at: Date.now()
+    };
+
+    for (const seat of room.seats) {
+      if (seat.type === 'human' && seat.playerId) {
+        this.io.to(`player:${seat.playerId}`).emit('room:catPetted', payload);
+      }
+    }
+    return { ok: true, payload };
   }
 
   clearSeatOrder({ roomCode, playerId, target = 'self' }) {
@@ -1052,11 +1237,15 @@ export class RoomManager {
       room.orders[sender.seatIndex] = { drink: null, food: null };
     }
     this.broadcastRoomOrders(room);
-    return { ok: true, orders: room.orders };
+    return { ok: true, orders: room.orders, socialStats: room.socialStats };
   }
 
   broadcastRoomOrders(room) {
-    const payload = { orders: room.orders, lastOrder: room.lastOrder };
+    const payload = {
+      orders: room.orders,
+      lastOrder: room.lastOrder,
+      socialStats: room.socialStats || createEmptySocialStats()
+    };
     for (const seat of room.seats) {
       if (seat.type === 'human' && seat.playerId) {
         this.io.to(`player:${seat.playerId}`).emit('room:orders', payload);
@@ -1154,8 +1343,10 @@ export class RoomManager {
       status: room.status,
       isHost: room.hostPlayerId === playerId,
       music: room.music || null,
+      tv: room.tv || null,
       orders: room.orders || createEmptyOrders(),
       lastOrder: room.lastOrder || null,
+      socialStats: room.socialStats || createEmptySocialStats(),
       chatHistory: room.chatHistory || [],
       options: room.options,
       viewerSeatIndex,

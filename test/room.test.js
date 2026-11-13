@@ -371,3 +371,123 @@ test('RoomManager supports musicQueueMove, musicQueueShuffle, room chat, and nud
   assert.equal(nudgeP2.ok, true);
   assert.equal(nudgeP2.nudge.targetSeatIndex, 0);
 });
+
+test('RoomManager allows host-only live roomAtmosphere/roomAmbiance updates during playing while blocking rule changes', (ctx) => {
+  const io = createMockIo();
+  const rm = new RoomManager(io);
+  const created = rm.createRoom({
+    playerId: 'h1',
+    playerName: 'Efe',
+    roomName: 'Ortam Odası',
+    options: { roomAtmosphere: 'rainy', roomAmbiance: 'rain' }
+  });
+  ctx.after(() => created?.room?.session?.destroy());
+
+  const code = created.room.code;
+  rm.joinRoom({ roomCode: code, playerId: 'p2', playerName: 'Arhan' });
+  assert.equal(created.room.options.roomAtmosphere, 'rainy');
+  assert.equal(created.room.options.roomAmbiance, 'rain');
+
+  assert.equal(rm.startGame(code, 'h1').ok, true);
+
+  // Non-host cannot change atmosphere/ambiance
+  const guestTry = rm.updateOptions({
+    roomCode: code,
+    hostPlayerId: 'p2',
+    options: { roomAtmosphere: 'midnight', roomAmbiance: 'fireplace' }
+  });
+  assert.equal(guestTry.ok, false);
+
+  // Host cannot change rules mid-game
+  const ruleTry = rm.updateOptions({
+    roomCode: code,
+    hostPlayerId: 'h1',
+    options: { katlamali: true }
+  });
+  assert.equal(ruleTry.ok, false);
+
+  // Host CAN change atmosphere & ambiance live during active game
+  const liveCozy = rm.updateOptions({
+    roomCode: code,
+    hostPlayerId: 'h1',
+    options: { roomAtmosphere: 'midnight', roomAmbiance: 'fireplace' }
+  });
+  assert.equal(liveCozy.ok, true);
+  assert.equal(created.room.options.roomAtmosphere, 'midnight');
+  assert.equal(created.room.options.roomAmbiance, 'fireplace');
+
+  const p2View = rm.getRoomPayloadForPlayer(created.room, 'p2');
+  assert.equal(p2View.options.roomAtmosphere, 'midnight');
+  assert.equal(p2View.options.roomAmbiance, 'fireplace');
+});
+
+test('resolveTvInput and RoomManager TV/sip/catPet track state, socialStats, and emit room events', async () => {
+  const { resolveTvInput } = await import('../server/musicResolver.js');
+  const io = createMockIo();
+  const rm = new RoomManager(io);
+  const created = rm.createRoom({
+    playerId: 'h1',
+    playerName: 'Efe',
+    roomName: 'Kahve Keyfi'
+  });
+  const code = created.room.code;
+  rm.joinRoom({ roomCode: code, playerId: 'p2', playerName: 'Hasan' });
+
+  // Direct YouTube TV resolve + setRoomTv + stopRoomTv
+  const directTv = await resolveTvInput('https://youtu.be/dQw4w9WgXcQ', 'Akşam Yayını');
+  assert.equal(directTv.ok, true);
+  assert.equal(directTv.tv.videoId, 'dQw4w9WgXcQ');
+  assert.equal(directTv.tv.isLive, false);
+
+  // Mock YouTube search HTML for preset channelId
+  const fakeYtSearchHtml = `var ytInitialData = {"contents":{"twoColumnSearchResultsRenderer":{"primaryContents":{"sectionListRenderer":{"contents":[{"itemSectionRenderer":{"contents":[{"videoRenderer":{"videoId":"trt1LiveVid01","title":{"runs":[{"text":"TRT 1 Canlı Yayın"}]},"ownerText":{"runs":[{"text":"TRT 1"}]}}}]}}]}}}}};`;
+  const presetTv = await resolveTvInput('', '', {
+    channelId: 'trt1',
+    fetchImpl: async () => ({ ok: true, text: async () => fakeYtSearchHtml })
+  });
+  assert.equal(presetTv.ok, true);
+  assert.equal(presetTv.tv.channelId, 'trt1');
+  assert.equal(presetTv.tv.videoId, 'trt1LiveVid01');
+  assert.equal(presetTv.tv.isLive, true);
+
+  const setRes = rm.setRoomTv({ roomCode: code, playerId: 'h1', tvPayload: presetTv.tv });
+  assert.equal(setRes.ok, true);
+  assert.equal(setRes.tv.updatedBy, 'Efe');
+  assert.equal(io.emitted.some((e) => e.event === 'room:tv' && e.target === 'player:p2' && e.payload?.videoId === 'trt1LiveVid01'), true);
+
+  const stopRes = rm.stopRoomTv({ roomCode: code, playerId: 'p2' });
+  assert.equal(stopRes.ok, true);
+  assert.equal(created.room.tv, null);
+  assert.equal(io.emitted.some((e) => e.event === 'room:tv' && e.target === 'player:h1' && e.payload === null), true);
+
+  // Sip drink without order fails
+  assert.equal(rm.sipDrink({ roomCode: code, playerId: 'h1' }).ok, false);
+
+  // Order tea -> sipsRemaining = 4, sip 4 times -> 0 -> refill
+  const ordRes = rm.orderTreat({ roomCode: code, playerId: 'h1', itemId: 'cay', target: 'self' });
+  assert.equal(ordRes.ok, true);
+  assert.equal(ordRes.orders[0].drink.sipsRemaining, 4);
+  assert.equal(ordRes.socialStats[0].treatsOrdered, 1);
+
+  for (let expected = 3; expected >= 0; expected -= 1) {
+    const sRes = rm.sipDrink({ roomCode: code, playerId: 'h1' });
+    assert.equal(sRes.ok, true);
+    assert.equal(sRes.action, 'sip');
+    assert.equal(sRes.sipsRemaining, expected);
+  }
+  assert.equal(created.room.socialStats[0].sipsTaken, 4);
+
+  const refillRes = rm.sipDrink({ roomCode: code, playerId: 'h1' });
+  assert.equal(refillRes.ok, true);
+  assert.equal(refillRes.action, 'refill');
+  assert.equal(refillRes.sipsRemaining, 4);
+  assert.equal(created.room.socialStats[0].treatsOrdered, 2);
+
+  // Petting cats increments catsPetted and broadcasts room:catPetted
+  assert.equal(rm.petCat({ roomCode: code, playerId: 'p2', catIndex: 99 }).ok, false);
+  const petRes = rm.petCat({ roomCode: code, playerId: 'p2', catIndex: 2 });
+  assert.equal(petRes.ok, true);
+  assert.equal(petRes.payload.cat.name, 'Kömür');
+  assert.equal(petRes.payload.socialStats[1].catsPetted, 1);
+  assert.equal(io.emitted.some((e) => e.event === 'room:catPetted' && e.target === 'player:h1' && e.payload.catIndex === 2), true);
+});

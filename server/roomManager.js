@@ -1,5 +1,5 @@
 import { createEmptyOrders, KAHVE_MENU_MAP } from '../shared/menu.js';
-import { buildYouTubeEmbedUrl, parseMusicUrl } from '../shared/music.js';
+import { buildYouTubeEmbedUrl, parseMusicUrl, summarizeMusicQueue } from '../shared/music.js';
 import {
   isPresetAvatar,
   pickRandomBotAvatar,
@@ -531,7 +531,8 @@ export class RoomManager {
         queueIndex: room.musicQueueIndex,
         queueTotal: room.musicQueue.length,
         hasNext: room.musicQueueIndex + 1 < room.musicQueue.length,
-        autoplayEnabled: Boolean(room.musicAutoplay)
+        autoplayEnabled: Boolean(room.musicAutoplay),
+        queueItems: summarizeMusicQueue(room.musicQueue, room.musicQueueIndex)
       };
       this.broadcastRoomMusic(room);
       return { ok: true, music: room.music, queuedCount: toAdd.length };
@@ -552,7 +553,8 @@ export class RoomManager {
       queueIndex: 0,
       queueTotal: room.musicQueue.length,
       hasNext: room.musicQueue.length > 1,
-      autoplayEnabled: Boolean(room.musicAutoplay)
+      autoplayEnabled: Boolean(room.musicAutoplay),
+      queueItems: summarizeMusicQueue(room.musicQueue, 0)
     };
 
     this.broadcastRoomMusic(room);
@@ -611,7 +613,8 @@ export class RoomManager {
     if (room.music) {
       room.music = {
         ...room.music,
-        autoplayEnabled: room.musicAutoplay
+        autoplayEnabled: room.musicAutoplay,
+        queueItems: summarizeMusicQueue(room.musicQueue, room.musicQueueIndex)
       };
       this.broadcastRoomMusic(room);
     }
@@ -638,7 +641,7 @@ export class RoomManager {
       const candidate = queue[nextIdx];
       const resolvedTrack = await resolveQueuedTrack(candidate, { fetchImpl });
       if (resolvedTrack) {
-        queue[nextIdx] = resolvedTrack;
+        queue[nextIdx] = { ...resolvedTrack, updatedBy: candidate.updatedBy || seat.name || 'Oyuncu' };
         room.musicQueueIndex = nextIdx;
         this.recordMusicHistory(room, resolvedTrack);
         room.music = {
@@ -648,7 +651,8 @@ export class RoomManager {
           queueIndex: nextIdx,
           queueTotal: queue.length,
           hasNext: nextIdx + 1 < queue.length,
-          autoplayEnabled: Boolean(room.musicAutoplay)
+          autoplayEnabled: Boolean(room.musicAutoplay),
+          queueItems: summarizeMusicQueue(queue, nextIdx)
         };
         this.broadcastRoomMusic(room);
         return { ok: true, music: room.music };
@@ -678,7 +682,8 @@ export class RoomManager {
           queueIndex: room.musicQueueIndex,
           queueTotal: queue.length,
           hasNext: false,
-          autoplayEnabled: true
+          autoplayEnabled: true,
+          queueItems: summarizeMusicQueue(queue, room.musicQueueIndex)
         };
         this.broadcastRoomMusic(room);
         return { ok: true, music: room.music };
@@ -690,6 +695,137 @@ export class RoomManager {
     room.musicQueueIndex = 0;
     this.broadcastRoomMusic(room);
     return { ok: true, music: null };
+  }
+
+  async jumpMusicQueue({ roomCode, playerId, index, fetchImpl }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
+    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+
+    const queue = Array.isArray(room.musicQueue) ? room.musicQueue : [];
+    const targetIdx = Number(index);
+    if (!Number.isInteger(targetIdx) || targetIdx < 0 || targetIdx >= queue.length) {
+      return { ok: false, error: 'Geçersiz sıra numarası.' };
+    }
+
+    const candidate = queue[targetIdx];
+    const resolvedTrack = await resolveQueuedTrack(candidate, { fetchImpl });
+    if (!resolvedTrack) {
+      return { ok: false, error: 'Seçilen parça şu an başlatılamadı.' };
+    }
+
+    queue[targetIdx] = { ...resolvedTrack, updatedBy: candidate.updatedBy || seat.name || 'Oyuncu' };
+    room.musicQueueIndex = targetIdx;
+    this.recordMusicHistory(room, resolvedTrack);
+    room.music = {
+      ...resolvedTrack,
+      updatedBy: candidate.updatedBy || seat.name || 'Oyuncu',
+      updatedAt: Date.now(),
+      queueIndex: targetIdx,
+      queueTotal: queue.length,
+      hasNext: targetIdx + 1 < queue.length,
+      autoplayEnabled: Boolean(room.musicAutoplay),
+      queueItems: summarizeMusicQueue(queue, targetIdx)
+    };
+    this.broadcastRoomMusic(room);
+    return { ok: true, music: room.music };
+  }
+
+  async removeMusicQueueItem({ roomCode, playerId, index, fetchImpl }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
+    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+
+    const queue = Array.isArray(room.musicQueue) ? room.musicQueue : [];
+    const targetIdx = Number(index);
+    if (!Number.isInteger(targetIdx) || targetIdx < 0 || targetIdx >= queue.length) {
+      return { ok: false, error: 'Geçersiz sıra numarası.' };
+    }
+
+    const removingCurrent = targetIdx === room.musicQueueIndex;
+    queue.splice(targetIdx, 1);
+
+    if (queue.length === 0) {
+      room.music = null;
+      room.musicQueue = [];
+      room.musicQueueIndex = 0;
+      this.broadcastRoomMusic(room);
+      return { ok: true, music: null };
+    }
+
+    if (!removingCurrent) {
+      if (targetIdx < room.musicQueueIndex) {
+        room.musicQueueIndex = Math.max(0, room.musicQueueIndex - 1);
+      }
+      if (room.music) {
+        room.music = {
+          ...room.music,
+          queueIndex: room.musicQueueIndex,
+          queueTotal: queue.length,
+          hasNext: room.musicQueueIndex + 1 < queue.length,
+          queueItems: summarizeMusicQueue(queue, room.musicQueueIndex)
+        };
+      }
+      this.broadcastRoomMusic(room);
+      return { ok: true, music: room.music };
+    }
+
+    let playIdx = Math.min(targetIdx, queue.length - 1);
+    while (playIdx < queue.length) {
+      const candidate = queue[playIdx];
+      const resolvedTrack = await resolveQueuedTrack(candidate, { fetchImpl });
+      if (resolvedTrack) {
+        queue[playIdx] = { ...resolvedTrack, updatedBy: candidate.updatedBy || seat.name || 'Oyuncu' };
+        room.musicQueueIndex = playIdx;
+        this.recordMusicHistory(room, resolvedTrack);
+        room.music = {
+          ...resolvedTrack,
+          updatedBy: candidate.updatedBy || seat.name || 'Oyuncu',
+          updatedAt: Date.now(),
+          queueIndex: playIdx,
+          queueTotal: queue.length,
+          hasNext: playIdx + 1 < queue.length,
+          autoplayEnabled: Boolean(room.musicAutoplay),
+          queueItems: summarizeMusicQueue(queue, playIdx)
+        };
+        this.broadcastRoomMusic(room);
+        return { ok: true, music: room.music };
+      }
+      playIdx += 1;
+    }
+
+    room.music = null;
+    room.musicQueue = [];
+    room.musicQueueIndex = 0;
+    this.broadcastRoomMusic(room);
+    return { ok: true, music: null };
+  }
+
+  clearUpcomingMusicQueue({ roomCode, playerId }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
+    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+
+    const queue = Array.isArray(room.musicQueue) ? room.musicQueue : [];
+    if (!room.music || queue.length === 0) {
+      return { ok: true, music: room.music };
+    }
+
+    const active = queue[room.musicQueueIndex] || { ...room.music };
+    room.musicQueue = [active];
+    room.musicQueueIndex = 0;
+    room.music = {
+      ...room.music,
+      queueIndex: 0,
+      queueTotal: 1,
+      hasNext: false,
+      queueItems: summarizeMusicQueue(room.musicQueue, 0)
+    };
+    this.broadcastRoomMusic(room);
+    return { ok: true, music: room.music };
   }
 
   switchMusicFallback({ roomCode, playerId, currentKey = '' }) {
@@ -715,7 +851,8 @@ export class RoomManager {
       videoId: nextVideoId,
       fallbackVideoIds: fallbacks,
       embedUrl: buildYouTubeEmbedUrl(nextVideoId),
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      queueItems: summarizeMusicQueue(room.musicQueue, room.musicQueueIndex)
     };
     this.recordMusicHistory(room, room.music);
     this.broadcastRoomMusic(room);

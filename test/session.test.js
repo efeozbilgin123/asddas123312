@@ -1624,5 +1624,51 @@ test('formatMusicPlayerDisplay separates track title from explicit Serhat Canikl
   assert.equal(pausedDisplay.statusText, 'duraklatıldı · İsteyen: Arhan');
 });
 
+test('LocalSingleplayerClient supports queueing URLs and queue jump/remove/clear controls', (ctx) => {
+  const client = new LocalSingleplayerClient({
+    playerName: 'Efe',
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
+    onState: () => {}
+  });
+  ctx.after(() => client.destroy());
+
+  let res1 = null;
+  client.action('room:musicSet', { url: 'https://youtu.be/dQw4w9WgXcQ', title: 'Birinci' }, (r) => { res1 = r; });
+  assert.equal(res1.ok, true);
+  assert.equal(res1.music.queueTotal, 1);
+
+  let res2 = null;
+  client.action('room:musicSet', { url: 'https://youtu.be/9bZkp7q19f0', title: 'İkinci', mode: 'queue' }, (r) => { res2 = r; });
+  assert.equal(res2.ok, true);
+  assert.equal(res2.music.queueTotal, 2);
+  assert.equal(res2.music.title, 'Birinci');
+  assert.equal(res2.music.hasNext, true);
+  assert.deepEqual(res2.music.queueItems.map((q) => q.title), ['Birinci', 'İkinci']);
+
+  let res3 = null;
+  client.action('room:musicSet', { url: 'https://youtu.be/kJQP7kiw5Fk', title: 'Üçüncü', mode: 'queue' }, (r) => { res3 = r; });
+  assert.equal(res3.ok, true);
+  assert.equal(res3.music.queueTotal, 3);
+
+  let jumped = null;
+  client.action('room:musicQueueJump', { index: 2 }, (r) => { jumped = r; });
+  assert.equal(jumped.ok, true);
+  assert.equal(jumped.music.title, 'Üçüncü');
+  assert.equal(jumped.music.queueIndex, 2);
+
+  let removed = null;
+  client.action('room:musicQueueRemove', { index: 0 }, (r) => { removed = r; });
+  assert.equal(removed.ok, true);
+  assert.equal(removed.music.queueIndex, 1);
+  assert.equal(removed.music.queueTotal, 2);
+
+  let cleared = null;
+  client.action('room:musicQueueClear', {}, (r) => { cleared = r; });
+  assert.equal(cleared.ok, true);
+  assert.equal(cleared.music.queueTotal, 1);
+  assert.equal(cleared.music.title, 'Üçüncü');
+});
+
+
 
 

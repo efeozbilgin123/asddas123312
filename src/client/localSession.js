@@ -1,6 +1,6 @@
 import { GameSession } from '../../shared/gameSession.js';
 import { createEmptyOrders, KAHVE_MENU_MAP } from '../../shared/menu.js';
-import { buildYouTubeEmbedUrl, parseMusicUrl } from '../../shared/music.js';
+import { buildYouTubeEmbedUrl, parseMusicUrl, summarizeMusicQueue } from '../../shared/music.js';
 import { pickRandomBotAvatar, pickRandomBotName } from '../../shared/presets.js';
 
 export class LocalSingleplayerClient {
@@ -130,9 +130,10 @@ export class LocalSingleplayerClient {
         const resolved = data?.resolvedPayload;
         const mode = data?.mode === 'queue' ? 'queue' : 'replace';
         if (resolved?.ok && resolved.track) {
-          const incoming = Array.isArray(resolved.queue) && resolved.queue.length > 0
+          const incoming = (Array.isArray(resolved.queue) && resolved.queue.length > 0
             ? resolved.queue
-            : [resolved.track];
+            : [resolved.track]
+          ).map((t) => ({ ...t, updatedBy: this.playerName }));
           if (mode === 'queue' && this.music && this.musicQueue.length > 0) {
             const cap = Math.max(0, 30 - this.musicQueue.length);
             this.musicQueue.push(...incoming.slice(0, cap));
@@ -141,7 +142,8 @@ export class LocalSingleplayerClient {
               queueIndex: this.musicQueueIndex,
               queueTotal: this.musicQueue.length,
               hasNext: this.musicQueueIndex + 1 < this.musicQueue.length,
-              autoplayEnabled: Boolean(this.musicAutoplay)
+              autoplayEnabled: Boolean(this.musicAutoplay),
+              queueItems: summarizeMusicQueue(this.musicQueue, this.musicQueueIndex)
             };
           } else {
             this.musicQueue = incoming.slice(0, 30);
@@ -154,7 +156,8 @@ export class LocalSingleplayerClient {
               queueIndex: 0,
               queueTotal: this.musicQueue.length,
               hasNext: this.musicQueue.length > 1,
-              autoplayEnabled: Boolean(this.musicAutoplay)
+              autoplayEnabled: Boolean(this.musicAutoplay),
+              queueItems: summarizeMusicQueue(this.musicQueue, 0)
             };
           }
           this.emitRoomState();
@@ -167,18 +170,34 @@ export class LocalSingleplayerClient {
           res = parsed;
         } else if (parsed.needsResolution) {
           res = { ok: false, error: 'Spotify veya şarkı araması için sunucu bağlantısı gerekiyor.' };
-        } else {
-          this.musicQueue = [parsed];
-          this.musicQueueIndex = 0;
-          this.recordMusicHistory(parsed);
+        } else if (mode === 'queue' && this.music && this.musicQueue.length > 0) {
+          if (this.musicQueue.length < 30) {
+            this.musicQueue.push({ ...parsed, updatedBy: this.playerName });
+          }
           this.music = {
-            ...parsed,
+            ...this.music,
+            queueIndex: this.musicQueueIndex,
+            queueTotal: this.musicQueue.length,
+            hasNext: this.musicQueueIndex + 1 < this.musicQueue.length,
+            autoplayEnabled: Boolean(this.musicAutoplay),
+            queueItems: summarizeMusicQueue(this.musicQueue, this.musicQueueIndex)
+          };
+          this.emitRoomState();
+          res = { ok: true, music: this.music };
+        } else {
+          const item = { ...parsed, updatedBy: this.playerName };
+          this.musicQueue = [item];
+          this.musicQueueIndex = 0;
+          this.recordMusicHistory(item);
+          this.music = {
+            ...item,
             updatedBy: this.playerName,
             updatedAt: Date.now(),
             queueIndex: 0,
             queueTotal: 1,
             hasNext: false,
-            autoplayEnabled: Boolean(this.musicAutoplay)
+            autoplayEnabled: Boolean(this.musicAutoplay),
+            queueItems: summarizeMusicQueue(this.musicQueue, 0)
           };
           this.emitRoomState();
           res = { ok: true, music: this.music };
@@ -190,7 +209,8 @@ export class LocalSingleplayerClient {
         if (this.music) {
           this.music = {
             ...this.music,
-            autoplayEnabled: this.musicAutoplay
+            autoplayEnabled: this.musicAutoplay,
+            queueItems: summarizeMusicQueue(this.musicQueue, this.musicQueueIndex)
           };
           this.emitRoomState();
         }
@@ -226,7 +246,8 @@ export class LocalSingleplayerClient {
                 queueIndex: this.musicQueueIndex,
                 queueTotal: this.musicQueue.length,
                 hasNext: false,
-                autoplayEnabled: true
+                autoplayEnabled: true,
+                queueItems: summarizeMusicQueue(this.musicQueue, this.musicQueueIndex)
               };
               this.emitRoomState();
               res = { ok: true, music: this.music };
@@ -244,22 +265,130 @@ export class LocalSingleplayerClient {
           res = { ok: true, music: null };
           break;
         }
-        const nextTrack = data?.resolvedTrack || this.musicQueue[nextIdx];
+        const candidate = this.musicQueue[nextIdx];
+        const nextTrack = data?.resolvedTrack || candidate;
         if (!nextTrack?.embedUrl) {
           res = { ok: false, needsResolveItem: nextTrack, nextIndex: nextIdx };
           break;
         }
-        this.musicQueue[nextIdx] = nextTrack;
+        const trackWithOwner = { ...nextTrack, updatedBy: candidate?.updatedBy || nextTrack.updatedBy || this.playerName };
+        this.musicQueue[nextIdx] = trackWithOwner;
         this.musicQueueIndex = nextIdx;
-        this.recordMusicHistory(nextTrack);
+        this.recordMusicHistory(trackWithOwner);
         this.music = {
-          ...nextTrack,
-          updatedBy: nextTrack.updatedBy || this.playerName,
+          ...trackWithOwner,
           updatedAt: Date.now(),
           queueIndex: nextIdx,
           queueTotal: this.musicQueue.length,
           hasNext: nextIdx + 1 < this.musicQueue.length,
-          autoplayEnabled: Boolean(this.musicAutoplay)
+          autoplayEnabled: Boolean(this.musicAutoplay),
+          queueItems: summarizeMusicQueue(this.musicQueue, nextIdx)
+        };
+        this.emitRoomState();
+        res = { ok: true, music: this.music };
+        break;
+      }
+      case 'room:musicQueueJump': {
+        const targetIdx = Number(data?.index);
+        if (!Number.isInteger(targetIdx) || targetIdx < 0 || targetIdx >= this.musicQueue.length) {
+          res = { ok: false, error: 'Geçersiz sıra numarası.' };
+          break;
+        }
+        const candidate = this.musicQueue[targetIdx];
+        const targetTrack = data?.resolvedTrack || candidate;
+        if (!targetTrack?.embedUrl) {
+          res = { ok: false, needsResolveItem: targetTrack, targetIndex: targetIdx };
+          break;
+        }
+        const trackWithOwner = { ...targetTrack, updatedBy: candidate?.updatedBy || targetTrack.updatedBy || this.playerName };
+        this.musicQueue[targetIdx] = trackWithOwner;
+        this.musicQueueIndex = targetIdx;
+        this.recordMusicHistory(trackWithOwner);
+        this.music = {
+          ...trackWithOwner,
+          updatedAt: Date.now(),
+          queueIndex: targetIdx,
+          queueTotal: this.musicQueue.length,
+          hasNext: targetIdx + 1 < this.musicQueue.length,
+          autoplayEnabled: Boolean(this.musicAutoplay),
+          queueItems: summarizeMusicQueue(this.musicQueue, targetIdx)
+        };
+        this.emitRoomState();
+        res = { ok: true, music: this.music };
+        break;
+      }
+      case 'room:musicQueueRemove': {
+        const targetIdx = Number(data?.index);
+        if (!Number.isInteger(targetIdx) || targetIdx < 0 || targetIdx >= this.musicQueue.length) {
+          res = { ok: false, error: 'Geçersiz sıra numarası.' };
+          break;
+        }
+        const removingCurrent = targetIdx === this.musicQueueIndex;
+        if (removingCurrent) {
+          const previewLen = this.musicQueue.length - 1;
+          if (previewLen > 0) {
+            const nextPlayIdx = Math.min(targetIdx, previewLen - 1);
+            const candidate = nextPlayIdx >= targetIdx ? this.musicQueue[nextPlayIdx + 1] : this.musicQueue[nextPlayIdx];
+            const resolved = data?.resolvedTrack || candidate;
+            if (!resolved?.embedUrl) {
+              res = { ok: false, needsResolveItem: resolved, targetIndex: targetIdx };
+              break;
+            }
+            this.musicQueue.splice(targetIdx, 1);
+            const trackWithOwner = { ...resolved, updatedBy: candidate?.updatedBy || resolved.updatedBy || this.playerName };
+            this.musicQueue[nextPlayIdx] = trackWithOwner;
+            this.musicQueueIndex = nextPlayIdx;
+            this.recordMusicHistory(trackWithOwner);
+            this.music = {
+              ...trackWithOwner,
+              updatedAt: Date.now(),
+              queueIndex: nextPlayIdx,
+              queueTotal: this.musicQueue.length,
+              hasNext: nextPlayIdx + 1 < this.musicQueue.length,
+              autoplayEnabled: Boolean(this.musicAutoplay),
+              queueItems: summarizeMusicQueue(this.musicQueue, nextPlayIdx)
+            };
+          } else {
+            this.musicQueue = [];
+            this.musicQueueIndex = 0;
+            this.music = null;
+          }
+          this.emitRoomState();
+          res = { ok: true, music: this.music };
+          break;
+        }
+
+        this.musicQueue.splice(targetIdx, 1);
+        if (targetIdx < this.musicQueueIndex) {
+          this.musicQueueIndex = Math.max(0, this.musicQueueIndex - 1);
+        }
+        if (this.music) {
+          this.music = {
+            ...this.music,
+            queueIndex: this.musicQueueIndex,
+            queueTotal: this.musicQueue.length,
+            hasNext: this.musicQueueIndex + 1 < this.musicQueue.length,
+            queueItems: summarizeMusicQueue(this.musicQueue, this.musicQueueIndex)
+          };
+        }
+        this.emitRoomState();
+        res = { ok: true, music: this.music };
+        break;
+      }
+      case 'room:musicQueueClear': {
+        if (!this.music || this.musicQueue.length === 0) {
+          res = { ok: true, music: this.music };
+          break;
+        }
+        const active = this.musicQueue[this.musicQueueIndex] || { ...this.music };
+        this.musicQueue = [active];
+        this.musicQueueIndex = 0;
+        this.music = {
+          ...this.music,
+          queueIndex: 0,
+          queueTotal: 1,
+          hasNext: false,
+          queueItems: summarizeMusicQueue(this.musicQueue, 0)
         };
         this.emitRoomState();
         res = { ok: true, music: this.music };
@@ -276,7 +405,8 @@ export class LocalSingleplayerClient {
             videoId: nextId,
             fallbackVideoIds: fallbacks,
             embedUrl: buildYouTubeEmbedUrl(nextId),
-            updatedAt: Date.now()
+            updatedAt: Date.now(),
+            queueItems: summarizeMusicQueue(this.musicQueue, this.musicQueueIndex)
           };
           this.recordMusicHistory(this.music);
           this.emitRoomState();

@@ -1173,6 +1173,148 @@ body {
   pointer-events: none;
 }
 
+.music-queue {
+  display: grid;
+  gap: var(--space-xs);
+  padding-top: var(--space-xs);
+  border-top: 1px solid var(--color-rule);
+}
+
+.music-queue[hidden] {
+  display: none;
+}
+
+.music-queue--dialog {
+  margin-top: var(--space-md);
+  padding-top: var(--space-md);
+}
+
+.music-queue__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+}
+
+.music-queue__title {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--color-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.music-queue__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+.music-queue__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  max-height: 210px;
+  overflow-y: auto;
+}
+
+.music-queue__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xs);
+  padding: 5px 8px;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--color-rule);
+  background: var(--color-card);
+  min-width: 0;
+}
+
+.music-queue__item.is-current {
+  border-color: var(--color-mint);
+  background: var(--color-mint-deep);
+}
+
+.music-queue__play {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.music-queue__play:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.music-queue__idx {
+  width: 18px;
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--color-muted);
+  text-align: center;
+}
+
+.music-queue__item.is-current .music-queue__idx {
+  color: var(--color-mint);
+}
+
+.music-queue__meta {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.music-queue__name {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--color-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.music-queue__sub {
+  font-size: 0.68rem;
+  color: var(--color-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.music-queue__remove {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--color-rule);
+  border-radius: 6px;
+  background: var(--color-paper-2);
+  color: var(--color-ink-2);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.music-queue__remove:hover {
+  border-color: var(--color-accent-3);
+  color: var(--color-ink);
+}
+
 /* Kahvehane Orders Dialog */
 .order-toolbar {
   display: flex;

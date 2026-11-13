@@ -224,3 +224,83 @@ test('RoomManager accepts all 16 preset avatars and selects unique bot names fro
   }
 });
 
+test('RoomManager exposes music queueItems and supports jump, remove, and clear upcoming tracks', async () => {
+  const io = createMockIo();
+  const rm = new RoomManager(io);
+  const created = rm.createRoom({
+    playerId: 'h1',
+    playerName: 'Efe',
+    roomName: 'Müzik Odası'
+  });
+  const code = created.room.code;
+
+  const first = rm.setRoomMusic({
+    roomCode: code,
+    playerId: 'h1',
+    url: 'https://youtu.be/dQw4w9WgXcQ',
+    title: 'İlk Şarkı'
+  });
+  assert.equal(first.ok, true);
+  assert.equal(first.music.queueItems.length, 1);
+  assert.equal(first.music.queueItems[0].isCurrent, true);
+
+  const second = rm.setRoomMusic({
+    roomCode: code,
+    playerId: 'h1',
+    url: 'https://youtu.be/9bZkp7q19f0',
+    title: 'İkinci Şarkı',
+    mode: 'queue'
+  });
+  assert.equal(second.ok, true);
+  assert.equal(second.music.queueTotal, 2);
+
+  const third = rm.setRoomMusic({
+    roomCode: code,
+    playerId: 'h1',
+    url: 'https://youtu.be/kJQP7kiw5Fk',
+    title: 'Üçüncü Şarkı',
+    mode: 'queue'
+  });
+  assert.equal(third.ok, true);
+  assert.equal(third.music.queueItems.length, 3);
+  assert.deepEqual(
+    third.music.queueItems.map((x) => [x.title, x.isCurrent]),
+    [['İlk Şarkı', true], ['İkinci Şarkı', false], ['Üçüncü Şarkı', false]]
+  );
+
+  // Jump directly to index 2
+  const jumped = await rm.jumpMusicQueue({ roomCode: code, playerId: 'h1', index: 2 });
+  assert.equal(jumped.ok, true);
+  assert.equal(jumped.music.title, 'Üçüncü Şarkı');
+  assert.equal(jumped.music.queueIndex, 2);
+  assert.equal(jumped.music.queueItems[2].isCurrent, true);
+
+  // Remove index 0 (non-current) shifts queueIndex to 1 without interrupting track 3
+  const removedFirst = await rm.removeMusicQueueItem({ roomCode: code, playerId: 'h1', index: 0 });
+  assert.equal(removedFirst.ok, true);
+  assert.equal(removedFirst.music.title, 'Üçüncü Şarkı');
+  assert.equal(removedFirst.music.queueIndex, 1);
+  assert.equal(removedFirst.music.queueTotal, 2);
+
+  // Remove index 1 (current) switches cleanly to remaining index 0 ('İkinci Şarkı')
+  const removedCur = await rm.removeMusicQueueItem({ roomCode: code, playerId: 'h1', index: 1 });
+  assert.equal(removedCur.ok, true);
+  assert.equal(removedCur.music.title, 'İkinci Şarkı');
+  assert.equal(removedCur.music.queueTotal, 1);
+
+  // Add another track then clear upcoming queue
+  rm.setRoomMusic({
+    roomCode: code,
+    playerId: 'h1',
+    url: 'https://youtu.be/dQw4w9WgXcQ',
+    title: 'Ekstra Şarkı',
+    mode: 'queue'
+  });
+  const cleared = rm.clearUpcomingMusicQueue({ roomCode: code, playerId: 'h1' });
+  assert.equal(cleared.ok, true);
+  assert.equal(cleared.music.queueTotal, 1);
+  assert.equal(cleared.music.title, 'İkinci Şarkı');
+  assert.equal(cleared.music.hasNext, false);
+});
+
+

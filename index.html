@@ -399,12 +399,24 @@
         <div class="music-dock__controls">
           <button type="button" id="music-dock-playpause" class="btn btn--quiet btn--sm" hidden>Duraklat</button>
           <button type="button" id="music-dock-next" class="btn btn--quiet btn--sm" hidden>Sonraki</button>
+          <button type="button" id="music-dock-queue" class="btn btn--quiet btn--sm" aria-expanded="false" aria-controls="music-queue-drawer">Sıra (1)</button>
+          <button type="button" id="music-dock-add" class="btn btn--quiet btn--sm" title="Sıraya yeni şarkı ekle">+ Ekle</button>
           <button type="button" id="music-dock-autoplay" class="btn btn--quiet btn--sm" hidden aria-pressed="true">Oto: Açık</button>
           <input id="music-volume" class="music-volume" type="range" min="0" max="100" value="55" aria-label="Müzik ses seviyesi">
           <a id="music-external-link" class="btn btn--quiet btn--sm" href="#" target="_blank" rel="noopener noreferrer" hidden>Aç</a>
           <button type="button" id="music-dock-toggle" class="btn btn--quiet btn--sm" aria-expanded="false" hidden>Göster</button>
           <button type="button" id="music-dock-stop" class="btn btn--quiet btn--sm">Durdur</button>
         </div>
+      </div>
+      <div id="music-queue-drawer" class="music-queue" hidden>
+        <div class="music-queue__head">
+          <span id="music-queue-summary" class="music-queue__title">Şarkı Sırası</span>
+          <div class="music-queue__actions">
+            <button type="button" id="music-queue-clear" class="btn btn--quiet btn--sm" hidden>Sonrakileri Temizle</button>
+            <button type="button" id="music-queue-add" class="btn btn--quiet btn--sm">+ Parça Ekle</button>
+          </div>
+        </div>
+        <ol id="music-queue-list" class="music-queue__list"></ol>
       </div>
       <div id="music-player-host" class="music-dock__body"></div>
     </aside>
@@ -434,6 +446,13 @@
           <button type="submit" id="btn-music-play" class="btn btn--primary">Odada Çal</button>
         </div>
       </form>
+      <section id="dialog-music-queue-section" class="music-queue music-queue--dialog" hidden aria-label="Şarkı sırası">
+        <div class="music-queue__head">
+          <span id="dialog-music-queue-summary" class="music-queue__title">Şarkı Sırası</span>
+          <button type="button" id="dialog-music-queue-clear" class="btn btn--quiet btn--sm" hidden>Sonrakileri Temizle</button>
+        </div>
+        <ol id="dialog-music-queue-list" class="music-queue__list"></ol>
+      </section>
     </div>
   </dialog>
 

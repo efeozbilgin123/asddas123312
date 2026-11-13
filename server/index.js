@@ -259,6 +259,35 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack(res);
   });
 
+  safeOn('room:musicQueueJump', async (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = await roomManager.jumpMusicQueue({
+      roomCode: code,
+      playerId,
+      index: data?.index
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:musicQueueRemove', async (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = await roomManager.removeMusicQueueItem({
+      roomCode: code,
+      playerId,
+      index: data?.index
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:musicQueueClear', (_data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.clearUpcomingMusicQueue({
+      roomCode: code,
+      playerId
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
   safeOn('room:orderTreat', (data, ack) => {
     const code = roomManager.playerToRoom.get(playerId);
     const res = roomManager.orderTreat({

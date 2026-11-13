@@ -217,4 +217,16 @@ export function formatMusicPlayerDisplay(music, isPaused = false) {
   };
 }
 
+export function summarizeMusicQueue(queue, currentIndex = 0) {
+  if (!Array.isArray(queue) || queue.length === 0) return [];
+  return queue.slice(0, 30).map((item, idx) => ({
+    index: idx,
+    title: item?.title || item?.trackTitle || 'Parça',
+    sourceProvider: item?.sourceProvider || item?.provider || '',
+    updatedBy: item?.updatedBy || 'Serhat Canikli',
+    isCurrent: idx === currentIndex
+  }));
+}
+
+
 

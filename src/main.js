@@ -137,11 +137,18 @@ const els = {
   musicTrackTitle: document.getElementById('music-track-title'),
   musicDockPlayPause: document.getElementById('music-dock-playpause'),
   musicDockNext: document.getElementById('music-dock-next'),
+  musicDockQueue: document.getElementById('music-dock-queue'),
+  musicDockAdd: document.getElementById('music-dock-add'),
   musicDockAutoplay: document.getElementById('music-dock-autoplay'),
   musicVolume: document.getElementById('music-volume'),
   musicExternalLink: document.getElementById('music-external-link'),
   musicDockToggle: document.getElementById('music-dock-toggle'),
   musicDockStop: document.getElementById('music-dock-stop'),
+  musicQueueDrawer: document.getElementById('music-queue-drawer'),
+  musicQueueSummary: document.getElementById('music-queue-summary'),
+  musicQueueClear: document.getElementById('music-queue-clear'),
+  musicQueueAdd: document.getElementById('music-queue-add'),
+  musicQueueList: document.getElementById('music-queue-list'),
   musicPlayerHost: document.getElementById('music-player-host'),
 
   dialogMusic: document.getElementById('dialog-music'),
@@ -152,6 +159,10 @@ const els = {
   btnMusicStop: document.getElementById('btn-music-stop'),
   btnMusicQueue: document.getElementById('btn-music-queue'),
   btnMusicPlay: document.getElementById('btn-music-play'),
+  dialogMusicQueueSection: document.getElementById('dialog-music-queue-section'),
+  dialogMusicQueueSummary: document.getElementById('dialog-music-queue-summary'),
+  dialogMusicQueueClear: document.getElementById('dialog-music-queue-clear'),
+  dialogMusicQueueList: document.getElementById('dialog-music-queue-list'),
 
   dialogOrders: document.getElementById('dialog-orders'),
   orderTarget: document.getElementById('order-target'),
@@ -696,6 +707,153 @@ function handleMusicPlaybackError(expectedKey) {
   });
 }
 
+function jumpMusicQueue(index) {
+  if (!currentRoom || !activeMusicData) return;
+  sendGameAction('room:musicQueueJump', { index }, async (res) => {
+    if (!res?.ok && res?.needsResolveItem && localClient) {
+      const resolvedTrack = await resolveNextOfflineTrackIfNeeded(res.needsResolveItem);
+      if (resolvedTrack) {
+        sendGameAction('room:musicQueueJump', { index, resolvedTrack }, (r2) => {
+          if (r2?.ok) applyRoomMusic(r2.music || null);
+        });
+      }
+      return;
+    }
+    if (res?.ok) {
+      applyRoomMusic(res.music || null);
+    }
+  });
+}
+
+function removeMusicQueueItem(index) {
+  if (!currentRoom || !activeMusicData) return;
+  sendGameAction('room:musicQueueRemove', { index }, async (res) => {
+    if (!res?.ok && res?.needsResolveItem && localClient) {
+      const resolvedTrack = await resolveNextOfflineTrackIfNeeded(res.needsResolveItem);
+      if (resolvedTrack) {
+        sendGameAction('room:musicQueueRemove', { index, resolvedTrack }, (r2) => {
+          if (r2?.ok) applyRoomMusic(r2.music || null);
+        });
+      }
+      return;
+    }
+    if (res?.ok) {
+      applyRoomMusic(res.music || null);
+    }
+  });
+}
+
+function clearUpcomingMusicQueue() {
+  if (!currentRoom || !activeMusicData) return;
+  sendGameAction('room:musicQueueClear', {}, (res) => {
+    if (res?.ok) {
+      applyRoomMusic(res.music || null);
+    }
+  });
+}
+
+function populateQueueListEl(listEl, items) {
+  if (!listEl) return;
+  listEl.innerHTML = '';
+
+  items.forEach((item) => {
+    const li = document.createElement('li');
+    li.className = `music-queue__item${item.isCurrent ? ' is-current' : ''}`;
+
+    const playBtn = document.createElement('button');
+    playBtn.type = 'button';
+    playBtn.className = 'music-queue__play';
+    playBtn.title = item.isCurrent ? 'Şu an çalıyor' : 'Bu parçaya geç';
+    playBtn.addEventListener('click', () => {
+      if (!item.isCurrent) jumpMusicQueue(item.index);
+    });
+
+    const idxSpan = document.createElement('span');
+    idxSpan.className = 'music-queue__idx';
+    idxSpan.textContent = item.isCurrent ? '▶' : String(item.index + 1);
+
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'music-queue__meta';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'music-queue__name';
+    nameSpan.textContent = item.title || 'Parça';
+
+    const subSpan = document.createElement('span');
+    subSpan.className = 'music-queue__sub';
+    const subParts = [];
+    if (item.isCurrent) {
+      subParts.push('Şu an çalıyor');
+    }
+    if (item.updatedBy === 'Serhat Canikli') {
+      subParts.push('Serhat Canikli · Otomatik');
+    } else if (item.updatedBy) {
+      subParts.push(`İsteyen: ${item.updatedBy}`);
+    }
+    subSpan.textContent = subParts.join(' · ') || 'Sırada';
+
+    metaDiv.appendChild(nameSpan);
+    metaDiv.appendChild(subSpan);
+    playBtn.appendChild(idxSpan);
+    playBtn.appendChild(metaDiv);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'music-queue__remove';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Sıradan kaldır';
+    removeBtn.setAttribute('aria-label', `${item.title || 'Parçayı'} sıradan kaldır`);
+    removeBtn.addEventListener('click', () => {
+      removeMusicQueueItem(item.index);
+    });
+
+    li.appendChild(playBtn);
+    li.appendChild(removeBtn);
+    listEl.appendChild(li);
+  });
+}
+
+function renderMusicQueue(music = activeMusicData) {
+  const items = Array.isArray(music?.queueItems) && music.queueItems.length > 0
+    ? music.queueItems
+    : (music ? [{
+        index: 0,
+        title: music.title || 'Oda Müziği',
+        sourceProvider: music.sourceProvider || music.provider || '',
+        updatedBy: music.updatedBy || 'Serhat Canikli',
+        isCurrent: true
+      }] : []);
+
+  const total = items.length;
+  const hasUpcoming = items.some((it, i) => i > (music?.queueIndex || 0));
+
+  if (els.musicDockQueue) {
+    els.musicDockQueue.textContent = total > 0 ? `Sıra (${total})` : 'Sıra';
+    els.musicDockQueue.hidden = total === 0;
+  }
+  if (els.musicQueueSummary) {
+    els.musicQueueSummary.textContent = `Şarkı Sırası (${total})`;
+  }
+  if (els.musicQueueClear) {
+    els.musicQueueClear.hidden = !hasUpcoming && total <= 1;
+  }
+  if (els.dialogMusicQueueSection) {
+    els.dialogMusicQueueSection.hidden = total === 0;
+  }
+  if (els.dialogMusicQueueSummary) {
+    els.dialogMusicQueueSummary.textContent = `Çalma Sırası (${total})`;
+  }
+  if (els.dialogMusicQueueClear) {
+    els.dialogMusicQueueClear.hidden = !hasUpcoming && total <= 1;
+  }
+  if (els.btnMusicQueue) {
+    els.btnMusicQueue.hidden = !music;
+  }
+
+  populateQueueListEl(els.musicQueueList, items);
+  populateQueueListEl(els.dialogMusicQueueList, items);
+}
+
 function applyRoomMusic(music) {
   if (!music || !music.embedUrl) {
     activeMusicKey = null;
@@ -710,7 +868,14 @@ function applyRoomMusic(music) {
       els.musicDock.classList.add('is-minimized');
       els.musicDock.classList.remove('is-paused');
     }
+    if (els.musicQueueDrawer) {
+      els.musicQueueDrawer.hidden = true;
+    }
+    if (els.musicDockQueue) {
+      els.musicDockQueue.setAttribute('aria-expanded', 'false');
+    }
     syncMusicPlayerLabels(null);
+    renderMusicQueue(null);
     if (els.musicDockPlayPause) els.musicDockPlayPause.hidden = true;
     if (els.musicDockNext) els.musicDockNext.hidden = true;
     if (els.musicDockAutoplay) els.musicDockAutoplay.hidden = true;
@@ -755,6 +920,8 @@ function applyRoomMusic(music) {
   if (els.musicDockPlayPause) {
     els.musicDockPlayPause.hidden = !(music.provider === 'youtube' || music.provider === 'soundcloud' || music.kind === 'audio');
   }
+
+  renderMusicQueue(music);
 
   if (key === activeMusicKey) {
     activeMusicData = music;
@@ -1831,23 +1998,27 @@ els.btnSound.addEventListener('click', () => {
 });
 
 // Shared Room Music controls (Serhat Canikli bot style)
-function openMusicDialog() {
+function openMusicDialog({ emptyInput = Boolean(activeMusicData) } = {}) {
   if (!currentRoom) return;
   if (els.musicUrlHelp) els.musicUrlHelp.textContent = '';
   if (els.musicUrlInput) {
-    els.musicUrlInput.value = activeMusicData?.originalUrl || '';
+    els.musicUrlInput.value = emptyInput ? '' : (activeMusicData?.originalUrl || '');
   }
   if (els.musicTitleInput) {
-    els.musicTitleInput.value = activeMusicData?.title || '';
+    els.musicTitleInput.value = emptyInput ? '' : (activeMusicData?.title || '');
   }
   if (els.btnMusicQueue) {
     els.btnMusicQueue.hidden = !activeMusicData;
   }
+  renderMusicQueue(activeMusicData);
   els.dialogMusic?.showModal();
+  if (emptyInput) {
+    els.musicUrlInput?.focus();
+  }
 }
 
-els.btnMusic?.addEventListener('click', openMusicDialog);
-els.btnWaitMusic?.addEventListener('click', openMusicDialog);
+els.btnMusic?.addEventListener('click', () => openMusicDialog());
+els.btnWaitMusic?.addEventListener('click', () => openMusicDialog());
 
 let musicSubmitting = false;
 
@@ -1914,9 +2085,21 @@ async function submitRoomMusic(mode = 'replace') {
         }
         return;
       }
-      if (els.musicUrlHelp) els.musicUrlHelp.textContent = '';
       if (res.music) applyRoomMusic(res.music);
-      if (els.dialogMusic?.open) els.dialogMusic.close();
+      if (mode === 'queue') {
+        if (els.musicUrlInput) els.musicUrlInput.value = '';
+        if (els.musicTitleInput) els.musicTitleInput.value = '';
+        if (els.musicUrlHelp) {
+          const addedCount = Number(res.queuedCount);
+          els.musicUrlHelp.textContent = addedCount > 1
+            ? `${addedCount} parça sıraya eklendi.`
+            : 'Parça sıraya eklendi.';
+        }
+        els.musicUrlInput?.focus();
+      } else {
+        if (els.musicUrlHelp) els.musicUrlHelp.textContent = '';
+        if (els.dialogMusic?.open) els.dialogMusic.close();
+      }
     }
   );
 }
@@ -1975,6 +2158,18 @@ els.musicDockPlayPause?.addEventListener('click', () => {
 els.musicDockNext?.addEventListener('click', () => {
   advanceRoomMusic(activeMusicKey);
 });
+
+els.musicDockQueue?.addEventListener('click', () => {
+  if (!els.musicQueueDrawer) return;
+  const isNowHidden = !els.musicQueueDrawer.hidden;
+  els.musicQueueDrawer.hidden = isNowHidden;
+  els.musicDockQueue.setAttribute('aria-expanded', String(!isNowHidden));
+});
+
+els.musicDockAdd?.addEventListener('click', () => openMusicDialog({ emptyInput: true }));
+els.musicQueueAdd?.addEventListener('click', () => openMusicDialog({ emptyInput: true }));
+els.musicQueueClear?.addEventListener('click', clearUpcomingMusicQueue);
+els.dialogMusicQueueClear?.addEventListener('click', clearUpcomingMusicQueue);
 
 els.musicDockAutoplay?.addEventListener('click', () => {
   if (!currentRoom || !activeMusicData) return;

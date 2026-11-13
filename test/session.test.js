@@ -58,7 +58,7 @@ test('GameSession enforces picked discard usage or return', () => {
   });
 
   session.startRound();
-  const starterDiscard = session.seats[1].hand[0];
+  const starterDiscard = session.seats[1].hand.find((t) => !isOkeyTile(t, session.okeyTarget));
   session.discardTile(1, starterDiscard.id);
 
   // Seat 2 picks left discard

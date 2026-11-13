@@ -76,6 +76,7 @@ const els = {
   btnQuality: document.getElementById('btn-quality'),
   btnSound: document.getElementById('btn-sound'),
   btnRules: document.getElementById('btn-rules'),
+  btnStandUp: document.getElementById('btn-stand-up'),
   btnLeave: document.getElementById('btn-leave'),
 
   viewLobby: document.getElementById('view-lobby'),
@@ -104,6 +105,7 @@ const els = {
 
   joinCodeForm: document.getElementById('join-code-form'),
   joinCode: document.getElementById('join-code'),
+  btnJoinBilliard: document.getElementById('btn-join-billiard'),
   btnJoinSpectator: document.getElementById('btn-join-spectator'),
   joinHelp: document.getElementById('join-help'),
 
@@ -122,6 +124,9 @@ const els = {
   btnWaitTv: document.getElementById('btn-wait-tv'),
   btnCopyCode: document.getElementById('btn-copy-code'),
   waitSeatsGrid: document.getElementById('wait-seats-grid'),
+  waitBilliardPanel: document.getElementById('wait-billiard-panel'),
+  waitBilliardStatus: document.getElementById('wait-billiard-status'),
+  waitBilliardSeats: document.getElementById('wait-billiard-seats'),
   waitHostControls: document.getElementById('wait-host-controls'),
   waitTeamMode: document.getElementById('wait-team-mode'),
   waitKatlamali: document.getElementById('wait-katlamali'),
@@ -133,8 +138,10 @@ const els = {
   waitAmbiancePill: document.getElementById('wait-ambiance-pill'),
   waitSpectators: document.getElementById('wait-spectators'),
   waitStatusMsg: document.getElementById('wait-status-msg'),
+  btnEnter3dHall: document.getElementById('btn-enter-3d-hall'),
   btnStartMatch: document.getElementById('btn-start-match'),
 
+  okeyBottomDock: document.getElementById('okey-bottom-dock'),
   hudRound: document.getElementById('hud-round'),
   hudOkey: document.getElementById('hud-okey'),
   hudSeriesCount: document.getElementById('hud-series-count'),
@@ -144,6 +151,26 @@ const els = {
   gameAlertToast: document.getElementById('game-alert-toast'),
   hudSpeechBubble: document.getElementById('hud-speech-bubble'),
   spectatorBar: document.getElementById('spectator-bar'),
+
+  billiardHud: document.getElementById('billiard-hud'),
+  billiardPlayersBar: document.getElementById('billiard-players-bar'),
+  billiardHudStatus: document.getElementById('billiard-hud-status'),
+  btnBilliardPlace: document.getElementById('btn-billiard-place'),
+  billiardPowerWrap: document.getElementById('billiard-power-wrap'),
+  billiardPower: document.getElementById('billiard-power'),
+  billiardPowerVal: document.getElementById('billiard-power-val'),
+  btnBilliardShoot: document.getElementById('btn-billiard-shoot'),
+  btnBilliardStart: document.getElementById('btn-billiard-start'),
+  btnBilliardBot: document.getElementById('btn-billiard-bot'),
+  btnBilliardStand: document.getElementById('btn-billiard-stand'),
+
+  freeroamHud: document.getElementById('freeroam-hud'),
+  freeroamHint: document.getElementById('freeroam-hint'),
+  freeroamStatus: document.getElementById('freeroam-status'),
+  btnRoamJoinOkey: document.getElementById('btn-roam-join-okey'),
+  btnRoamJoinBilliard: document.getElementById('btn-roam-join-billiard'),
+  btnRoamStartOkey: document.getElementById('btn-roam-start-okey'),
+  btnRoamBackWait: document.getElementById('btn-roam-back-wait'),
 
   stagingBar: document.getElementById('staging-bar'),
   stagingGroups: document.getElementById('staging-groups'),
@@ -393,6 +420,8 @@ let lastRoundModalNumber = 0;
 let lastTurnSeatSeen = null;
 let lastTurnRoundSeen = null;
 let lastWatchSeatRendered = undefined;
+let viewIn3dHall = false;
+let lastMyActivity = null;
 let bannerNotice = '';
 let noticeTimer = null;
 let hudBubbleTimer = null;
@@ -474,7 +503,7 @@ function openCatMenu(catIndex) {
 }
 
 function handleDrinkSip() {
-  if (!currentRoom || currentRoom.isSpectator) return;
+  if (!currentRoom || (currentRoom.myActivity || 'okey') !== 'okey') return;
   sendGameAction('room:orderSip', {}, (res) => {
     if (!res?.ok) {
       if (res?.error) showNotice(res.error, 2600);
@@ -551,6 +580,24 @@ const scene3d = new OkeyTable3D(els.canvas, {
     if (currentRoom && !currentRoom.isSpectator) {
       openTvDialog();
     }
+  },
+  onBilliardAim: (angle, power) => {
+    if (!currentRoom) return;
+    sendGameAction('room:billiardAim', { angle, power });
+  },
+  onBilliardPlaceBall: (x, z) => {
+    if (!currentRoom) return;
+    sendGameAction('room:billiardPlaceBall', { x, z }, (res) => {
+      if (!res?.ok && res?.error) {
+        showNotice(res.error);
+      } else if (els.btnBilliardPlace) {
+        els.btnBilliardPlace.classList.remove('is-active');
+      }
+    });
+  },
+  onFreeroamMove: (payload) => {
+    if (!currentRoom) return;
+    sendGameAction('room:roamMove', payload);
   }
 });
 
@@ -1071,26 +1118,33 @@ function setRoomsRegionState(mode, rooms = []) {
 
       const tdCount = document.createElement('td');
       tdCount.className = 'num';
-      tdCount.textContent = r.spectatorCount > 0
-        ? `${r.humanCount} / 4 · ${r.spectatorCount} izleyici`
-        : `${r.humanCount} / 4`;
+      const bHum = r.billiardHumanCount || 0;
+      const specSuffix = r.spectatorCount > 0 ? ` · ${r.spectatorCount} gezgin` : '';
+      tdCount.textContent = `Okey ${r.humanCount}/4 · Bilardo ${bHum}/2${specSuffix}`;
 
       const tdAct = document.createElement('td');
       tdAct.className = 'room-actions-cell';
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'btn btn--sm';
-      btn.textContent = 'Katıl';
-      btn.disabled = (r.openSeats === 0 && r.status === 'playing') || r.humanCount >= 4;
-      btn.addEventListener('click', () => joinRoomByCode(r.code, { asSpectator: false }));
+      const okeyBtn = document.createElement('button');
+      okeyBtn.type = 'button';
+      okeyBtn.className = 'btn btn--sm';
+      okeyBtn.textContent = 'Okey';
+      okeyBtn.disabled = (r.openSeats === 0 && r.status === 'playing') || r.humanCount >= 4;
+      okeyBtn.addEventListener('click', () => joinRoomByCode(r.code, { activity: 'okey' }));
+
+      const bilBtn = document.createElement('button');
+      bilBtn.type = 'button';
+      bilBtn.className = 'btn btn--quiet btn--sm';
+      bilBtn.textContent = 'Bilardo';
+      bilBtn.disabled = bHum >= 2 || (r.billiardPhase === 'playing' && (r.billiardCount || 0) >= 2 && bHum >= 2);
+      bilBtn.addEventListener('click', () => joinRoomByCode(r.code, { activity: 'billiard' }));
 
       const watchBtn = document.createElement('button');
       watchBtn.type = 'button';
       watchBtn.className = 'btn btn--quiet btn--sm';
-      watchBtn.textContent = 'İzle';
-      watchBtn.addEventListener('click', () => joinRoomByCode(r.code, { asSpectator: true }));
+      watchBtn.textContent = 'Gezin';
+      watchBtn.addEventListener('click', () => joinRoomByCode(r.code, { asSpectator: true, activity: 'spectator' }));
 
-      tdAct.append(btn, watchBtn);
+      tdAct.append(okeyBtn, bilBtn, watchBtn);
 
       tr.append(tdName, tdCode, tdRule, tdCount, tdAct);
       els.roomsTbody.appendChild(tr);
@@ -1147,6 +1201,8 @@ function startSingleplayer() {
   chatUnreadCount = 0;
   updateChatUnreadBadge();
   lastRoundModalNumber = 0;
+  lastMyActivity = null;
+  viewIn3dHall = false;
   stagedGroups = [];
 
   const lobbyOpts = readLobbyOptions();
@@ -1210,7 +1266,7 @@ function createRoom(quickStart) {
   );
 }
 
-function joinRoomByCode(code, { asSpectator = false } = {}) {
+function joinRoomByCode(code, { asSpectator = false, activity = 'auto' } = {}) {
   const name = validatePlayerName();
   if (!name) return;
 
@@ -1233,7 +1289,13 @@ function joinRoomByCode(code, { asSpectator = false } = {}) {
 
   socket.emit(
     'room:join',
-    { roomCode: clean, playerName: name, playerAvatar: selectedAvatar, asSpectator: Boolean(asSpectator) },
+    {
+      roomCode: clean,
+      playerName: name,
+      playerAvatar: selectedAvatar,
+      asSpectator: Boolean(asSpectator),
+      activity
+    },
     (res) => {
       if (!res?.ok) {
         els.joinCode.setAttribute('aria-invalid', 'true');
@@ -2077,14 +2139,297 @@ window.addEventListener('message', (event) => {
   }
 });
 
+function setActiveCameraButton(camPreset) {
+  els.cameraGroup?.querySelectorAll('.seg__btn').forEach((b) => {
+    b.classList.toggle('is-active', b.dataset.cam === camPreset);
+  });
+}
+
+function setCameraPresetAndSync(camPreset) {
+  scene3d.setCameraPreset(camPreset);
+  setActiveCameraButton(camPreset);
+  if (currentRoom) {
+    syncActiveActivityHuds(currentRoom);
+  }
+}
+
+function renderBilliardHud(room) {
+  if (!els.billiardHud || !room) return;
+  const b = room.billiard;
+  const myId = localClient ? 'local-human' : playerId;
+  const mySeatIdx = room.billiardSeatIndex ?? null;
+
+  if (els.billiardPlayersBar) {
+    els.billiardPlayersBar.innerHTML = '';
+    const seats = Array.isArray(b?.seats) ? b.seats : [
+      { seatIndex: 0, type: 'empty', name: 'Bilardo 1' },
+      { seatIndex: 1, type: 'empty', name: 'Bilardo 2' }
+    ];
+    seats.forEach((seat, idx) => {
+      const pill = document.createElement('div');
+      const isTurn = b?.phase === 'playing' && b.currentSeat === idx;
+      const isMine = mySeatIdx === idx || (seat.type === 'human' && seat.playerId === myId);
+      pill.className = `billiard-player-pill${isTurn ? ' is-turn' : ''}${isMine ? ' is-mine' : ''}`;
+
+      const nameEl = document.createElement('span');
+      const baseName = seat.type === 'empty' ? `Boş Koltuk ${idx + 1}` : (seat.name || `Oyuncu ${idx + 1}`);
+      nameEl.textContent = `${baseName}${isMine ? ' (Siz)' : ''}`;
+      pill.appendChild(nameEl);
+
+      const group = seat.group;
+      const groupText = group === 'solids'
+        ? 'Düz (1-7)'
+        : group === 'stripes'
+          ? 'Çizgili (9-15)'
+          : group === 'eight'
+            ? '8-Top'
+            : b?.phase === 'playing'
+              ? 'Açık'
+              : 'Bekliyor';
+      const wins = b?.wins?.[idx] || 0;
+      const badge = document.createElement('span');
+      badge.className = 'pill';
+      badge.textContent = wins > 0 ? `${groupText} · ${wins}G` : groupText;
+      pill.appendChild(badge);
+
+      els.billiardPlayersBar.appendChild(pill);
+    });
+  }
+
+  if (els.billiardHudStatus) {
+    els.billiardHudStatus.textContent = b?.statusMessage || 'Bilardo masası hazır.';
+  }
+
+  const isTurn = scene3d.isMyBilliardTurn();
+  const isHostOrBilliard = Boolean(room.isHost || room.myActivity === 'billiard');
+  const canStart = Boolean(
+    b &&
+      (b.phase === 'waiting' || b.phase === 'gameOver') &&
+      isHostOrBilliard &&
+      b.seats?.some((s) => s.type !== 'empty')
+  );
+  const canToggleBot = Boolean(
+    b &&
+      b.phase !== 'playing' &&
+      isHostOrBilliard &&
+      b.seats?.some((s) => s.type !== 'human')
+  );
+
+  if (els.billiardPowerWrap) els.billiardPowerWrap.hidden = !isTurn;
+  if (els.btnBilliardShoot) {
+    els.btnBilliardShoot.hidden = !isTurn;
+    els.btnBilliardShoot.disabled = Boolean(b?.shotInProgress);
+  }
+  if (els.btnBilliardPlace) {
+    els.btnBilliardPlace.hidden = !(isTurn && b?.ballInHand);
+  }
+  if (els.btnBilliardStart) {
+    els.btnBilliardStart.hidden = !canStart;
+    els.btnBilliardStart.textContent = b?.phase === 'gameOver' ? 'Yeni El Başlat' : 'Bilardo Başlat';
+  }
+  if (els.btnBilliardBot) {
+    els.btnBilliardBot.hidden = !canToggleBot;
+    const hasBot = b?.seats?.some((s) => s.type === 'bot');
+    els.btnBilliardBot.textContent = hasBot ? 'Botu Çıkar' : 'Bot Ekle';
+  }
+  if (els.btnBilliardStand) {
+    const canJoinBilliard =
+      room.myActivity !== 'billiard' &&
+      Boolean(
+        b?.seats?.some(
+          (s) => s.type === 'empty' || (s.type === 'human' && !s.connected) || (b.phase !== 'playing' && s.type === 'bot')
+        )
+      );
+    if (room.myActivity === 'billiard') {
+      els.btnBilliardStand.hidden = false;
+      els.btnBilliardStand.textContent = 'Masadan Kalk';
+    } else if (canJoinBilliard) {
+      els.btnBilliardStand.hidden = false;
+      els.btnBilliardStand.textContent = 'Bilardo Oyna';
+    } else {
+      els.btnBilliardStand.hidden = true;
+    }
+  }
+}
+
+function renderFreeroamHud(room) {
+  if (!els.freeroamHud || !room) return;
+  const okeyHumans = (room.seats || []).filter((s) => s.type === 'human').length;
+  const bSeats = room.billiard?.seats || [];
+  const bHumans = bSeats.filter((s) => s.type === 'human').length;
+  const okeyStatus = room.status === 'playing' ? 'Oyunda' : 'Bekliyor';
+  const bMsg = room.billiard?.statusMessage || 'Hazır';
+
+  if (els.freeroamStatus) {
+    els.freeroamStatus.textContent = `Okey (${okeyStatus}): ${okeyHumans}/4 · Bilardo: ${bHumans}/2 (${bMsg})`;
+  }
+
+  const openOkeySeat = (room.seats || []).some(
+    (s) =>
+      s.type === 'empty' ||
+      (s.type === 'human' && !s.connected) ||
+      (room.status === 'waiting' && s.type === 'bot') ||
+      (room.isLocal && s.type === 'bot')
+  );
+  if (els.btnRoamJoinOkey) {
+    els.btnRoamJoinOkey.hidden = room.myActivity === 'okey' || !openOkeySeat;
+  }
+
+  const openBilliardSeat = bSeats.some(
+    (s) =>
+      s.type === 'empty' ||
+      (s.type === 'human' && !s.connected) ||
+      (room.billiard?.phase !== 'playing' && s.type === 'bot') ||
+      (room.isLocal && s.type === 'bot')
+  );
+  if (els.btnRoamJoinBilliard) {
+    els.btnRoamJoinBilliard.hidden = room.myActivity === 'billiard' || !openBilliardSeat;
+  }
+
+  if (els.btnRoamStartOkey) {
+    els.btnRoamStartOkey.hidden = !(room.status === 'waiting' && room.isHost);
+  }
+  if (els.btnRoamBackWait) {
+    els.btnRoamBackWait.hidden = !(room.status === 'waiting' && room.myActivity === 'okey');
+  }
+}
+
+function syncActiveActivityHuds(room) {
+  if (!room) return;
+  const cam = scene3d.cameraMode;
+  const myAct = room.myActivity || (room.isSpectator ? 'spectator' : 'okey');
+  let showFreeroam = cam === 'freeroam';
+  const showBilliard = !showFreeroam && (cam === 'billiard' || myAct === 'billiard');
+  const showOkey = !showFreeroam && !showBilliard && room.status === 'playing' && Boolean(room.game);
+
+  if (!showFreeroam && !showBilliard && !showOkey) {
+    showFreeroam = true;
+  }
+
+  if (els.okeyBottomDock) els.okeyBottomDock.hidden = !showOkey;
+  if (els.billiardHud) els.billiardHud.hidden = !showBilliard;
+  if (els.freeroamHud) els.freeroamHud.hidden = !showFreeroam;
+
+  if (showBilliard) renderBilliardHud(room);
+  if (showFreeroam) renderFreeroamHud(room);
+
+  if (els.spectatorBar) {
+    if (showOkey && myAct === 'spectator' && room.status === 'playing' && room.game) {
+      renderSpectatorBar(room, room.game);
+    } else {
+      els.spectatorBar.hidden = true;
+    }
+  }
+}
+
+function renderWaitingBilliard(room) {
+  if (!els.waitBilliardSeats || !room) return;
+  const b = room.billiard;
+  const seats = Array.isArray(b?.seats) ? b.seats : [];
+  const myId = localClient ? 'local-human' : playerId;
+  const mySeatIdx = room.billiardSeatIndex ?? null;
+
+  if (els.waitBilliardStatus) {
+    els.waitBilliardStatus.textContent = b?.statusMessage || 'Hazır';
+  }
+
+  els.waitBilliardSeats.innerHTML = '';
+  seats.forEach((seat, idx) => {
+    const isMine = mySeatIdx === idx || (seat.type === 'human' && seat.playerId === myId);
+    const card = document.createElement('div');
+    card.className = `wait-billiard__card${isMine ? ' is-mine' : ''}`;
+
+    const info = document.createElement('div');
+    info.className = 'wait-billiard__info';
+
+    const title = document.createElement('strong');
+    title.textContent =
+      seat.type === 'empty'
+        ? `Bilardo ${idx + 1} koltuğu boş`
+        : `${seat.name}${isMine ? ' (Siz)' : ''}`;
+
+    const sub = document.createElement('span');
+    sub.className = 'wait-seat__role';
+    sub.textContent =
+      seat.type === 'human'
+        ? 'Gerçek oyuncu'
+        : seat.type === 'bot'
+          ? 'Bilardo botu'
+          : '8-Top bilardo koltuğu';
+
+    info.append(title, sub);
+    card.appendChild(info);
+
+    const acts = document.createElement('div');
+    acts.className = 'wait-billiard__actions';
+
+    if (isMine) {
+      const standBtn = document.createElement('button');
+      standBtn.type = 'button';
+      standBtn.className = 'btn btn--quiet btn--sm';
+      standBtn.textContent = 'Masadan Kalk';
+      standBtn.addEventListener('click', () => {
+        sendGameAction('room:billiardLeave', {}, (res) => {
+          if (!res?.ok && els.waitStatusMsg) {
+            els.waitStatusMsg.textContent = res?.error || 'Kalkılamadı.';
+          }
+        });
+      });
+      acts.appendChild(standBtn);
+    } else if (
+      seat.type === 'empty' ||
+      (seat.type === 'human' && !seat.connected) ||
+      (b?.phase !== 'playing' && seat.type === 'bot')
+    ) {
+      const joinBtn = document.createElement('button');
+      joinBtn.type = 'button';
+      joinBtn.className = 'btn btn--primary btn--sm';
+      joinBtn.textContent = 'Bilardo Otur';
+      joinBtn.addEventListener('click', () => {
+        sendGameAction('room:billiardJoin', { seatIndex: idx }, (res) => {
+          if (!res?.ok && els.waitStatusMsg) {
+            els.waitStatusMsg.textContent = res?.error || 'Bilardoya oturulamadı.';
+          } else if (els.waitStatusMsg) {
+            els.waitStatusMsg.textContent = '';
+          }
+        });
+      });
+      acts.appendChild(joinBtn);
+    }
+
+    if ((room.isHost || room.myActivity === 'billiard') && seat.type !== 'human' && b?.phase !== 'playing') {
+      const botBtn = document.createElement('button');
+      botBtn.type = 'button';
+      botBtn.className = 'btn btn--quiet btn--sm';
+      botBtn.textContent = seat.type === 'bot' ? 'Botu Çıkar' : 'Bot Ekle';
+      botBtn.addEventListener('click', () => {
+        sendGameAction('room:billiardToggleBot', { seatIndex: idx }, (res) => {
+          if (!res?.ok && els.waitStatusMsg) {
+            els.waitStatusMsg.textContent = res?.error || 'Bilardo botu güncellenemedi.';
+          }
+        });
+      });
+      acts.appendChild(botBtn);
+    }
+
+    if (acts.childElementCount > 0) {
+      card.appendChild(acts);
+    }
+    els.waitBilliardSeats.appendChild(card);
+  });
+}
+
 function switchView(room) {
   const prevRoom = currentRoom;
   currentRoom = room;
   if (!room) {
     closeCatMenu();
+    viewIn3dHall = false;
+    lastMyActivity = null;
     els.viewLobby.hidden = false;
     els.viewWaiting.hidden = true;
     els.viewGame.hidden = true;
+    if (els.btnStandUp) els.btnStandUp.hidden = true;
     els.btnLeave.hidden = true;
     if (els.btnYazboz) els.btnYazboz.hidden = true;
     if (els.btnChat) {
@@ -2094,6 +2439,9 @@ function switchView(room) {
     if (els.chatDrawer) els.chatDrawer.hidden = true;
     if (els.hudSpeechBubble) els.hudSpeechBubble.hidden = true;
     if (els.spectatorBar) els.spectatorBar.hidden = true;
+    if (els.billiardHud) els.billiardHud.hidden = true;
+    if (els.freeroamHud) els.freeroamHud.hidden = true;
+    if (els.okeyBottomDock) els.okeyBottomDock.hidden = false;
     if (els.waitSpectators) els.waitSpectators.hidden = true;
     if (els.catToast) els.catToast.hidden = true;
     if (els.btnOrders) els.btnOrders.hidden = true;
@@ -2103,9 +2451,7 @@ function switchView(room) {
     els.connBadge.hidden = false;
     els.roomPill.hidden = true;
     els.cameraGroup.hidden = true;
-    els.cameraGroup.querySelectorAll('.seg__btn').forEach((b) => {
-      b.classList.toggle('is-active', b.dataset.cam === 'fp');
-    });
+    setActiveCameraButton('fp');
     stagedGroups = [];
     lastEventIdSeen = 0;
     lastRoundModalNumber = 0;
@@ -2148,6 +2494,9 @@ function switchView(room) {
     applyRoomTv(null);
     applyAmbiancePlayback('none');
     applyRoomAmbianceTrack(null);
+    scene3d.setActivityContext({ myActivity: 'okey', billiardSeatIndex: null, localPlayerId: playerId });
+    scene3d.updateBilliardState(null);
+    scene3d.renderRoamers([], null);
     scene3d.setRoomAtmosphere(els.optAtmosphere?.value || 'rainy');
     scene3d.setRoomOrders(null, 0);
     scene3d.renderGameState(null);
@@ -2157,6 +2506,20 @@ function switchView(room) {
 
   scene3d.setLobbyRooms(lastLobbyRooms, room.code);
 
+  const myActivity = room.myActivity || (room.isSpectator ? 'spectator' : 'okey');
+  const myId = localClient ? 'local-human' : playerId;
+  scene3d.setActivityContext({
+    myActivity,
+    billiardSeatIndex: room.billiardSeatIndex ?? null,
+    localPlayerId: myId
+  });
+  scene3d.updateBilliardState(room.billiard || null);
+  scene3d.renderRoamers(room.roamers || [], room.myRoamerKey || null);
+
+  if (myActivity !== 'okey' || room.status === 'playing') {
+    viewIn3dHall = true;
+  }
+
   if (!prevRoom && room.lastOrder?.id) {
     lastOrderIdSeen = Number(room.lastOrder.id);
   }
@@ -2164,7 +2527,8 @@ function switchView(room) {
     renderOrdersTargetSelect();
   }
 
-  const isSpec = Boolean(room.isSpectator);
+  const isSpec = Boolean(room.isSpectator) || myActivity === 'spectator';
+  if (els.btnStandUp) els.btnStandUp.hidden = myActivity === 'spectator';
   els.btnLeave.hidden = false;
   if (els.btnChat) els.btnChat.hidden = false;
   if (els.btnYazboz) els.btnYazboz.hidden = !room.game;
@@ -2203,18 +2567,31 @@ function switchView(room) {
   applyRoomOrders(room.orders || null, room.lastOrder || null, room.viewerSeatIndex ?? 0);
   syncChatHistory(room.chatHistory, { announceNew: Boolean(prevRoom) });
 
-  if (!isSpec) {
+  if (lastMyActivity !== myActivity) {
+    lastMyActivity = myActivity;
+    lastWatchSeatRendered = myActivity === 'spectator' ? (room.watchSeatIndex ?? null) : undefined;
+    const defaultCam =
+      myActivity === 'billiard'
+        ? 'billiard'
+        : myActivity === 'spectator'
+          ? 'freeroam'
+          : (room.status === 'playing' ? 'fp' : 'table');
+    scene3d.setCameraPreset(defaultCam);
+    setActiveCameraButton(defaultCam);
+  } else if (myActivity !== 'spectator') {
     lastWatchSeatRendered = undefined;
   } else if (room.status === 'playing' && room.watchSeatIndex !== lastWatchSeatRendered) {
+    const hadWatchPrev = lastWatchSeatRendered !== undefined;
     lastWatchSeatRendered = room.watchSeatIndex ?? null;
-    const camPreset = lastWatchSeatRendered == null ? 'table' : 'fp';
-    scene3d.setCameraPreset(camPreset);
-    els.cameraGroup?.querySelectorAll('.seg__btn').forEach((b) => {
-      b.classList.toggle('is-active', b.dataset.cam === camPreset);
-    });
+    if (hadWatchPrev) {
+      const camPreset = lastWatchSeatRendered == null ? 'table' : 'fp';
+      scene3d.setCameraPreset(camPreset);
+      setActiveCameraButton(camPreset);
+    }
   }
 
-  if (room.status === 'waiting') {
+  const showWaitingPanel = room.status === 'waiting' && myActivity === 'okey' && !viewIn3dHall;
+  if (showWaitingPanel) {
     els.viewLobby.hidden = true;
     els.viewWaiting.hidden = false;
     els.viewGame.hidden = true;
@@ -2223,6 +2600,8 @@ function switchView(room) {
     els.roomPill.textContent = `Oda ${room.code}`;
     els.cameraGroup.hidden = true;
     if (els.spectatorBar) els.spectatorBar.hidden = true;
+    if (els.billiardHud) els.billiardHud.hidden = true;
+    if (els.freeroamHud) els.freeroamHud.hidden = true;
     showGameAlert('', 'islek', 0);
     renderWaitingRoom(room);
     scene3d.renderGameState(null);
@@ -2231,9 +2610,23 @@ function switchView(room) {
     els.viewWaiting.hidden = true;
     els.viewGame.hidden = false;
     els.connBadge.hidden = true;
-    els.roomPill.hidden = true;
+    els.roomPill.hidden = room.status === 'playing';
+    if (room.status !== 'playing') {
+      els.roomPill.textContent = `Oda ${room.code}`;
+    }
     els.cameraGroup.hidden = false;
-    renderGameRoom(room);
+    if (room.status === 'playing' && room.game) {
+      renderGameRoom(room);
+    } else {
+      scene3d.renderGameState({
+        phase: 'waiting',
+        seats: room.seats || [],
+        options: room.options,
+        isSpectator: myActivity !== 'okey',
+        viewerSeatIndex: room.viewerSeatIndex ?? 0
+      });
+    }
+    syncActiveActivityHuds(room);
   }
 }
 
@@ -2406,11 +2799,14 @@ function renderWaitingRoom(room) {
       els.waitSpectators.hidden = true;
     }
   }
+
+  renderWaitingBilliard(room);
 }
 
 function renderSpectatorBar(room, game) {
   if (!els.spectatorBar) return;
-  if (!room?.isSpectator) {
+  const myAct = room?.myActivity || (room?.isSpectator ? 'spectator' : 'okey');
+  if (myAct !== 'spectator' || scene3d.cameraMode === 'freeroam' || scene3d.cameraMode === 'billiard') {
     els.spectatorBar.hidden = true;
     els.spectatorBar.innerHTML = '';
     return;
@@ -2431,7 +2827,7 @@ function renderSpectatorBar(room, game) {
   overBtn.className = `btn btn--quiet btn--sm spectator-bar__btn${watchIdx === null ? ' is-active' : ''}`;
   overBtn.textContent = 'Genel Bakış';
   overBtn.addEventListener('click', () => {
-    socket.emit('room:watchSeat', { seatIndex: null }, (res) => {
+    sendGameAction('room:watchSeat', { seatIndex: null }, (res) => {
       if (!res?.ok && res?.error) showNotice(res.error);
     });
   });
@@ -2443,7 +2839,7 @@ function renderSpectatorBar(room, game) {
     seatBtn.className = `btn btn--quiet btn--sm spectator-bar__btn${watchIdx === idx ? ' is-active' : ''}`;
     seatBtn.textContent = seat?.name || `Koltuk ${idx + 1}`;
     seatBtn.addEventListener('click', () => {
-      socket.emit('room:watchSeat', { seatIndex: idx }, (res) => {
+      sendGameAction('room:watchSeat', { seatIndex: idx }, (res) => {
         if (!res?.ok && res?.error) showNotice(res.error);
       });
     });
@@ -2451,7 +2847,7 @@ function renderSpectatorBar(room, game) {
   });
 
   const openSeat = (room.seats || []).some(
-    (s) => s.type === 'empty' || (s.type === 'human' && !s.connected)
+    (s) => s.type === 'empty' || (s.type === 'human' && !s.connected) || (room.isLocal && s.type === 'bot')
   );
   if (openSeat) {
     const takeBtn = document.createElement('button');
@@ -2459,7 +2855,7 @@ function renderSpectatorBar(room, game) {
     takeBtn.className = 'btn btn--primary btn--sm';
     takeBtn.textContent = 'Koltuk Kap';
     takeBtn.addEventListener('click', () => {
-      socket.emit('room:takeSeat', {}, (res) => {
+      sendGameAction('room:takeSeat', {}, (res) => {
         if (!res?.ok && res?.error) showNotice(res.error);
       });
     });
@@ -2471,64 +2867,68 @@ function renderGameRoom(room) {
   const game = room.game;
   if (!game) return;
 
+  const isOkeyPlayer = (room.myActivity || (room.isSpectator ? 'spectator' : 'okey')) === 'okey';
+
   // Handle sound effects & alerts for newly seen event
   if (game.lastEvent && game.lastEvent.id > lastEventIdSeen) {
     lastEventIdSeen = game.lastEvent.id;
     const ev = game.lastEvent;
-    if (ev.type === 'round_start') {
-      soundFX.playTileShuffle();
-      showGameAlert('', 'islek', 0);
-    } else if (ev.type === 'draw_deck' || ev.type === 'draw_discard') {
-      soundFX.playTileFlip();
-    } else if (ev.type === 'return_discard') {
-      soundFX.playFeltSlide();
-    } else if (ev.type === 'open_hand') {
-      soundFX.playOpenHand();
-    } else if (ev.type === 'round_over') {
-      const summary = game.roundSummary;
-      const mult = summary
-        ? (summary.finishedWithOkey ? 2 : 1) * ((summary.finishedFromPairs || summary.finishedFromHand) ? 2 : 1)
-        : 1;
-      soundFX.playRoundWin(mult);
-      if (
-        summary &&
-        summary.winnerSeat !== null &&
-        summary.winnerSeat !== undefined &&
-        !summary.roundCancelled &&
-        !summary.deckExhausted
-      ) {
-        scene3d.triggerWinCelebration({
-          winnerSeat: summary.winnerSeat,
-          viewerSeat: game.viewerSeatIndex,
-          multiplier: mult
-        });
-      }
-      if (els.dialogYazboz?.open) {
-        renderYazbozDialog();
-      }
-    } else if (ev.type === 'discard') {
-      const msgLower = String(ev.message || '').toLowerCase();
-      const alertKind =
-        ev.alertKind ||
-        (msgLower.includes('okey')
-          ? 'okey'
-          : msgLower.includes('işlek') || msgLower.includes('ceza')
-            ? 'islek'
-            : null);
+    if (isOkeyPlayer || scene3d.cameraMode !== 'billiard') {
+      if (ev.type === 'round_start') {
+        soundFX.playTileShuffle();
+        showGameAlert('', 'islek', 0);
+      } else if (ev.type === 'draw_deck' || ev.type === 'draw_discard') {
+        soundFX.playTileFlip();
+      } else if (ev.type === 'return_discard') {
+        soundFX.playFeltSlide();
+      } else if (ev.type === 'open_hand') {
+        soundFX.playOpenHand();
+      } else if (ev.type === 'round_over') {
+        const summary = game.roundSummary;
+        const mult = summary
+          ? (summary.finishedWithOkey ? 2 : 1) * ((summary.finishedFromPairs || summary.finishedFromHand) ? 2 : 1)
+          : 1;
+        soundFX.playRoundWin(mult);
+        if (
+          summary &&
+          summary.winnerSeat !== null &&
+          summary.winnerSeat !== undefined &&
+          !summary.roundCancelled &&
+          !summary.deckExhausted
+        ) {
+          scene3d.triggerWinCelebration({
+            winnerSeat: summary.winnerSeat,
+            viewerSeat: game.viewerSeatIndex,
+            multiplier: mult
+          });
+        }
+        if (els.dialogYazboz?.open) {
+          renderYazbozDialog();
+        }
+      } else if (ev.type === 'discard') {
+        const msgLower = String(ev.message || '').toLowerCase();
+        const alertKind =
+          ev.alertKind ||
+          (msgLower.includes('okey')
+            ? 'okey'
+            : msgLower.includes('işlek') || msgLower.includes('ceza')
+              ? 'islek'
+              : null);
 
-      if (alertKind) {
-        soundFX.playPenalty();
-        const tileText = ev.tile ? ` (${formatTileLabel(ev.tile)})` : '';
-        const alertText = `${ev.message}${tileText}`;
-        showNotice(alertText, 4500);
-        showGameAlert(alertText, alertKind, 4500);
-      } else {
-        soundFX.playTileClack(0.92);
+        if (alertKind) {
+          soundFX.playPenalty();
+          const tileText = ev.tile ? ` (${formatTileLabel(ev.tile)})` : '';
+          const alertText = `${ev.message}${tileText}`;
+          showNotice(alertText, 4500);
+          showGameAlert(alertText, alertKind, 4500);
+        } else {
+          soundFX.playTileClack(0.92);
+        }
+      } else if (ev.type === 'lay_meld' || ev.type === 'layoff') {
+        soundFX.playTileClack(1.08);
       }
-    } else if (ev.type === 'lay_meld' || ev.type === 'layoff') {
-      soundFX.playTileClack(1.08);
     }
-    if (!room.isSpectator && els.dialogSecret.open && !els.secretPanelView.hidden) {
+    if (isOkeyPlayer && els.dialogSecret.open && !els.secretPanelView.hidden) {
       sendGameAction('admin:snapshot', {}, (res) => {
         if (res?.ok && res.snapshot) renderSecretSnapshot(res.snapshot);
       });
@@ -2537,7 +2937,7 @@ function renderGameRoom(room) {
 
   // Soft kahvehane turn bell when turn arrives at viewer
   if (
-    !room.isSpectator &&
+    isOkeyPlayer &&
     game.phase === 'playing' &&
     game.currentSeat === game.viewerSeatIndex &&
     (lastTurnSeatSeen !== game.currentSeat || lastTurnRoundSeen !== game.roundNumber)
@@ -2562,7 +2962,7 @@ function renderGameRoom(room) {
   const viewerIdx = game.viewerSeatIndex;
   const handIds = new Set((game.seats[viewerIdx]?.hand || []).map((t) => t.id));
   stagedGroups = stagedGroups.filter((g) => g.tiles.every((t) => handIds.has(t.id)));
-  if (room.isSpectator || game.seats[viewerIdx]?.opened) {
+  if (!isOkeyPlayer || game.seats[viewerIdx]?.opened) {
     stagedGroups = [];
   }
 
@@ -2570,8 +2970,8 @@ function renderGameRoom(room) {
   updateTurnBanner();
   updateGameControls();
 
-  // Round over modal
-  if (game.phase === 'roundOver' && game.roundSummary && game.roundNumber !== lastRoundModalNumber) {
+  // Round over modal (only auto-popup for Okey players & spectators watching Okey)
+  if (isOkeyPlayer && game.phase === 'roundOver' && game.roundSummary && game.roundNumber !== lastRoundModalNumber) {
     lastRoundModalNumber = game.roundNumber;
     openRoundSummaryDialog(room, game.roundSummary);
   } else if (game.phase === 'playing' && els.dialogRound.open) {
@@ -2588,15 +2988,17 @@ function updateTurnBanner() {
     return;
   }
 
-  if (currentRoom?.isSpectator) {
+  const isObserving =
+    Boolean(currentRoom?.isSpectator) || (currentRoom?.myActivity && currentRoom.myActivity !== 'okey');
+  if (isObserving) {
     if (game.phase === 'roundOver') {
       const baseMsg = game.roundSummary?.message || 'El tamamlandı.';
-      els.hudTurnText.textContent = `${baseMsg} · Yancı modu`;
+      els.hudTurnText.textContent = `${baseMsg} · İzleme modu`;
       return;
     }
     const activeSeat = game.seats[game.currentSeat];
     if (currentRoom.watchSeatIndex === null || currentRoom.watchSeatIndex === undefined) {
-      els.hudTurnText.textContent = `Yancı modu · Genel Bakış · ${activeSeat?.name || 'Oyuncu'} hamle yapıyor.`;
+      els.hudTurnText.textContent = `İzleme modu · Genel Bakış · ${activeSeat?.name || 'Oyuncu'} hamle yapıyor.`;
     } else {
       const watchedSeat = game.seats[currentRoom.watchSeatIndex];
       els.hudTurnText.textContent = `Yancı modu · ${watchedSeat?.name || 'Koltuk'} arkasından izleniyor · ${activeSeat?.name || 'Oyuncu'} hamle yapıyor.`;
@@ -2613,7 +3015,7 @@ function updateTurnBanner() {
   }
 
   const activeSeat = game.seats[game.currentSeat];
-  const isMe = !currentRoom?.isSpectator && game.currentSeat === game.viewerSeatIndex;
+  const isMe = game.currentSeat === game.viewerSeatIndex;
   if (isMe) {
     if (game.turnPhase === 'draw') {
       els.hudTurnText.textContent = 'Sıra sizde: ortadan taş çekin veya solunuzdaki taşı alın.';
@@ -2631,7 +3033,8 @@ function updateGameControls() {
   const game = currentRoom?.game;
   if (!game) return;
 
-  const isSpectator = Boolean(currentRoom?.isSpectator);
+  const isSpectator =
+    Boolean(currentRoom?.isSpectator) || (currentRoom?.myActivity && currentRoom.myActivity !== 'okey');
   if (els.btnSortRuns) els.btnSortRuns.hidden = isSpectator;
   if (els.btnSortPairs) els.btnSortPairs.hidden = isSpectator;
 
@@ -3239,17 +3642,37 @@ els.btnCreateRoom.addEventListener('click', () => createRoom(false));
 
 els.joinCodeForm.addEventListener('submit', (e) => {
   e.preventDefault();
-  joinRoomByCode(els.joinCode.value);
+  joinRoomByCode(els.joinCode.value, { activity: 'okey' });
+});
+els.btnJoinBilliard?.addEventListener('click', () => {
+  joinRoomByCode(els.joinCode.value, { activity: 'billiard' });
 });
 els.btnJoinSpectator?.addEventListener('click', () => {
-  joinRoomByCode(els.joinCode.value, { asSpectator: true });
+  joinRoomByCode(els.joinCode.value, { asSpectator: true, activity: 'spectator' });
 });
 
 els.btnRefreshRooms.addEventListener('click', refreshRooms);
 els.btnRetryRooms.addEventListener('click', refreshRooms);
 
+els.btnStandUp?.addEventListener('click', () => {
+  if (!currentRoom) return;
+  sendGameAction('room:standUp', {}, (res) => {
+    if (!res?.ok && res?.error) showNotice(res.error);
+  });
+});
+
 els.btnLeave.addEventListener('click', leaveCurrentMatch);
 els.btnRoundLeave.addEventListener('click', leaveCurrentMatch);
+
+els.btnEnter3dHall?.addEventListener('click', () => {
+  if (!currentRoom) return;
+  viewIn3dHall = true;
+  if (scene3d.cameraMode === 'fp' || scene3d.cameraMode === 'table') {
+    scene3d.setCameraPreset('freeroam');
+    setActiveCameraButton('freeroam');
+  }
+  switchView(currentRoom);
+});
 
 els.btnCopyCode.addEventListener('click', async () => {
   if (!currentRoom) return;
@@ -3472,10 +3895,102 @@ els.btnDiscardTile.addEventListener('click', () => {
 // Camera Preset Switcher
 els.cameraGroup.querySelectorAll('.seg__btn').forEach((btn) => {
   btn.addEventListener('click', () => {
-    els.cameraGroup.querySelectorAll('.seg__btn').forEach((b) => b.classList.remove('is-active'));
-    btn.classList.add('is-active');
-    scene3d.setCameraPreset(btn.dataset.cam);
+    setCameraPresetAndSync(btn.dataset.cam);
   });
+});
+
+// 8-Ball Billiard HUD Controls
+els.billiardPower?.addEventListener('input', (e) => {
+  const pct = Math.max(15, Math.min(100, Number(e.target.value) || 68));
+  if (els.billiardPowerVal) {
+    els.billiardPowerVal.textContent = `%${pct}`;
+  }
+  scene3d.setBilliardPower(pct / 100);
+});
+
+els.btnBilliardPlace?.addEventListener('click', () => {
+  const nextActive = !els.btnBilliardPlace.classList.contains('is-active');
+  els.btnBilliardPlace.classList.toggle('is-active', nextActive);
+  scene3d.setBilliardPlaceMode(nextActive);
+  if (nextActive) {
+    showNotice('Beyaz topu koymak için bilardo çuhasına tıklayın.', 2600);
+  }
+});
+
+els.btnBilliardShoot?.addEventListener('click', () => {
+  if (!currentRoom) return;
+  const aim = scene3d.getBilliardAim();
+  sendGameAction('room:billiardShoot', { angle: aim.angle, power: aim.power }, (res) => {
+    if (!res?.ok && res?.error) showNotice(res.error);
+  });
+});
+
+els.btnBilliardStart?.addEventListener('click', () => {
+  if (!currentRoom) return;
+  sendGameAction('room:billiardStart', { autoFillBot: true }, (res) => {
+    if (!res?.ok && res?.error) showNotice(res.error);
+  });
+});
+
+els.btnBilliardBot?.addEventListener('click', () => {
+  if (!currentRoom) return;
+  const b = currentRoom.billiard;
+  const botSeat = b?.seats?.find((s) => s.type === 'bot');
+  const emptySeat = b?.seats?.find((s) => s.type === 'empty');
+  const targetIdx = botSeat ? botSeat.seatIndex : (emptySeat ? emptySeat.seatIndex : 1);
+  sendGameAction('room:billiardToggleBot', { seatIndex: targetIdx }, (res) => {
+    if (!res?.ok && res?.error) showNotice(res.error);
+  });
+});
+
+els.btnBilliardStand?.addEventListener('click', () => {
+  if (!currentRoom) return;
+  if (currentRoom.myActivity === 'billiard') {
+    sendGameAction('room:standUp', {}, (res) => {
+      if (!res?.ok && res?.error) showNotice(res.error);
+    });
+  } else {
+    sendGameAction('room:billiardJoin', {}, (res) => {
+      if (!res?.ok && res?.error) showNotice(res.error);
+    });
+  }
+});
+
+// Freeroam HUD Warps & Seat Actions
+els.freeroamHud?.querySelectorAll('[data-warp]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    if (scene3d.cameraMode !== 'freeroam') {
+      setCameraPresetAndSync('freeroam');
+    }
+    scene3d.teleportFreeroam(btn.dataset.warp || 'okey');
+  });
+});
+
+els.btnRoamJoinOkey?.addEventListener('click', () => {
+  if (!currentRoom) return;
+  sendGameAction('room:takeSeat', {}, (res) => {
+    if (!res?.ok && res?.error) showNotice(res.error);
+  });
+});
+
+els.btnRoamJoinBilliard?.addEventListener('click', () => {
+  if (!currentRoom) return;
+  sendGameAction('room:billiardJoin', {}, (res) => {
+    if (!res?.ok && res?.error) showNotice(res.error);
+  });
+});
+
+els.btnRoamStartOkey?.addEventListener('click', () => {
+  if (!currentRoom) return;
+  socket.emit('room:start', {}, (res) => {
+    if (!res?.ok && res?.error) showNotice(res.error);
+  });
+});
+
+els.btnRoamBackWait?.addEventListener('click', () => {
+  if (!currentRoom) return;
+  viewIn3dHall = false;
+  switchView(currentRoom);
 });
 
 // Sound toggle
@@ -3728,15 +4243,18 @@ els.musicVolume?.addEventListener('input', (e) => {
 // Kahvehane Orders controls
 function renderOrdersTargetSelect() {
   if (!els.orderTarget || !currentRoom) return;
-  const prev = els.orderTarget.value || 'self';
+  const isOkeyPlayer = (currentRoom.myActivity || (currentRoom.isSpectator ? 'spectator' : 'okey')) === 'okey';
+  const prev = els.orderTarget.value || (isOkeyPlayer ? 'self' : 'all');
   const mySeatIdx = currentRoom.viewerSeatIndex ?? 0;
 
   els.orderTarget.innerHTML = '';
 
-  const optSelf = document.createElement('option');
-  optSelf.value = 'self';
-  optSelf.textContent = 'Kendime';
-  els.orderTarget.appendChild(optSelf);
+  if (isOkeyPlayer) {
+    const optSelf = document.createElement('option');
+    optSelf.value = 'self';
+    optSelf.textContent = 'Kendime';
+    els.orderTarget.appendChild(optSelf);
+  }
 
   const optAll = document.createElement('option');
   optAll.value = 'all';
@@ -3744,7 +4262,7 @@ function renderOrdersTargetSelect() {
   els.orderTarget.appendChild(optAll);
 
   (currentRoom.seats || []).forEach((seat) => {
-    if (seat.type !== 'empty' && seat.seatIndex !== mySeatIdx) {
+    if (seat.type !== 'empty' && (!isOkeyPlayer || seat.seatIndex !== mySeatIdx)) {
       const opt = document.createElement('option');
       opt.value = String(seat.seatIndex);
       opt.textContent = seat.name || `Koltuk ${seat.seatIndex + 1}`;
@@ -3753,7 +4271,7 @@ function renderOrdersTargetSelect() {
   });
 
   const hasPrev = Array.from(els.orderTarget.options).some((o) => o.value === prev);
-  els.orderTarget.value = hasPrev ? prev : 'self';
+  els.orderTarget.value = hasPrev ? prev : (isOkeyPlayer ? 'self' : 'all');
 }
 
 function renderOrdersMenu() {
@@ -3932,7 +4450,8 @@ function renderYazbozDialog() {
       const th = document.createElement('th');
       th.scope = 'col';
       const teamTag = isPaired ? `[T${(idx % 2) + 1}] ` : '';
-      const selfTag = !currentRoom?.isSpectator && idx === game.viewerSeatIndex ? ' (Siz)' : '';
+      const isOkeyPlayer = (currentRoom?.myActivity || (currentRoom?.isSpectator ? 'spectator' : 'okey')) === 'okey';
+      const selfTag = isOkeyPlayer && idx === game.viewerSeatIndex ? ' (Siz)' : '';
       th.textContent = `${teamTag}${seat?.name || `Koltuk ${idx + 1}`}${selfTag}`;
       tr.appendChild(th);
     });
@@ -4505,8 +5024,8 @@ document.querySelectorAll('[data-close-dialog]').forEach((btn) => {
 
 // Secret Tile Vault (5 rapid taps on wordmark OR Ctrl+Shift+O / Ctrl+Shift+G)
 function openSecretVault() {
-  if (currentRoom?.isSpectator) {
-    showNotice('İzleyici modunda gizli kasa kullanılamaz.');
+  if (!currentRoom || (currentRoom.myActivity || (currentRoom.isSpectator ? 'spectator' : 'okey')) !== 'okey') {
+    showNotice('Gizli kasa yalnızca Okey masasında oturan oyuncu için kullanılabilir.');
     return;
   }
   if (!currentRoom?.game || currentRoom.game.phase !== 'playing') {
@@ -4554,6 +5073,19 @@ els.wordmark.addEventListener('click', (e) => {
   }, 2200);
 });
 
+const FREEROAM_KEY_CODES = new Set([
+  'KeyW',
+  'KeyA',
+  'KeyS',
+  'KeyD',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'ShiftLeft',
+  'ShiftRight'
+]);
+
 window.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key.toLowerCase() === 'o' || e.key.toLowerCase() === 'g')) {
     e.preventDefault();
@@ -4568,7 +5100,17 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (document.querySelector('dialog[open]')) return;
-  if (!currentRoom?.game || currentRoom.status !== 'playing' || currentRoom.isSpectator) {
+
+  if (currentRoom && scene3d.cameraMode === 'freeroam' && FREEROAM_KEY_CODES.has(e.code)) {
+    scene3d.setFreeroamKey(e.code, true);
+    if (e.code.startsWith('Arrow')) {
+      e.preventDefault();
+    }
+    return;
+  }
+
+  const isOkeyPlayer = (currentRoom?.myActivity || (currentRoom?.isSpectator ? 'spectator' : 'okey')) === 'okey';
+  if (!currentRoom?.game || currentRoom.status !== 'playing' || !isOkeyPlayer) {
     return;
   }
 
@@ -4589,6 +5131,16 @@ window.addEventListener('keydown', (e) => {
       els.btnDrawDeck.click();
     }
   }
+});
+
+window.addEventListener('keyup', (e) => {
+  if (FREEROAM_KEY_CODES.has(e.code)) {
+    scene3d.setFreeroamKey(e.code, false);
+  }
+});
+
+window.addEventListener('blur', () => {
+  scene3d.clearFreeroamKeys();
 });
 
 els.secretLockView.addEventListener('submit', (e) => {
@@ -4817,5 +5369,29 @@ socket.on('room:chat', (entry) => {
 socket.on('room:nudge', (nudge) => {
   if (!localClient && currentRoom && nudge) {
     handleIncomingNudge(nudge);
+  }
+});
+
+socket.on('room:billiard', (billiardState) => {
+  if (!localClient && currentRoom) {
+    currentRoom.billiard = billiardState || null;
+    scene3d.updateBilliardState(currentRoom.billiard);
+    if (currentRoom.status === 'waiting') {
+      renderWaitingBilliard(currentRoom);
+    }
+    syncActiveActivityHuds(currentRoom);
+  }
+});
+
+socket.on('room:billiardAim', (aimState) => {
+  if (!localClient && currentRoom) {
+    scene3d.updateRemoteBilliardAim(aimState);
+  }
+});
+
+socket.on('room:roamers', (roamers) => {
+  if (!localClient && currentRoom) {
+    currentRoom.roamers = Array.isArray(roamers) ? roamers : [];
+    scene3d.renderRoamers(currentRoom.roamers, currentRoom.myRoamerKey || null);
   }
 });

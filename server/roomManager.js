@@ -27,6 +27,7 @@ import {
   resolveQueuedTrack,
   resolveTvInput
 } from './musicResolver.js';
+import { BilliardSession } from '../shared/billiardSession.js';
 import { GameSession } from './gameSession.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -84,10 +85,27 @@ export class RoomManager {
     if (seat) {
       return {
         seat,
+        billiardSeat: null,
         spectator: null,
+        activity: 'okey',
         seatIndex: seat.seatIndex,
+        billiardSeatIndex: null,
         name: seat.name || 'Oyuncu',
         avatar: seat.avatar,
+        isSpectator: false
+      };
+    }
+    const bSeat = room.billiard?.findHumanSeat ? room.billiard.findHumanSeat(playerId) : null;
+    if (bSeat) {
+      return {
+        seat: null,
+        billiardSeat: bSeat,
+        spectator: null,
+        activity: 'billiard',
+        seatIndex: null,
+        billiardSeatIndex: bSeat.seatIndex,
+        name: bSeat.name || 'Bilardocu',
+        avatar: bSeat.avatar,
         isSpectator: false
       };
     }
@@ -95,8 +113,11 @@ export class RoomManager {
     if (spec) {
       return {
         seat: null,
+        billiardSeat: null,
         spectator: spec,
+        activity: 'spectator',
         seatIndex: null,
+        billiardSeatIndex: null,
         name: spec.name || 'Yancı',
         avatar: spec.avatar,
         isSpectator: true
@@ -112,6 +133,13 @@ export class RoomManager {
         ids.add(seat.playerId);
       }
     }
+    if (room.billiard?.seats) {
+      for (const bSeat of room.billiard.seats) {
+        if (bSeat.type === 'human' && bSeat.playerId) {
+          ids.add(bSeat.playerId);
+        }
+      }
+    }
     if (room.spectators instanceof Map) {
       for (const spec of room.spectators.values()) {
         if (spec?.playerId) ids.add(spec.playerId);
@@ -120,12 +148,135 @@ export class RoomManager {
     return Array.from(ids);
   }
 
+  getConnectedHumanIds(room) {
+    const ids = [];
+    const seen = new Set();
+    for (const seat of room.seats) {
+      if (seat.type === 'human' && seat.connected && seat.playerId && !seen.has(seat.playerId)) {
+        seen.add(seat.playerId);
+        ids.push(seat.playerId);
+      }
+    }
+    if (room.billiard?.seats) {
+      for (const bSeat of room.billiard.seats) {
+        if (bSeat.type === 'human' && bSeat.connected && bSeat.playerId && !seen.has(bSeat.playerId)) {
+          seen.add(bSeat.playerId);
+          ids.push(bSeat.playerId);
+        }
+      }
+    }
+    if (room.spectators instanceof Map) {
+      for (const spec of room.spectators.values()) {
+        if (spec?.connected !== false && spec?.playerId && !seen.has(spec.playerId)) {
+          seen.add(spec.playerId);
+          ids.push(spec.playerId);
+        }
+      }
+    }
+    return ids;
+  }
+
+  ensureRoamerKey(room, playerId) {
+    if (!(room.roamerKeys instanceof Map)) {
+      room.roamerKeys = new Map();
+    }
+    let key = room.roamerKeys.get(playerId);
+    if (!key) {
+      room.roamerSeq = (room.roamerSeq || 0) + 1;
+      key = `r-${room.roamerSeq}`;
+      room.roamerKeys.set(playerId, key);
+    }
+    return key;
+  }
+
+  getRoamersPayload(room) {
+    if (!(room.roamStates instanceof Map)) return [];
+    const now = Date.now();
+    const list = [];
+    for (const [pid, state] of room.roamStates.entries()) {
+      if (!state || !state.active) continue;
+      if (now - (state.updatedAt || 0) > 45000) {
+        room.roamStates.delete(pid);
+        continue;
+      }
+      list.push({
+        key: state.key,
+        name: state.name,
+        avatar: state.avatar,
+        activity: state.activity || 'spectator',
+        x: state.x,
+        z: state.z,
+        yaw: state.yaw
+      });
+    }
+    return list;
+  }
+
+  broadcastRoomRoamers(room) {
+    const roamers = this.getRoamersPayload(room);
+    for (const pid of this.getAllHumanRecipients(room)) {
+      this.io.to(`player:${pid}`).emit('room:roamers', roamers);
+    }
+  }
+
+  broadcastRoomBilliard(room) {
+    if (!room?.billiard) return;
+    const view = room.billiard.getClientView();
+    for (const pid of this.getAllHumanRecipients(room)) {
+      this.io.to(`player:${pid}`).emit('room:billiard', view);
+    }
+  }
+
+  destroyRoomResources(room) {
+    if (!room) return;
+    if (room.cleanupTimer) {
+      clearTimeout(room.cleanupTimer);
+      room.cleanupTimer = null;
+    }
+    if (room.session) {
+      room.session.destroy();
+      room.session = null;
+    }
+    if (room.billiard) {
+      room.billiard.destroy();
+    }
+    for (const s of room.seats) {
+      if (s.type === 'human' && s.playerId) {
+        this.playerToRoom.delete(s.playerId);
+      }
+    }
+    if (room.billiard?.seats) {
+      for (const bs of room.billiard.seats) {
+        if (bs.type === 'human' && bs.playerId) {
+          this.playerToRoom.delete(bs.playerId);
+        }
+      }
+    }
+    if (room.spectators instanceof Map) {
+      for (const sp of room.spectators.values()) {
+        if (sp?.playerId) {
+          this.playerToRoom.delete(sp.playerId);
+          this.io.to(`player:${sp.playerId}`).emit('room:state', null);
+        }
+      }
+      room.spectators.clear();
+    }
+    if (room.roamStates instanceof Map) {
+      room.roamStates.clear();
+    }
+    this.rooms.delete(room.code);
+  }
+
   listPublicRooms() {
     const list = [];
     for (const room of this.rooms.values()) {
       const humanCount = room.seats.filter((s) => s.type === 'human').length;
       const openSeats = room.seats.filter((s) => s.type === 'empty').length;
       const spectatorCount = room.spectators instanceof Map ? room.spectators.size : 0;
+      const billiardSeats = room.billiard?.seats || [];
+      const billiardCount = billiardSeats.filter((s) => s.type !== 'empty').length;
+      const billiardHumanCount = billiardSeats.filter((s) => s.type === 'human').length;
+      const billiardPhase = room.billiard?.phase || 'waiting';
       list.push({
         code: room.code,
         name: room.name,
@@ -133,6 +284,9 @@ export class RoomManager {
         humanCount,
         openSeats,
         spectatorCount,
+        billiardCount,
+        billiardHumanCount,
+        billiardPhase,
         seats: room.seats.map((s) => ({
           seatIndex: s.seatIndex,
           type: s.type,
@@ -171,6 +325,9 @@ export class RoomManager {
       createdAt: Date.now(),
       cleanupTimer: null,
       spectators: new Map(),
+      roamerKeys: new Map(),
+      roamStates: new Map(),
+      roamerSeq: 0,
       music: null,
       musicQueue: [],
       musicQueueIndex: 0,
@@ -201,8 +358,16 @@ export class RoomManager {
         roomAmbiance: normalizeRoomAmbiance(opts.roomAmbiance)
       },
       seats,
-      session: null
+      session: null,
+      billiard: null
     };
+
+    room.billiard = new BilliardSession({
+      onStateChange: () => {
+        this.broadcastRoomBilliard(room);
+        this.broadcastRoomsList();
+      }
+    });
 
     this.rooms.set(code, room);
     this.playerToRoom.set(playerId, code);
@@ -215,7 +380,7 @@ export class RoomManager {
     return { ok: true, room };
   }
 
-  joinRoom({ roomCode, playerId, playerName, playerAvatar, asSpectator = false }) {
+  joinRoom({ roomCode, playerId, playerName, playerAvatar, asSpectator = false, activity = 'auto' }) {
     const code = String(roomCode || '').trim().toUpperCase();
     const room = this.rooms.get(code);
     if (!room) {
@@ -227,7 +392,7 @@ export class RoomManager {
       room.spectators = new Map();
     }
 
-    // Check if player is reconnecting to an existing seat in this room
+    // Check if player is reconnecting to an existing Okey seat in this room
     const existingSeat = room.seats.find(
       (s) => s.type === 'human' && s.playerId === playerId
     );
@@ -248,11 +413,27 @@ export class RoomManager {
         });
       }
       this.broadcastRoomState(room);
-      return { ok: true, room, seatIndex: existingSeat.seatIndex, isSpectator: false };
+      return { ok: true, room, seatIndex: existingSeat.seatIndex, isSpectator: false, activity: 'okey' };
+    }
+
+    // Check if player is reconnecting to an existing Billiard seat
+    const existingBilliard = room.billiard?.findHumanSeat(playerId);
+    if (existingBilliard) {
+      if (room.cleanupTimer) {
+        clearTimeout(room.cleanupTimer);
+        room.cleanupTimer = null;
+      }
+      existingBilliard.connected = true;
+      existingBilliard.name = cleanName;
+      if (playerAvatar) existingBilliard.avatar = normalizeAvatar(playerAvatar, existingBilliard.seatIndex);
+      this.playerToRoom.set(playerId, code);
+      this.broadcastRoomState(room);
+      this.broadcastRoomBilliard(room);
+      return { ok: true, room, billiardSeatIndex: existingBilliard.seatIndex, isSpectator: false, activity: 'billiard' };
     }
 
     const existingSpectator = room.spectators.get(playerId);
-    if (existingSpectator && asSpectator) {
+    if (existingSpectator && (asSpectator || activity === 'spectator')) {
       if (room.cleanupTimer) {
         clearTimeout(room.cleanupTimer);
         room.cleanupTimer = null;
@@ -263,12 +444,33 @@ export class RoomManager {
       this.playerToRoom.set(playerId, code);
       this.broadcastRoomState(room);
       this.broadcastRoomsList();
-      return { ok: true, room, isSpectator: true, watchSeatIndex: existingSpectator.watchSeatIndex };
+      return { ok: true, room, isSpectator: true, watchSeatIndex: existingSpectator.watchSeatIndex, activity: 'spectator' };
     }
 
     this.leaveCurrentRoom(playerId);
 
-    if (!asSpectator) {
+    const wantSpectator = asSpectator || activity === 'spectator';
+
+    if (!wantSpectator && activity === 'billiard' && room.billiard) {
+      const bRes = room.billiard.sitHuman({
+        playerId,
+        playerName: cleanName,
+        playerAvatar: normalizeAvatar(playerAvatar, 0)
+      });
+      if (bRes.ok) {
+        if (room.cleanupTimer) {
+          clearTimeout(room.cleanupTimer);
+          room.cleanupTimer = null;
+        }
+        this.playerToRoom.set(playerId, code);
+        this.broadcastRoomState(room);
+        this.broadcastRoomBilliard(room);
+        this.broadcastRoomsList();
+        return { ok: true, room, billiardSeatIndex: bRes.seatIndex, isSpectator: false, activity: 'billiard' };
+      }
+    }
+
+    if (!wantSpectator && activity !== 'billiard') {
       if (room.status === 'playing') {
         const openSeat = room.seats.find(
           (s) => s.type === 'empty' || (s.type === 'human' && !s.connected)
@@ -302,7 +504,7 @@ export class RoomManager {
           }
           this.broadcastRoomState(room);
           this.broadcastRoomsList();
-          return { ok: true, room, seatIndex: openSeat.seatIndex, isSpectator: false };
+          return { ok: true, room, seatIndex: openSeat.seatIndex, isSpectator: false, activity: 'okey' };
         }
       } else {
         const emptySeat = room.seats.find((s) => s.type === 'empty');
@@ -317,12 +519,12 @@ export class RoomManager {
 
           this.broadcastRoomState(room);
           this.broadcastRoomsList();
-          return { ok: true, room, seatIndex: targetSeat.seatIndex, isSpectator: false };
+          return { ok: true, room, seatIndex: targetSeat.seatIndex, isSpectator: false, activity: 'okey' };
         }
       }
     }
 
-    // Unlimited spectators ("Yancı"): join spectator list when requested or when all seats are full
+    // Unlimited spectators ("Yancı" / Roamers): join spectator list when requested or when all seats are full
     if (room.cleanupTimer) {
       clearTimeout(room.cleanupTimer);
       room.cleanupTimer = null;
@@ -335,11 +537,12 @@ export class RoomManager {
       watchSeatIndex: null,
       joinedAt: Date.now()
     });
+    this.ensureRoamerKey(room, playerId);
     this.playerToRoom.set(playerId, code);
 
     this.broadcastRoomState(room);
     this.broadcastRoomsList();
-    return { ok: true, room, isSpectator: true, watchSeatIndex: null };
+    return { ok: true, room, isSpectator: true, watchSeatIndex: null, activity: 'spectator' };
   }
 
   watchSeat({ roomCode, playerId, seatIndex = null }) {
@@ -365,13 +568,89 @@ export class RoomManager {
     return { ok: true, watchSeatIndex: spec.watchSeatIndex };
   }
 
+  vacateOkeySeatForSwitch(room, mySeat) {
+    if (!mySeat) return;
+    if (room.status === 'waiting') {
+      mySeat.type = 'empty';
+      mySeat.playerId = null;
+      mySeat.name = null;
+      mySeat.avatar = `avatar-${(mySeat.seatIndex % PRESET_AVATAR_COUNT) + 1}`;
+      mySeat.connected = false;
+    } else {
+      mySeat.type = 'bot';
+      mySeat.playerId = `bot-${mySeat.seatIndex}`;
+      mySeat.name = `${mySeat.name || 'Oyuncu'} (Bot)`;
+      mySeat.connected = true;
+      if (room.session) {
+        room.session.updateSeatConnection(mySeat.seatIndex, {
+          playerId: mySeat.playerId,
+          name: mySeat.name,
+          isBot: true,
+          connected: true
+        });
+      }
+    }
+  }
+
+  standUp({ roomCode, playerId }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    const participant = this.findRoomParticipant(room, playerId);
+    if (!participant) return { ok: false, error: 'Bu odada değilsiniz.' };
+    if (participant.activity === 'spectator') {
+      return { ok: true, activity: 'spectator' };
+    }
+
+    if (!(room.spectators instanceof Map)) {
+      room.spectators = new Map();
+    }
+
+    if (participant.seat) {
+      this.vacateOkeySeatForSwitch(room, participant.seat);
+    }
+    if (participant.billiardSeat && room.billiard) {
+      room.billiard.standHuman(playerId, { convertToBotIfActive: true });
+    }
+
+    room.spectators.set(playerId, {
+      playerId,
+      name: participant.name || 'Oyuncu',
+      avatar: participant.avatar || 'avatar-1',
+      connected: true,
+      watchSeatIndex: null,
+      joinedAt: Date.now()
+    });
+    const key = this.ensureRoamerKey(room, playerId);
+    if (!(room.roamStates instanceof Map)) room.roamStates = new Map();
+    const startPos = participant.billiardSeat
+      ? { x: 11.8, z: -2.2, yaw: -Math.PI / 2 }
+      : { x: 0, z: 10.5, yaw: 0 };
+    room.roamStates.set(playerId, {
+      key,
+      name: participant.name || 'Oyuncu',
+      avatar: participant.avatar || 'avatar-1',
+      activity: 'spectator',
+      active: true,
+      ...startPos,
+      updatedAt: Date.now()
+    });
+
+    this.broadcastRoomState(room);
+    this.broadcastRoomBilliard(room);
+    this.broadcastRoomRoamers(room);
+    this.broadcastRoomsList();
+    return { ok: true, activity: 'spectator' };
+  }
+
   takeSeat({ roomCode, playerId, targetSeatIndex = null }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    if (!(room.spectators instanceof Map) || !room.spectators.has(playerId)) {
+
+    const spec = room.spectators instanceof Map ? room.spectators.get(playerId) : null;
+    const bSeat = room.billiard?.findHumanSeat(playerId) || null;
+    if (!spec && !bSeat) {
       return { ok: false, error: 'Zaten masada koltuktasınız veya izleyici değilsiniz.' };
     }
-    const spec = room.spectators.get(playerId);
 
     let seat = null;
     const requestedIdx = targetSeatIndex !== null && targetSeatIndex !== undefined ? Number(targetSeatIndex) : null;
@@ -407,11 +686,17 @@ export class RoomManager {
       }
     }
 
-    room.spectators.delete(playerId);
+    const actorName = spec?.name || bSeat?.name || 'Oyuncu';
+    const actorAvatar = spec?.avatar || bSeat?.avatar || normalizeAvatar(null, seat.seatIndex);
+
+    if (spec) room.spectators.delete(playerId);
+    if (bSeat && room.billiard) room.billiard.standHuman(playerId, { convertToBotIfActive: true });
+    if (room.roamStates instanceof Map) room.roamStates.delete(playerId);
+
     seat.type = 'human';
     seat.playerId = playerId;
-    seat.name = spec.name || 'Oyuncu';
-    seat.avatar = spec.avatar || normalizeAvatar(null, seat.seatIndex);
+    seat.name = actorName;
+    seat.avatar = actorAvatar;
     seat.connected = true;
 
     if (room.session) {
@@ -425,8 +710,162 @@ export class RoomManager {
     }
 
     this.broadcastRoomState(room);
+    this.broadcastRoomBilliard(room);
+    this.broadcastRoomRoamers(room);
     this.broadcastRoomsList();
     return { ok: true, seatIndex: seat.seatIndex };
+  }
+
+  billiardJoin({ roomCode, playerId, seatIndex = null }) {
+    const room = this.getRoom(roomCode);
+    if (!room || !room.billiard) return { ok: false, error: 'Masa bulunamadı.' };
+    const participant = this.findRoomParticipant(room, playerId);
+    if (!participant) return { ok: false, error: 'Bu odada değilsiniz.' };
+
+    if (participant.billiardSeat) {
+      return { ok: true, seatIndex: participant.billiardSeat.seatIndex };
+    }
+
+    // Pre-check if Billiard has a spot before removing from current Okey/spectator slot
+    const reqIdx = seatIndex !== null && seatIndex !== undefined ? Number(seatIndex) : null;
+    const canTake = (c) =>
+      c &&
+      (c.type === 'empty' ||
+        (room.billiard.phase !== 'playing' && c.type === 'bot') ||
+        (c.type === 'human' && !c.connected));
+    const available = reqIdx !== null
+      ? (canTake(room.billiard.seats[reqIdx]) ? room.billiard.seats[reqIdx] : null)
+      : room.billiard.seats.find((s) => s.type === 'empty') ||
+        room.billiard.seats.find((s) => s.type === 'human' && !s.connected) ||
+        (room.billiard.phase !== 'playing' ? room.billiard.seats.find((s) => s.type === 'bot') : null);
+
+    if (!available) {
+      return { ok: false, error: 'Bilardo masasında boş koltuk yok.' };
+    }
+
+    if (participant.seat) {
+      this.vacateOkeySeatForSwitch(room, participant.seat);
+    }
+    if (participant.spectator && room.spectators instanceof Map) {
+      room.spectators.delete(playerId);
+    }
+    if (room.roamStates instanceof Map) {
+      room.roamStates.delete(playerId);
+    }
+
+    const res = room.billiard.sitHuman({
+      playerId,
+      playerName: participant.name,
+      playerAvatar: participant.avatar,
+      seatIndex: available.seatIndex
+    });
+    if (!res.ok) return res;
+
+    this.broadcastRoomState(room);
+    this.broadcastRoomBilliard(room);
+    this.broadcastRoomRoamers(room);
+    this.broadcastRoomsList();
+    return res;
+  }
+
+  billiardLeave({ roomCode, playerId }) {
+    return this.standUp({ roomCode, playerId });
+  }
+
+  billiardToggleBot({ roomCode, playerId, seatIndex }) {
+    const room = this.getRoom(roomCode);
+    if (!room || !room.billiard) return { ok: false, error: 'Masa bulunamadı.' };
+    const participant = this.findRoomParticipant(room, playerId);
+    if (!participant) return { ok: false, error: 'Bu odada değilsiniz.' };
+    if (room.hostPlayerId !== playerId && !participant.billiardSeat) {
+      return { ok: false, error: 'Bilardo botunu masa kurucusu veya bilardocu ekleyebilir.' };
+    }
+    const res = room.billiard.toggleBotSeat(seatIndex);
+    if (res.ok) {
+      this.broadcastRoomState(room);
+      this.broadcastRoomBilliard(room);
+      this.broadcastRoomsList();
+    }
+    return res;
+  }
+
+  billiardStart({ roomCode, playerId, autoFillBot = true }) {
+    const room = this.getRoom(roomCode);
+    if (!room || !room.billiard) return { ok: false, error: 'Masa bulunamadı.' };
+    const participant = this.findRoomParticipant(room, playerId);
+    if (!participant) return { ok: false, error: 'Bu odada değilsiniz.' };
+    if (room.hostPlayerId !== playerId && !participant.billiardSeat) {
+      return { ok: false, error: 'Bilardo maçını bilardo oyuncuları veya kurucu başlatabilir.' };
+    }
+    const res = room.billiard.startMatch({ autoFillBot });
+    if (res.ok) {
+      this.broadcastRoomState(room);
+      this.broadcastRoomBilliard(room);
+      this.broadcastRoomsList();
+    }
+    return res;
+  }
+
+  billiardAim({ roomCode, playerId, angle, power }) {
+    const room = this.getRoom(roomCode);
+    if (!room || !room.billiard) return { ok: false };
+    const res = room.billiard.updateAim(playerId, { angle, power });
+    if (res.ok) {
+      for (const pid of this.getAllHumanRecipients(room)) {
+        if (pid === playerId) continue;
+        this.io.to(`player:${pid}`).emit('room:billiardAim', res.aimState);
+      }
+    }
+    return res;
+  }
+
+  billiardPlaceBall({ roomCode, playerId, x, z }) {
+    const room = this.getRoom(roomCode);
+    if (!room || !room.billiard) return { ok: false, error: 'Masa bulunamadı.' };
+    const res = room.billiard.placeCueBall(playerId, { x, z });
+    if (res.ok) {
+      this.broadcastRoomBilliard(room);
+    }
+    return res;
+  }
+
+  billiardShoot({ roomCode, playerId, angle, power }) {
+    const room = this.getRoom(roomCode);
+    if (!room || !room.billiard) return { ok: false, error: 'Masa bulunamadı.' };
+    return room.billiard.shoot(playerId, { angle, power });
+  }
+
+  roamMove({ roomCode, playerId, x, z, yaw, active = true }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false };
+    const participant = this.findRoomParticipant(room, playerId);
+    if (!participant) return { ok: false };
+
+    if (!(room.roamStates instanceof Map)) room.roamStates = new Map();
+    if (!active) {
+      room.roamStates.delete(playerId);
+      this.broadcastRoomRoamers(room);
+      return { ok: true };
+    }
+
+    const clampedX = Math.max(-23.5, Math.min(23.5, Number(x) || 0));
+    const clampedZ = Math.max(-19.5, Math.min(18.5, Number(z) || 0));
+    const cleanYaw = Number.isFinite(Number(yaw)) ? Number(yaw) : 0;
+    const key = this.ensureRoamerKey(room, playerId);
+
+    room.roamStates.set(playerId, {
+      key,
+      name: participant.name,
+      avatar: participant.avatar,
+      activity: participant.activity,
+      active: true,
+      x: Math.round(clampedX * 100) / 100,
+      z: Math.round(clampedZ * 100) / 100,
+      yaw: Math.round(cleanYaw * 1000) / 1000,
+      updatedAt: Date.now()
+    });
+    this.broadcastRoomRoamers(room);
+    return { ok: true };
   }
 
   leaveCurrentRoom(playerId, { disconnectOnly = false } = {}) {
@@ -439,16 +878,62 @@ export class RoomManager {
       return null;
     }
 
+    const okeyHasPlay = room.status === 'playing';
+    const billiardHasPlay = room.billiard?.phase === 'playing';
+    const keepForDisconnect = disconnectOnly && (okeyHasPlay || billiardHasPlay);
+
+    if (!keepForDisconnect && room.roamStates instanceof Map) {
+      room.roamStates.delete(playerId);
+    }
+
     if (room.spectators instanceof Map && room.spectators.has(playerId)) {
       const spec = room.spectators.get(playerId);
-      if (disconnectOnly && room.status === 'playing') {
+      if (keepForDisconnect) {
         spec.connected = false;
-        this.broadcastRoomState(room);
-        return room;
+      } else {
+        this.playerToRoom.delete(playerId);
+        room.spectators.delete(playerId);
       }
-      this.playerToRoom.delete(playerId);
-      room.spectators.delete(playerId);
+      const connectedAfterSpec = this.getConnectedHumanIds(room);
+      if (connectedAfterSpec.length === 0) {
+        if (disconnectOnly && (okeyHasPlay || billiardHasPlay)) {
+          this.scheduleRoomDisconnectCleanup(room);
+        } else {
+          this.destroyRoomResources(room);
+          this.broadcastRoomsList();
+          return null;
+        }
+      } else if (!disconnectOnly && room.hostPlayerId === playerId) {
+        room.hostPlayerId = connectedAfterSpec[0];
+      }
       this.broadcastRoomState(room);
+      this.broadcastRoomRoamers(room);
+      this.broadcastRoomsList();
+      return room;
+    }
+
+    const bSeat = room.billiard?.findHumanSeat(playerId) || null;
+    if (bSeat) {
+      if (keepForDisconnect) {
+        bSeat.connected = false;
+      } else {
+        this.playerToRoom.delete(playerId);
+        room.billiard.standHuman(playerId, { convertToBotIfActive: true });
+      }
+      const connectedAfterB = this.getConnectedHumanIds(room);
+      if (connectedAfterB.length === 0) {
+        if (disconnectOnly && (okeyHasPlay || billiardHasPlay)) {
+          this.scheduleRoomDisconnectCleanup(room);
+        } else {
+          this.destroyRoomResources(room);
+          this.broadcastRoomsList();
+          return null;
+        }
+      } else if (!disconnectOnly && room.hostPlayerId === playerId) {
+        room.hostPlayerId = connectedAfterB[0];
+      }
+      this.broadcastRoomState(room);
+      this.broadcastRoomBilliard(room);
       this.broadcastRoomsList();
       return room;
     }
@@ -461,101 +946,47 @@ export class RoomManager {
       return null;
     }
 
-    if (disconnectOnly && room.status === 'playing') {
+    if (disconnectOnly && okeyHasPlay) {
       seat.connected = false;
       if (room.session) {
         room.session.updateSeatConnection(seat.seatIndex, { connected: false });
       }
-      const anyConnectedHuman = room.seats.some((s) => s.type === 'human' && s.connected);
-      if (!anyConnectedHuman && !room.cleanupTimer) {
-        room.cleanupTimer = setTimeout(() => {
-          room.cleanupTimer = null;
-          const stillDisconnected = room.seats.every((s) => s.type !== 'human' || !s.connected);
-          if (!stillDisconnected) return;
-          if (room.session) room.session.destroy();
-          for (const s of room.seats) {
-            if (s.type === 'human' && s.playerId) {
-              this.playerToRoom.delete(s.playerId);
-            }
-          }
-          if (room.spectators instanceof Map) {
-            for (const sp of room.spectators.values()) {
-              if (sp?.playerId) {
-                this.playerToRoom.delete(sp.playerId);
-                this.io.to(`player:${sp.playerId}`).emit('room:state', null);
-              }
-            }
-            room.spectators.clear();
-          }
-          this.rooms.delete(code);
-          this.broadcastRoomsList();
-        }, 120000);
-        room.cleanupTimer.unref?.();
+      const connectedHumans = this.getConnectedHumanIds(room);
+      if (connectedHumans.length === 0) {
+        this.scheduleRoomDisconnectCleanup(room);
       }
       this.broadcastRoomState(room);
       return room;
     }
 
     this.playerToRoom.delete(playerId);
+    this.vacateOkeySeatForSwitch(room, seat);
 
-    if (room.status === 'waiting') {
-      seat.type = 'empty';
-      seat.playerId = null;
-      seat.name = null;
-      seat.avatar = `avatar-${(seat.seatIndex % PRESET_AVATAR_COUNT) + 1}`;
-      seat.connected = false;
-    } else {
-      // Convert leaving player's seat to a bot so remaining players can finish
-      seat.type = 'bot';
-      seat.playerId = `bot-${seat.seatIndex}`;
-      seat.name = `${seat.name || 'Oyuncu'} (Bot)`;
-      seat.connected = true;
-      if (room.session) {
-        room.session.updateSeatConnection(seat.seatIndex, {
-          playerId: seat.playerId,
-          name: seat.name,
-          isBot: true,
-          connected: true
-        });
-      }
-    }
-
-    const activeHumans = room.seats.filter(
-      (s) => s.type === 'human' && s.connected
-    );
-
+    const activeHumans = this.getConnectedHumanIds(room);
     if (activeHumans.length === 0) {
-      if (room.cleanupTimer) {
-        clearTimeout(room.cleanupTimer);
-        room.cleanupTimer = null;
-      }
-      if (room.session) room.session.destroy();
-      for (const s of room.seats) {
-        if (s.type === 'human' && s.playerId) {
-          this.playerToRoom.delete(s.playerId);
-        }
-      }
-      if (room.spectators instanceof Map) {
-        for (const sp of room.spectators.values()) {
-          if (sp?.playerId) {
-            this.playerToRoom.delete(sp.playerId);
-            this.io.to(`player:${sp.playerId}`).emit('room:state', null);
-          }
-        }
-        room.spectators.clear();
-      }
-      this.rooms.delete(code);
+      this.destroyRoomResources(room);
       this.broadcastRoomsList();
       return null;
     }
 
     if (room.hostPlayerId === playerId) {
-      room.hostPlayerId = activeHumans[0].playerId;
+      room.hostPlayerId = activeHumans[0];
     }
 
     this.broadcastRoomState(room);
     this.broadcastRoomsList();
     return room;
+  }
+
+  scheduleRoomDisconnectCleanup(room) {
+    if (!room || room.cleanupTimer) return;
+    room.cleanupTimer = setTimeout(() => {
+      room.cleanupTimer = null;
+      if (this.getConnectedHumanIds(room).length > 0) return;
+      this.destroyRoomResources(room);
+      this.broadcastRoomsList();
+    }, 120000);
+    room.cleanupTimer.unref?.();
   }
 
   toggleBotSeat({ roomCode, hostPlayerId, seatIndex }) {
@@ -847,11 +1278,11 @@ export class RoomManager {
   setRoomMusic({ roomCode, playerId, url, title, mode = 'replace', resolvedPayload = null }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const actor = this.findRoomParticipant(room, playerId);
+    if (!actor) return { ok: false, error: 'Bu odada bulunmuyorsunuz.' };
 
     if (resolvedPayload) {
-      return this.applyResolvedMusic(room, seat, resolvedPayload, mode);
+      return this.applyResolvedMusic(room, actor, resolvedPayload, mode);
     }
 
     const parsed = parseMusicUrl(url, title);
@@ -860,26 +1291,26 @@ export class RoomManager {
       return { ok: false, error: 'Parça sunucuda çözümlenmeyi bekliyor.' };
     }
 
-    return this.applyResolvedMusic(room, seat, { ok: true, track: parsed, queue: [parsed] }, mode);
+    return this.applyResolvedMusic(room, actor, { ok: true, track: parsed, queue: [parsed] }, mode);
   }
 
   async resolveAndSetRoomMusic({ roomCode, playerId, url, title, mode = 'replace', fetchImpl }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const actor = this.findRoomParticipant(room, playerId);
+    if (!actor) return { ok: false, error: 'Bu odada bulunmuyorsunuz.' };
 
     const resolved = await resolveMusicInput(url, title, { fetchImpl });
     if (!resolved.ok) return resolved;
 
-    return this.applyResolvedMusic(room, seat, resolved, mode);
+    return this.applyResolvedMusic(room, actor, resolved, mode);
   }
 
   setMusicAutoplay({ roomCode, playerId, enabled }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const actor = this.findRoomParticipant(room, playerId);
+    if (!actor) return { ok: false, error: 'Bu odada bulunmuyorsunuz.' };
 
     room.musicAutoplay = enabled === undefined ? !room.musicAutoplay : Boolean(enabled);
     if (room.music) {
@@ -896,8 +1327,8 @@ export class RoomManager {
   async advanceRoomMusic({ roomCode, playerId, currentKey = '', fetchImpl }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const actor = this.findRoomParticipant(room, playerId);
+    if (!actor) return { ok: false, error: 'Bu odada bulunmuyorsunuz.' };
 
     if (!room.music) return { ok: true, music: null };
 
@@ -913,12 +1344,12 @@ export class RoomManager {
       const candidate = queue[nextIdx];
       const resolvedTrack = await resolveQueuedTrack(candidate, { fetchImpl });
       if (resolvedTrack) {
-        queue[nextIdx] = { ...resolvedTrack, updatedBy: candidate.updatedBy || seat.name || 'Oyuncu' };
+        queue[nextIdx] = { ...resolvedTrack, updatedBy: candidate.updatedBy || actor.name || 'Oyuncu' };
         room.musicQueueIndex = nextIdx;
         this.recordMusicHistory(room, resolvedTrack);
         room.music = {
           ...resolvedTrack,
-          updatedBy: candidate.updatedBy || seat.name || 'Oyuncu',
+          updatedBy: candidate.updatedBy || actor.name || 'Oyuncu',
           updatedAt: Date.now(),
           queueIndex: nextIdx,
           queueTotal: queue.length,
@@ -972,8 +1403,8 @@ export class RoomManager {
   async jumpMusicQueue({ roomCode, playerId, index, fetchImpl }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const actor = this.findRoomParticipant(room, playerId);
+    if (!actor) return { ok: false, error: 'Bu odada bulunmuyorsunuz.' };
 
     const queue = Array.isArray(room.musicQueue) ? room.musicQueue : [];
     const targetIdx = Number(index);
@@ -987,12 +1418,12 @@ export class RoomManager {
       return { ok: false, error: 'Seçilen parça şu an başlatılamadı.' };
     }
 
-    queue[targetIdx] = { ...resolvedTrack, updatedBy: candidate.updatedBy || seat.name || 'Oyuncu' };
+    queue[targetIdx] = { ...resolvedTrack, updatedBy: candidate.updatedBy || actor.name || 'Oyuncu' };
     room.musicQueueIndex = targetIdx;
     this.recordMusicHistory(room, resolvedTrack);
     room.music = {
       ...resolvedTrack,
-      updatedBy: candidate.updatedBy || seat.name || 'Oyuncu',
+      updatedBy: candidate.updatedBy || actor.name || 'Oyuncu',
       updatedAt: Date.now(),
       queueIndex: targetIdx,
       queueTotal: queue.length,
@@ -1007,8 +1438,8 @@ export class RoomManager {
   async removeMusicQueueItem({ roomCode, playerId, index, fetchImpl }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const actor = this.findRoomParticipant(room, playerId);
+    if (!actor) return { ok: false, error: 'Bu odada bulunmuyorsunuz.' };
 
     const queue = Array.isArray(room.musicQueue) ? room.musicQueue : [];
     const targetIdx = Number(index);
@@ -1049,12 +1480,12 @@ export class RoomManager {
       const candidate = queue[playIdx];
       const resolvedTrack = await resolveQueuedTrack(candidate, { fetchImpl });
       if (resolvedTrack) {
-        queue[playIdx] = { ...resolvedTrack, updatedBy: candidate.updatedBy || seat.name || 'Oyuncu' };
+        queue[playIdx] = { ...resolvedTrack, updatedBy: candidate.updatedBy || actor.name || 'Oyuncu' };
         room.musicQueueIndex = playIdx;
         this.recordMusicHistory(room, resolvedTrack);
         room.music = {
           ...resolvedTrack,
-          updatedBy: candidate.updatedBy || seat.name || 'Oyuncu',
+          updatedBy: candidate.updatedBy || actor.name || 'Oyuncu',
           updatedAt: Date.now(),
           queueIndex: playIdx,
           queueTotal: queue.length,
@@ -1078,8 +1509,8 @@ export class RoomManager {
   clearUpcomingMusicQueue({ roomCode, playerId }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const actor = this.findRoomParticipant(room, playerId);
+    if (!actor) return { ok: false, error: 'Bu odada bulunmuyorsunuz.' };
 
     const queue = Array.isArray(room.musicQueue) ? room.musicQueue : [];
     if (!room.music || queue.length === 0) {
@@ -1103,8 +1534,8 @@ export class RoomManager {
   shuffleMusicQueue({ roomCode, playerId }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const actor = this.findRoomParticipant(room, playerId);
+    if (!actor) return { ok: false, error: 'Bu odada bulunmuyorsunuz.' };
 
     const queue = Array.isArray(room.musicQueue) ? room.musicQueue : [];
     if (!room.music || queue.length === 0) {
@@ -1134,8 +1565,8 @@ export class RoomManager {
   moveMusicQueueItem({ roomCode, playerId, fromIndex, toIndex }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const actor = this.findRoomParticipant(room, playerId);
+    if (!actor) return { ok: false, error: 'Bu odada bulunmuyorsunuz.' };
 
     const queue = Array.isArray(room.musicQueue) ? room.musicQueue : [];
     const fromIdx = Number(fromIndex);
@@ -1184,8 +1615,8 @@ export class RoomManager {
   switchMusicFallback({ roomCode, playerId, currentKey = '' }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const actor = this.findRoomParticipant(room, playerId);
+    if (!actor) return { ok: false, error: 'Bu odada bulunmuyorsunuz.' };
 
     if (!room.music) return { ok: true, music: null };
     const activeKey = `${room.music.embedUrl}|${room.music.updatedAt || 0}`;
@@ -1215,8 +1646,8 @@ export class RoomManager {
   stopRoomMusic({ roomCode, playerId }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const actor = this.findRoomParticipant(room, playerId);
+    if (!actor) return { ok: false, error: 'Bu odada bulunmuyorsunuz.' };
 
     room.music = null;
     room.musicQueue = [];
@@ -1241,8 +1672,8 @@ export class RoomManager {
   async resolveAndSetRoomTv({ roomCode, playerId, channelId = '', url = '', title = '', fetchImpl = globalThis.fetch }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const sender = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!sender) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const sender = this.findRoomParticipant(room, playerId);
+    if (!sender) return { ok: false, error: 'Bu odada bulunmuyorsunuz.' };
 
     const resolved = await resolveTvInput(url, title, { channelId, fetchImpl });
     if (!resolved?.ok || !resolved.tv) {
@@ -1261,8 +1692,8 @@ export class RoomManager {
   setRoomTv({ roomCode, playerId, tvPayload }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const sender = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!sender) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const sender = this.findRoomParticipant(room, playerId);
+    if (!sender) return { ok: false, error: 'Bu odada bulunmuyorsunuz.' };
 
     if (!tvPayload || typeof tvPayload !== 'object' || !tvPayload.embedUrl) {
       return { ok: false, error: 'Geçersiz TV yayın bilgisi.' };
@@ -1287,8 +1718,8 @@ export class RoomManager {
   stopRoomTv({ roomCode, playerId }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const sender = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!sender) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const sender = this.findRoomParticipant(room, playerId);
+    if (!sender) return { ok: false, error: 'Bu odada bulunmuyorsunuz.' };
 
     room.tv = null;
     this.broadcastRoomTv(room);
@@ -1400,8 +1831,8 @@ export class RoomManager {
   orderTreat({ roomCode, playerId, itemId, target = 'self' }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const sender = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!sender) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const sender = this.findRoomParticipant(room, playerId);
+    if (!sender) return { ok: false, error: 'Bu odada bulunmuyorsunuz.' };
 
     const item = KAHVE_MENU_MAP.get(String(itemId || ''));
     if (!item) return { ok: false, error: 'Geçersiz kahvehane siparişi.' };
@@ -1414,7 +1845,13 @@ export class RoomManager {
       room.seats.forEach((s) => {
         if (s.type !== 'empty') targetIndices.push(s.seatIndex);
       });
+      if (targetIndices.length === 0) {
+        return { ok: false, error: 'Okey masasında sipariş gönderilecek kimse yok.' };
+      }
     } else if (target === 'self') {
+      if (sender.seatIndex === null) {
+        return { ok: false, error: 'Kendinize ikram koymak için Okey masasında oturmalısınız veya masaya ısmarlayabilirsiniz.' };
+      }
       targetIndices.push(sender.seatIndex);
     } else {
       const idx = Number(target);
@@ -1444,7 +1881,7 @@ export class RoomManager {
       room.orders[seatIdx] = slot;
     }
 
-    if (room.socialStats[sender.seatIndex]) {
+    if (sender.seatIndex !== null && room.socialStats[sender.seatIndex]) {
       room.socialStats[sender.seatIndex].treatsOrdered += targetIndices.length;
     }
 
@@ -1553,8 +1990,8 @@ export class RoomManager {
   clearSeatOrder({ roomCode, playerId, target = 'self' }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const sender = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!sender) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const sender = this.findRoomParticipant(room, playerId);
+    if (!sender) return { ok: false, error: 'Bu odada bulunmuyorsunuz.' };
 
     if (!Array.isArray(room.orders)) room.orders = createEmptyOrders();
     if (target === 'all') {
@@ -1562,7 +1999,7 @@ export class RoomManager {
         return { ok: false, error: 'Tüm masanın siparişlerini yalnızca kurucu temizleyebilir.' };
       }
       room.orders = createEmptyOrders();
-    } else {
+    } else if (sender.seatIndex !== null) {
       room.orders[sender.seatIndex] = { drink: null, food: null };
     }
     this.broadcastRoomOrders(room);
@@ -1660,10 +2097,14 @@ export class RoomManager {
     const mySeat = room.seats.find(
       (s) => s.type === 'human' && s.playerId === playerId
     );
-    const mySpectator = !mySeat && room.spectators instanceof Map
+    const myBilliardSeat = !mySeat && room.billiard?.findHumanSeat
+      ? room.billiard.findHumanSeat(playerId)
+      : null;
+    const mySpectator = !mySeat && !myBilliardSeat && room.spectators instanceof Map
       ? room.spectators.get(playerId) || null
       : null;
-    const isSpectator = Boolean(mySpectator);
+    const myActivity = mySeat ? 'okey' : myBilliardSeat ? 'billiard' : 'spectator';
+    const isSpectator = myActivity === 'spectator';
     const watchSeatIndex = mySpectator ? mySpectator.watchSeatIndex : null;
     const viewerSeatIndex = mySeat ? mySeat.seatIndex : (watchSeatIndex ?? 0);
     const spectatorsList = room.spectators instanceof Map
@@ -1679,11 +2120,16 @@ export class RoomManager {
       code: room.code,
       name: room.name,
       status: room.status,
-      isHost: !isSpectator && room.hostPlayerId === playerId,
+      isHost: room.hostPlayerId === playerId,
+      myActivity,
+      billiardSeatIndex: myBilliardSeat ? myBilliardSeat.seatIndex : null,
+      myRoamerKey: this.ensureRoamerKey(room, playerId),
       isSpectator,
       watchSeatIndex,
       spectators: spectatorsList,
       spectatorCount: spectatorsList.length,
+      roamers: this.getRoamersPayload(room),
+      billiard: room.billiard ? room.billiard.getClientView() : null,
       music: room.music || null,
       tv: room.tv || null,
       ambianceTrack: room.ambianceTrack || null,
@@ -1703,7 +2149,7 @@ export class RoomManager {
       })),
       game: room.session
         ? room.session.getClientView(mySeat ? mySeat.seatIndex : 0, {
-            isSpectator,
+            isSpectator: !mySeat,
             watchSeatIndex
           })
         : null

@@ -4,6 +4,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { canLayoffTile } from '../../shared/melds.js';
 import { KAHVE_CATS, RACK_THEMES, TILE_THEMES } from '../../shared/presets.js';
 import { isOkeyTile } from '../../shared/tiles.js';
+import { BILLIARD_WORLD_POS, BilliardTable3D } from './billiard3d.js';
 import { soundFX } from './sound.js';
 import {
   createLiveClockTexture,
@@ -52,6 +53,11 @@ const CAMERA_PRESETS = {
     pos: new THREE.Vector3(0, 7.6, 12.8),
     target: new THREE.Vector3(0, 0.75, 4.4),
     fov: 44
+  },
+  billiard: {
+    pos: new THREE.Vector3(BILLIARD_WORLD_POS.x - 5.4, 6.2, BILLIARD_WORLD_POS.z + 5.6),
+    target: new THREE.Vector3(BILLIARD_WORLD_POS.x, 0.18, BILLIARD_WORLD_POS.z),
+    fov: 48
   }
 };
 
@@ -388,6 +394,12 @@ export class OkeyTable3D {
     this.scene.add(this.bubbleGroup);
     this.celebrationGroup = new THREE.Group();
     this.scene.add(this.celebrationGroup);
+    this.roamerGroup = new THREE.Group();
+    this.scene.add(this.roamerGroup);
+    this.roamerActors = new Map();
+    this.roamerNameMats = new Map();
+    this._lastRoamersSig = '';
+
     this.steamParticles = [];
     this.speechBubbles = new Map();
     this.celebrationParticles = [];
@@ -402,7 +414,37 @@ export class OkeyTable3D {
     this.currentOrders = null;
     this.currentViewerIdx = 0;
 
+    this.cameraMode = 'table';
+    this.myActivity = 'okey';
+    this.billiardSeatIndex = null;
+    this.billiardState = null;
+    this.localPlayerId = null;
+    this.billiardPlaceMode = false;
+    this.billiardAimingDrag = false;
+    this._lastBilliardAimEmitAt = 0;
+    this.freeroamState = {
+      pos: new THREE.Vector3(0, 3.2, 10.6),
+      yaw: 0,
+      pitch: -0.14,
+      keys: new Set(),
+      lookDrag: null,
+      lastEmitAt: 0,
+      lastSentX: null,
+      lastSentZ: null,
+      lastSentYaw: null
+    };
+    this._roamTmpLook = new THREE.Vector3();
+
+    this.billiard3d = new BilliardTable3D(this.scene, {
+      bustGeom: this.bustGeom,
+      avatarMatCache: this.avatarMatCache
+    });
+
     this.buildEnvironment();
+    const billiardFelt = this.billiard3d.getFeltHitMesh();
+    if (billiardFelt) {
+      this.envInteractables.push(billiardFelt);
+    }
     this.buildTable();
     this.buildRacks();
     this.buildDiceMeshes();
@@ -2347,6 +2389,10 @@ export class OkeyTable3D {
       this.activePointerId = null;
     }
     this.orbitDrag = null;
+    this.billiardAimingDrag = false;
+    if (this.freeroamState) {
+      this.freeroamState.lookDrag = null;
+    }
     if (this.dragState?.floatingMesh) {
       this.scene.remove(this.dragState.floatingMesh);
     }
@@ -2621,7 +2667,22 @@ export class OkeyTable3D {
     }
 
     if (wasDemo) {
-      this.setCameraPreset('fp');
+      if (this.myActivity === 'billiard') {
+        this.setCameraPreset('billiard');
+      } else if (this.myActivity === 'spectator') {
+        this.setCameraPreset('freeroam');
+      } else {
+        this.setCameraPreset('fp');
+      }
+    }
+
+    if (state.phase === 'waiting') {
+      this.handSlotData.fill(null);
+      this.selectedTileIds.clear();
+      this.lastRenderedRound = null;
+      this.renderPlayerHeads(state, viewerIdx);
+      this.requestShadowUpdate(2);
+      return;
     }
 
     const isMyTurn = !state.isSpectator && state.phase === 'playing' && state.currentSeat === viewerIdx;
@@ -2987,10 +3048,248 @@ export class OkeyTable3D {
   }
 
   setCameraPreset(presetName) {
-    const preset = CAMERA_PRESETS[presetName] || CAMERA_PRESETS.fp;
+    const prevMode = this.cameraMode;
+    if (presetName === 'freeroam') {
+      this.cameraMode = 'freeroam';
+      this.orbitDrag = null;
+      this.billiardAimingDrag = false;
+      if (prevMode !== 'freeroam') {
+        if (prevMode === 'billiard') {
+          this.freeroamState.pos.set(BILLIARD_WORLD_POS.x - 5.2, 3.2, BILLIARD_WORLD_POS.z);
+          this.freeroamState.yaw = -Math.PI / 2;
+          this.freeroamState.pitch = -0.18;
+        } else {
+          this.freeroamState.pos.set(0, 3.2, 10.6);
+          this.freeroamState.yaw = 0;
+          this.freeroamState.pitch = -0.15;
+        }
+        this.constrainFreeroamPosition(this.freeroamState.pos);
+        this.callbacks.onFreeroamMove?.({
+          x: this.freeroamState.pos.x,
+          z: this.freeroamState.pos.z,
+          yaw: this.freeroamState.yaw,
+          active: true
+        });
+      }
+      this.targetFov = 64;
+      if (this.canvas) this.canvas.style.cursor = 'grab';
+      return;
+    }
+
+    if (prevMode === 'freeroam') {
+      this.freeroamState.keys.clear();
+      this.freeroamState.lookDrag = null;
+      if (this.canvas) this.canvas.style.cursor = 'default';
+      this.callbacks.onFreeroamMove?.({ active: false });
+    }
+
+    this.cameraMode = CAMERA_PRESETS[presetName] ? presetName : 'fp';
+    const preset = CAMERA_PRESETS[this.cameraMode] || CAMERA_PRESETS.fp;
     this.targetCamLook.copy(preset.target);
     this.targetSpherical.setFromVector3(preset.pos.clone().sub(preset.target));
     this.targetFov = preset.fov || 44;
+  }
+
+  teleportFreeroam(zone = 'okey') {
+    const zones = {
+      okey: { x: 0, z: 10.6, yaw: 0, pitch: -0.16 },
+      billiard: { x: BILLIARD_WORLD_POS.x - 5.0, z: BILLIARD_WORLD_POS.z, yaw: -Math.PI / 2, pitch: -0.22 },
+      tea: { x: 0, z: -15.2, yaw: 0, pitch: -0.06 },
+      tv: { x: 0, z: -9.8, yaw: 0, pitch: 0.08 }
+    };
+    const z = zones[zone] || zones.okey;
+    this.cameraMode = 'freeroam';
+    this.orbitDrag = null;
+    this.billiardAimingDrag = false;
+    this.freeroamState.pos.set(z.x, 3.2, z.z);
+    this.freeroamState.yaw = z.yaw;
+    this.freeroamState.pitch = z.pitch;
+    this.constrainFreeroamPosition(this.freeroamState.pos);
+    this.targetFov = 64;
+    this.callbacks.onFreeroamMove?.({
+      x: this.freeroamState.pos.x,
+      z: this.freeroamState.pos.z,
+      yaw: this.freeroamState.yaw,
+      active: true
+    });
+  }
+
+  setFreeroamKey(key, isDown) {
+    if (!this.freeroamState?.keys) return;
+    const norm = String(key || '').toLowerCase();
+    if (isDown) this.freeroamState.keys.add(norm);
+    else this.freeroamState.keys.delete(norm);
+  }
+
+  clearFreeroamKeys() {
+    this.freeroamState?.keys?.clear();
+  }
+
+  constrainFreeroamPosition(pos) {
+    pos.x = THREE.MathUtils.clamp(pos.x, -23.0, 23.0);
+    pos.z = THREE.MathUtils.clamp(pos.z, -19.2, 20.6);
+    pos.y = 3.2;
+
+    // Push out from center Okey table (box around origin)
+    const okeyHalf = 7.25;
+    if (Math.abs(pos.x) < okeyHalf && Math.abs(pos.z) < okeyHalf) {
+      const dx = okeyHalf - Math.abs(pos.x);
+      const dz = okeyHalf - Math.abs(pos.z);
+      if (dx < dz) pos.x = pos.x >= 0 ? okeyHalf : -okeyHalf;
+      else pos.z = pos.z >= 0 ? okeyHalf : -okeyHalf;
+    }
+
+    // Push out from Billiard table
+    const bx = BILLIARD_WORLD_POS.x;
+    const bz = BILLIARD_WORLD_POS.z;
+    const bHalfW = 2.65;
+    const bHalfL = 4.35;
+    if (Math.abs(pos.x - bx) < bHalfW && Math.abs(pos.z - bz) < bHalfL) {
+      const dx = bHalfW - Math.abs(pos.x - bx);
+      const dz = bHalfL - Math.abs(pos.z - bz);
+      if (dx < dz) pos.x = pos.x >= bx ? bx + bHalfW : bx - bHalfW;
+      else pos.z = pos.z >= bz ? bz + bHalfL : bz - bHalfL;
+    }
+
+    // Push out from 4 side tables
+    const sideTables = [
+      [-16.2, -15.2],
+      [16.2, -15.2],
+      [-17.4, 10.2],
+      [17.4, 10.2]
+    ];
+    for (const [tx, tz] of sideTables) {
+      const dx = pos.x - tx;
+      const dz = pos.z - tz;
+      const dist = Math.hypot(dx, dz);
+      const minR = 3.45;
+      if (dist < minR && dist > 0.001) {
+        pos.x = tx + (dx / dist) * minR;
+        pos.z = tz + (dz / dist) * minR;
+      }
+    }
+  }
+
+  isMyBilliardTurn() {
+    if (!this.billiardState || this.billiardState.phase !== 'playing') return false;
+    if (this.myActivity !== 'billiard' || this.billiardSeatIndex === null) return false;
+    return this.billiardState.currentSeat === this.billiardSeatIndex && !this.billiard3d?.isAnimatingShot;
+  }
+
+  setActivityContext({ myActivity, billiardSeatIndex, localPlayerId } = {}) {
+    if (myActivity) this.myActivity = myActivity;
+    if (billiardSeatIndex !== undefined) this.billiardSeatIndex = billiardSeatIndex;
+    if (localPlayerId !== undefined) this.localPlayerId = localPlayerId;
+  }
+
+  updateBilliardState(billiardState) {
+    this.billiardState = billiardState || null;
+    if (this.billiard3d && billiardState) {
+      this.billiard3d.updateState(billiardState, this.localPlayerId);
+    }
+    if (!billiardState?.ballInHand) {
+      this.billiardPlaceMode = false;
+    }
+  }
+
+  updateRemoteBilliardAim(aimState) {
+    if (!aimState || !this.billiard3d?.currentState) return;
+    if (this.isMyBilliardTurn()) return;
+    this.billiard3d.currentState.aimState = { ...aimState };
+  }
+
+  setBilliardPlaceMode(enabled) {
+    this.billiardPlaceMode = Boolean(enabled && this.billiardState?.ballInHand && this.isMyBilliardTurn());
+  }
+
+  setBilliardPower(power) {
+    const p = THREE.MathUtils.clamp(Number(power) || 0.65, 0.12, 1);
+    this.billiard3d?.setLocalAim(undefined, p);
+    if (this.isMyBilliardTurn()) {
+      const now = performance.now();
+      if (now - this._lastBilliardAimEmitAt > 65) {
+        this._lastBilliardAimEmitAt = now;
+        this.callbacks.onBilliardAim?.(this.billiard3d.localAimAngle, p);
+      }
+    }
+  }
+
+  getBilliardAim() {
+    return {
+      angle: this.billiard3d?.localAimAngle ?? -Math.PI / 2,
+      power: this.billiard3d?.localAimPower ?? 0.65
+    };
+  }
+
+  renderRoamers(roamers = [], myRoamerKey = null) {
+    const list = (Array.isArray(roamers) ? roamers : []).filter(
+      (r) => r && r.key && (this.cameraMode !== 'freeroam' || r.key !== myRoamerKey)
+    );
+    const activeKeys = new Set(list.map((r) => r.key));
+
+    // Remove departed roamers
+    for (const [key, actor] of this.roamerActors.entries()) {
+      if (!activeKeys.has(key)) {
+        this.roamerGroup.remove(actor.group);
+        const npMat = this.roamerNameMats.get(key);
+        if (npMat) {
+          npMat.map?.dispose();
+          npMat.dispose();
+          this.roamerNameMats.delete(key);
+        }
+        this.roamerActors.delete(key);
+      }
+    }
+
+    for (const r of list) {
+      let actor = this.roamerActors.get(r.key);
+      if (!actor) {
+        const group = new THREE.Group();
+        group.position.set(Number(r.x) || 0, -0.35, Number(r.z) || 0);
+        group.rotation.y = (Number(r.yaw) || 0) + Math.PI;
+
+        let vestMat = this.colorMatCache.get('roamer-vest');
+        if (!vestMat) {
+          vestMat = new THREE.MeshStandardMaterial({ color: '#395C58', roughness: 0.72 });
+          this.colorMatCache.set('roamer-vest', vestMat);
+        }
+        const bust = new THREE.Mesh(this.bustGeom, vestMat);
+        bust.scale.setScalar(0.88);
+        group.add(bust);
+
+        const avKey = `roam-av-${r.avatar || 'avatar-1'}`;
+        let avMat = this.avatarMatCache.get(avKey);
+        if (!avMat) {
+          avMat = new THREE.MeshBasicMaterial({ map: getAvatarTexture(r.avatar || 'avatar-1', r.name || 'G') });
+          this.avatarMatCache.set(avKey, avMat);
+        }
+        const badge = new THREE.Mesh(new THREE.CircleGeometry(0.45, 16), avMat);
+        badge.position.set(0, 1.48, 0.34);
+        group.add(badge);
+
+        const npMat = new THREE.SpriteMaterial({
+          map: createNameplateTexture(`${r.name || 'Gezgin'}`, { isActive: false }),
+          transparent: true,
+          depthWrite: false
+        });
+        this.roamerNameMats.set(r.key, npMat);
+        const np = new THREE.Sprite(npMat);
+        np.position.set(0, 2.55, 0);
+        np.scale.set(3.0, 0.75, 1);
+        group.add(np);
+
+        this.roamerGroup.add(group);
+        actor = {
+          group,
+          targetPos: new THREE.Vector3(Number(r.x) || 0, -0.35, Number(r.z) || 0),
+          targetYaw: (Number(r.yaw) || 0) + Math.PI
+        };
+        this.roamerActors.set(r.key, actor);
+      } else {
+        actor.targetPos.set(Number(r.x) || 0, -0.35, Number(r.z) || 0);
+        actor.targetYaw = (Number(r.yaw) || 0) + Math.PI;
+      }
+    }
   }
 
   isMyPlayTurn() {
@@ -3094,7 +3393,12 @@ export class OkeyTable3D {
 
       if (e.button === 2 || e.button === 1) {
         this.cancelActiveInteractions();
-        this.orbitDrag = { x: e.clientX, y: e.clientY };
+        if (this.cameraMode === 'freeroam') {
+          this.freeroamState.lookDrag = { x: e.clientX, y: e.clientY };
+          this.canvas.style.cursor = 'grabbing';
+        } else {
+          this.orbitDrag = { x: e.clientX, y: e.clientY };
+        }
         try {
           this.canvas.setPointerCapture?.(e.pointerId);
           this.activePointerId = e.pointerId;
@@ -3111,12 +3415,80 @@ export class OkeyTable3D {
         ...this.envInteractables
       ];
       const hits = this.raycaster.intersectObjects(clickTargets, false);
-      if (hits.length === 0) return;
+
+      if (hits.length === 0) {
+        if (this.cameraMode === 'freeroam') {
+          this.cancelActiveInteractions();
+          this.freeroamState.lookDrag = { x: e.clientX, y: e.clientY };
+          this.canvas.style.cursor = 'grabbing';
+          try {
+            this.canvas.setPointerCapture?.(e.pointerId);
+            this.activePointerId = e.pointerId;
+          } catch {
+            // Ignore pointer capture errors
+          }
+        }
+        return;
+      }
 
       const hit = hits[0].object;
       const data = hit.userData;
 
+      if (data.kind === 'billiardFelt') {
+        if (this.isMyBilliardTurn()) {
+          const local = this.billiard3d.worldToLocalFelt(hits[0].point);
+          if (this.billiardPlaceMode && this.billiardState?.ballInHand) {
+            this.billiardPlaceMode = false;
+            this.callbacks.onBilliardPlaceBall?.(local.x, local.z);
+            return;
+          }
+          this.cancelActiveInteractions();
+          const cueBall = this.billiard3d.ballMeshes.get(0);
+          if (cueBall) {
+            const dx = local.x - cueBall.position.x;
+            const dz = local.z - cueBall.position.z;
+            if (Math.hypot(dx, dz) > 0.02) {
+              const angle = Math.atan2(dz, dx);
+              this.billiard3d.setLocalAim(angle);
+              this.callbacks.onBilliardAim?.(angle, this.billiard3d.localAimPower);
+            }
+          }
+          this.billiardAimingDrag = true;
+          this.canvas.style.cursor = 'crosshair';
+          try {
+            this.canvas.setPointerCapture?.(e.pointerId);
+            this.activePointerId = e.pointerId;
+          } catch {
+            // Ignore pointer capture errors
+          }
+          return;
+        }
+        if (this.cameraMode === 'freeroam') {
+          this.cancelActiveInteractions();
+          this.freeroamState.lookDrag = { x: e.clientX, y: e.clientY };
+          this.canvas.style.cursor = 'grabbing';
+          try {
+            this.canvas.setPointerCapture?.(e.pointerId);
+            this.activePointerId = e.pointerId;
+          } catch {
+            // Ignore pointer capture errors
+          }
+        }
+        return;
+      }
+
       if (this.currentState?.isSpectator && data.kind !== 'cat' && data.kind !== 'tv') {
+        if (this.cameraMode === 'freeroam') {
+          this.cancelActiveInteractions();
+          this.freeroamState.lookDrag = { x: e.clientX, y: e.clientY };
+          this.canvas.style.cursor = 'grabbing';
+          try {
+            this.canvas.setPointerCapture?.(e.pointerId);
+            this.activePointerId = e.pointerId;
+          } catch {
+            // Ignore pointer capture errors
+          }
+        }
         return;
       }
 
@@ -3157,6 +3529,66 @@ export class OkeyTable3D {
     };
 
     this.onPointerMove = (e) => {
+      if (this.freeroamState?.lookDrag) {
+        const dx = e.clientX - this.freeroamState.lookDrag.x;
+        const dy = e.clientY - this.freeroamState.lookDrag.y;
+        this.freeroamState.lookDrag = { x: e.clientX, y: e.clientY };
+
+        this.freeroamState.yaw -= dx * 0.0055;
+        this.freeroamState.pitch = THREE.MathUtils.clamp(
+          this.freeroamState.pitch - dy * 0.0045,
+          -0.75,
+          0.55
+        );
+        const now = performance.now();
+        if (now - this.freeroamState.lastEmitAt > 95) {
+          this.freeroamState.lastEmitAt = now;
+          this.freeroamState.lastSentX = this.freeroamState.pos.x;
+          this.freeroamState.lastSentZ = this.freeroamState.pos.z;
+          this.freeroamState.lastSentYaw = this.freeroamState.yaw;
+          this.callbacks.onFreeroamMove?.({
+            x: this.freeroamState.pos.x,
+            z: this.freeroamState.pos.z,
+            yaw: this.freeroamState.yaw,
+            active: true
+          });
+        }
+        return;
+      }
+
+      if (this.billiardAimingDrag) {
+        if (!this.isMyBilliardTurn()) {
+          this.billiardAimingDrag = false;
+          this.canvas.style.cursor = 'default';
+          releaseActivePointer();
+          return;
+        }
+        const feltMesh = this.billiard3d?.getFeltHitMesh();
+        if (feltMesh) {
+          this.updatePointer(e.clientX, e.clientY);
+          this.raycaster.setFromCamera(this.pointer, this.camera);
+          const hits = this.raycaster.intersectObject(feltMesh, false);
+          if (hits.length > 0) {
+            const local = this.billiard3d.worldToLocalFelt(hits[0].point);
+            const cueBall = this.billiard3d.ballMeshes.get(0);
+            if (cueBall) {
+              const dx = local.x - cueBall.position.x;
+              const dz = local.z - cueBall.position.z;
+              if (Math.hypot(dx, dz) > 0.02) {
+                const angle = Math.atan2(dz, dx);
+                this.billiard3d.setLocalAim(angle);
+                const now = performance.now();
+                if (now - this._lastBilliardAimEmitAt > 65) {
+                  this._lastBilliardAimEmitAt = now;
+                  this.callbacks.onBilliardAim?.(angle, this.billiard3d.localAimPower);
+                }
+              }
+            }
+          }
+        }
+        return;
+      }
+
       if (this.orbitDrag) {
         const dx = e.clientX - this.orbitDrag.x;
         const dy = e.clientY - this.orbitDrag.y;
@@ -3282,10 +3714,47 @@ export class OkeyTable3D {
         this._hoverTargets.push(this.envInteractables[i]);
       }
       const hits = this.raycaster.intersectObjects(this._hoverTargets, false);
-      this.canvas.style.cursor = hits.length > 0 ? 'pointer' : 'default';
+      if (hits.length > 0) {
+        const hitKind = hits[0].object?.userData?.kind;
+        if (hitKind === 'billiardFelt') {
+          this.canvas.style.cursor = this.isMyBilliardTurn()
+            ? 'crosshair'
+            : (this.cameraMode === 'freeroam' ? 'grab' : 'default');
+        } else {
+          this.canvas.style.cursor = 'pointer';
+        }
+      } else {
+        this.canvas.style.cursor = this.cameraMode === 'freeroam' ? 'grab' : 'default';
+      }
     };
 
     this.onPointerUp = (e) => {
+      if (this.freeroamState?.lookDrag) {
+        this.freeroamState.lookDrag = null;
+        this.canvas.style.cursor = this.cameraMode === 'freeroam' ? 'grab' : 'default';
+        releaseActivePointer();
+        this.callbacks.onFreeroamMove?.({
+          x: this.freeroamState.pos.x,
+          z: this.freeroamState.pos.z,
+          yaw: this.freeroamState.yaw,
+          active: this.cameraMode === 'freeroam'
+        });
+        return;
+      }
+
+      if (this.billiardAimingDrag) {
+        this.billiardAimingDrag = false;
+        this.canvas.style.cursor = 'default';
+        releaseActivePointer();
+        if (this.isMyBilliardTurn()) {
+          this.callbacks.onBilliardAim?.(
+            this.billiard3d.localAimAngle,
+            this.billiard3d.localAimPower
+          );
+        }
+        return;
+      }
+
       if (this.orbitDrag) {
         this.orbitDrag = null;
         releaseActivePointer();
@@ -3496,11 +3965,11 @@ export class OkeyTable3D {
     };
 
     this.onWheel = (e) => {
-      if (this.demoMode) return;
+      if (this.demoMode || this.cameraMode === 'freeroam') return;
       this.targetSpherical.radius = THREE.MathUtils.clamp(
         this.targetSpherical.radius + e.deltaY * 0.008,
-        9.5,
-        20.0
+        this.cameraMode === 'billiard' ? 5.5 : 9.5,
+        22.0
       );
     };
 
@@ -4039,30 +4508,105 @@ export class OkeyTable3D {
       }
     }
 
+    // Tick 3D Billiard Table animations & cue stick
+    this.billiard3d?.tick(dt, {
+      isMyBilliardTurn: this.isMyBilliardTurn(),
+      localPlayerId: this.localPlayerId
+    });
+
+    // Smoothly interpolate live roaming spectator avatars
+    if (this.roamerActors.size > 0) {
+      const rDamp = this.reducedMotion ? 1 : Math.min(1, dt * 10);
+      for (const actor of this.roamerActors.values()) {
+        actor.group.position.lerp(actor.targetPos, rDamp);
+        let diff = actor.targetYaw - actor.group.rotation.y;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        actor.group.rotation.y += diff * rDamp;
+      }
+    }
+
     const damp = this.reducedMotion ? 1 : Math.min(1, dt * 8);
-    this.camSpherical.radius += (this.targetSpherical.radius - this.camSpherical.radius) * damp;
-    this.camSpherical.phi += (this.targetSpherical.phi - this.camSpherical.phi) * damp;
-    this.camSpherical.theta += (this.targetSpherical.theta - this.camSpherical.theta) * damp;
-    this.camTarget.lerp(this.targetCamLook, damp);
     if (this.targetFov && Math.abs(this.camera.fov - this.targetFov) > 0.05) {
       this.camera.fov += (this.targetFov - this.camera.fov) * damp;
       this.camera.updateProjectionMatrix();
     }
 
-    this._camOffsetVec.setFromSpherical(this.camSpherical);
-    this.camera.position.copy(this.camTarget).add(this._camOffsetVec);
-    if (this.nudgeShake && !this.reducedMotion) {
-      this.nudgeShake.elapsed += dt;
-      if (this.nudgeShake.elapsed >= this.nudgeShake.duration) {
-        this.nudgeShake = null;
-      } else {
-        const t = this.nudgeShake.elapsed / this.nudgeShake.duration;
-        const amp = (1 - t) * 0.14;
-        this.camera.position.x += Math.sin(t * Math.PI * 14) * amp;
-        this.camera.position.y += Math.cos(t * Math.PI * 10) * amp * 0.55;
+    if (this.cameraMode === 'freeroam' && !this.demoMode) {
+      const fs = this.freeroamState;
+      const keys = fs.keys;
+      const forwardInput =
+        (keys.has('keyw') || keys.has('arrowup') ? 1 : 0) -
+        (keys.has('keys') || keys.has('arrowdown') ? 1 : 0);
+      const strafeInput =
+        (keys.has('keyd') || keys.has('arrowright') ? 1 : 0) -
+        (keys.has('keya') || keys.has('arrowleft') ? 1 : 0);
+
+      if (forwardInput !== 0 || strafeInput !== 0) {
+        const len = Math.hypot(forwardInput, strafeInput);
+        const fNorm = forwardInput / len;
+        const sNorm = strafeInput / len;
+        const sprint = keys.has('shiftleft') || keys.has('shiftright');
+        const speed = sprint ? 10.5 : 6.4;
+
+        const fx = -Math.sin(fs.yaw);
+        const fz = -Math.cos(fs.yaw);
+        const rx = Math.cos(fs.yaw);
+        const rz = -Math.sin(fs.yaw);
+
+        fs.pos.x += (fx * fNorm + rx * sNorm) * speed * dt;
+        fs.pos.z += (fz * fNorm + rz * sNorm) * speed * dt;
+        this.constrainFreeroamPosition(fs.pos);
+
+        if (frameNow - fs.lastEmitAt > 95) {
+          const moved =
+            fs.lastSentX === null ||
+            Math.hypot(fs.pos.x - fs.lastSentX, fs.pos.z - fs.lastSentZ) > 0.05 ||
+            Math.abs(fs.yaw - (fs.lastSentYaw ?? 0)) > 0.03;
+          if (moved) {
+            fs.lastEmitAt = frameNow;
+            fs.lastSentX = fs.pos.x;
+            fs.lastSentZ = fs.pos.z;
+            fs.lastSentYaw = fs.yaw;
+            this.callbacks.onFreeroamMove?.({
+              x: fs.pos.x,
+              z: fs.pos.z,
+              yaw: fs.yaw,
+              active: true
+            });
+          }
+        }
       }
+
+      const cosPitch = Math.cos(fs.pitch);
+      const lx = -Math.sin(fs.yaw) * cosPitch;
+      const ly = Math.sin(fs.pitch);
+      const lz = -Math.cos(fs.yaw) * cosPitch;
+
+      this.camera.position.copy(fs.pos);
+      this._roamTmpLook.set(fs.pos.x + lx * 8, fs.pos.y + ly * 8, fs.pos.z + lz * 8);
+      this.camera.lookAt(this._roamTmpLook);
+    } else {
+      this.camSpherical.radius += (this.targetSpherical.radius - this.camSpherical.radius) * damp;
+      this.camSpherical.phi += (this.targetSpherical.phi - this.camSpherical.phi) * damp;
+      this.camSpherical.theta += (this.targetSpherical.theta - this.camSpherical.theta) * damp;
+      this.camTarget.lerp(this.targetCamLook, damp);
+
+      this._camOffsetVec.setFromSpherical(this.camSpherical);
+      this.camera.position.copy(this.camTarget).add(this._camOffsetVec);
+      if (this.nudgeShake && !this.reducedMotion) {
+        this.nudgeShake.elapsed += dt;
+        if (this.nudgeShake.elapsed >= this.nudgeShake.duration) {
+          this.nudgeShake = null;
+        } else {
+          const t = this.nudgeShake.elapsed / this.nudgeShake.duration;
+          const amp = (1 - t) * 0.14;
+          this.camera.position.x += Math.sin(t * Math.PI * 14) * amp;
+          this.camera.position.y += Math.cos(t * Math.PI * 10) * amp * 0.55;
+        }
+      }
+      this.camera.lookAt(this.camTarget);
     }
-    this.camera.lookAt(this.camTarget);
 
     if (this.shadowFramesPending > 0) {
       this.shadowFramesPending -= 1;
@@ -4113,6 +4657,8 @@ export class OkeyTable3D {
   destroy() {
     if (this.rafId) cancelAnimationFrame(this.rafId);
     this.cancelActiveInteractions();
+    this.clearFreeroamKeys();
+    this.billiard3d?.dispose();
     this.rainGroup?.dispose?.();
     this.css3dRenderer?.domElement?.remove();
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
@@ -4170,6 +4716,13 @@ export class OkeyTable3D {
       b.sprite.material?.dispose();
     }
     this.speechBubbles.clear();
+
+    for (const mat of this.roamerNameMats.values()) {
+      mat?.map?.dispose();
+      mat?.dispose();
+    }
+    this.roamerNameMats.clear();
+    this.roamerActors.clear();
 
     for (const mat of this.tileFaceMatCache.values()) mat?.dispose();
     this.tileFaceMatCache.clear();

@@ -652,4 +652,158 @@ test('RoomManager supports unlimited spectators, watchSeat, takeSeat, cat mama/m
   created.room.session?.destroy();
 });
 
+test('RoomManager supports simultaneous 4 Okey + 2 Billiard + Roamers in one room, standUp, activity switching, and roamMove', (ctx) => {
+  const io = createMockIo();
+  const rm = new RoomManager(io);
+
+  const created = rm.createRoom({
+    playerId: 'o1',
+    playerName: 'Efe',
+    roomName: 'Çoklu Salon'
+  });
+  assert.equal(created.ok, true);
+  const code = created.room.code;
+  ctx.after(() => {
+    created.room.session?.destroy();
+    created.room.billiard?.destroy();
+  });
+
+  // Fill 4 Okey seats
+  assert.equal(rm.joinRoom({ roomCode: code, playerId: 'o2', playerName: 'Ayşe' }).ok, true);
+  assert.equal(rm.joinRoom({ roomCode: code, playerId: 'o3', playerName: 'Mehmet' }).ok, true);
+  assert.equal(rm.joinRoom({ roomCode: code, playerId: 'o4', playerName: 'Zeynep' }).ok, true);
+  assert.equal(rm.startGame(code, 'o1').ok, true);
+
+  // Simultaneously 2 humans join Billiards directly in the same room
+  const b1 = rm.joinRoom({ roomCode: code, playerId: 'b1', playerName: 'Bilardo 1', activity: 'billiard' });
+  assert.equal(b1.ok, true);
+  assert.equal(b1.activity, 'billiard');
+  assert.equal(b1.billiardSeatIndex, 0);
+
+  const b2 = rm.joinRoom({ roomCode: code, playerId: 'b2', playerName: 'Bilardo 2', activity: 'billiard' });
+  assert.equal(b2.ok, true);
+  assert.equal(b2.activity, 'billiard');
+  assert.equal(b2.billiardSeatIndex, 1);
+
+  // Plus 2 roamers / spectators simultaneously in the same room
+  const sp1 = rm.joinRoom({ roomCode: code, playerId: 'sp1', playerName: 'Gezgin 1', asSpectator: true });
+  const sp2 = rm.joinRoom({ roomCode: code, playerId: 'sp2', playerName: 'Gezgin 2', activity: 'spectator' });
+  assert.equal(sp1.ok, true);
+  assert.equal(sp2.ok, true);
+
+  // Verify room listing and per-player payloads
+  const pub = rm.listPublicRooms().find((r) => r.code === code);
+  assert.ok(pub);
+  assert.equal(pub.humanCount, 4);
+  assert.equal(pub.billiardHumanCount, 2);
+  assert.equal(pub.spectatorCount, 2);
+
+  const b1Payload = rm.getRoomPayloadForPlayer(created.room, 'b1');
+  assert.equal(b1Payload.myActivity, 'billiard');
+  assert.equal(b1Payload.isSpectator, false);
+  assert.equal(b1Payload.billiardSeatIndex, 0);
+
+  const sp1Payload = rm.getRoomPayloadForPlayer(created.room, 'sp1');
+  assert.equal(sp1Payload.myActivity, 'spectator');
+  assert.equal(sp1Payload.isSpectator, true);
+
+  // Billiard players play simultaneously with active Okey game
+  assert.equal(rm.billiardStart({ roomCode: code, playerId: 'b1', autoFillBot: false }).ok, true);
+  assert.equal(rm.billiardAim({ roomCode: code, playerId: 'b1', angle: -1.5, power: 0.7 }).ok, true);
+  assert.equal(rm.billiardShoot({ roomCode: code, playerId: 'b1', angle: -Math.PI / 2, power: 0.85 }).ok, true);
+  assert.equal(io.emitted.some((e) => e.event === 'room:billiard' && e.target === 'player:o1'), true);
+  assert.equal(io.emitted.some((e) => e.event === 'room:billiardAim' && e.target === 'player:sp1'), true);
+
+  // Roam movement updates room:roamers and active:false removes roamer
+  const roamRes = rm.roamMove({ roomCode: code, playerId: 'sp1', x: 8.5, z: -2.0, yaw: 1.2, active: true });
+  assert.equal(roamRes.ok, true);
+  assert.equal(rm.getRoamersPayload(created.room).some((r) => r.name === 'Gezgin 1' && Math.abs(r.x - 8.5) < 0.01), true);
+  assert.equal(io.emitted.some((e) => e.event === 'room:roamers' && e.target === 'player:o1'), true);
+  const stopRoam = rm.roamMove({ roomCode: code, playerId: 'sp1', active: false });
+  assert.equal(stopRoam.ok, true);
+  assert.equal(rm.getRoamersPayload(created.room).some((r) => r.name === 'Gezgin 1'), false);
+
+  // Okey player o4 stands up -> bot takes o4 seat, room stays alive, o4 becomes spectator
+  const standO4 = rm.standUp({ roomCode: code, playerId: 'o4' });
+  assert.equal(standO4.ok, true);
+  assert.equal(created.room.seats[3].type, 'bot');
+  assert.equal(rm.getRoomPayloadForPlayer(created.room, 'o4').myActivity, 'spectator');
+
+  // Roamer sp1 sits in billiard after b2 stands up
+  assert.equal(rm.standUp({ roomCode: code, playerId: 'b2' }).ok, true);
+  assert.equal(created.room.billiard.seats[1].type, 'bot');
+
+  // If all Okey humans leave while billiard human b1 stays, room does NOT close
+  rm.leaveCurrentRoom('o1');
+  rm.leaveCurrentRoom('o2');
+  rm.leaveCurrentRoom('o3');
+  rm.leaveCurrentRoom('o4');
+  rm.leaveCurrentRoom('sp1');
+  rm.leaveCurrentRoom('sp2');
+  assert.ok(rm.getRoom(code));
+  assert.equal(created.room.hostPlayerId, 'b1');
+
+  // Even after b1 leaves, room stays open because b2 is still roaming as spectator
+  rm.leaveCurrentRoom('b1');
+  assert.ok(rm.getRoom(code));
+  assert.equal(created.room.hostPlayerId, 'b2');
+
+  // Once last human b2 leaves, room cleans up
+  rm.leaveCurrentRoom('b2');
+  assert.equal(rm.getRoom(code), null);
+});
+
+test('LocalSingleplayerClient transitions cleanly between Okey, Billiards, and Freeroam/Spectator', async (ctx) => {
+  const { LocalSingleplayerClient } = await import('../src/client/localSession.js');
+  const states = [];
+  const client = new LocalSingleplayerClient({
+    playerName: 'Efe',
+    playerAvatar: 'avatar-1',
+    seatIndex: 0,
+    options: { teamMode: 'solo', katlamali: false, maxRounds: 5, turnSeconds: 60 },
+    onState: (s) => states.push(s)
+  });
+  ctx.after(() => client.destroy());
+
+  client.emitRoomState();
+  let last = states[states.length - 1];
+  assert.equal(last.myActivity, 'okey');
+  assert.equal(last.billiard.seats.filter((s) => s.type === 'bot').length, 2);
+
+  // Switch from Okey to Billiards -> Okey seat vacates to bot
+  client.action('room:billiardJoin', { seatIndex: 0 }, (res) => {
+    assert.equal(res.ok, true);
+  });
+  last = states[states.length - 1];
+  assert.equal(last.myActivity, 'billiard');
+  assert.equal(last.billiardSeatIndex, 0);
+  assert.equal(last.seats[0].type, 'bot');
+
+  // Start local billiard match & shoot
+  client.action('room:billiardStart', { autoFillBot: true }, (res) => {
+    assert.equal(res.ok, true);
+  });
+  client.action('room:billiardShoot', { angle: -Math.PI / 2, power: 0.85 }, (res) => {
+    assert.equal(res.ok, true);
+    assert.ok(res.shot.frames.length > 2);
+  });
+
+  // Stand up -> becomes spectator
+  client.action('room:standUp', {}, (res) => {
+    assert.equal(res.ok, true);
+  });
+  last = states[states.length - 1];
+  assert.equal(last.myActivity, 'spectator');
+  assert.equal(last.isSpectator, true);
+
+  // Return to Okey seat 0
+  client.action('room:takeSeat', { seatIndex: 0 }, (res) => {
+    assert.equal(res.ok, true);
+  });
+  last = states[states.length - 1];
+  assert.equal(last.myActivity, 'okey');
+  assert.equal(last.seats[0].type, 'human');
+});
+
+
 

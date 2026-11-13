@@ -28,6 +28,8 @@
         <button type="button" class="seg__btn is-active" data-cam="fp">1. Şahıs</button>
         <button type="button" class="seg__btn" data-cam="table">Masa</button>
         <button type="button" class="seg__btn" data-cam="top">Üstten</button>
+        <button type="button" class="seg__btn" data-cam="billiard">Bilardo</button>
+        <button type="button" class="seg__btn" data-cam="freeroam">Gezin</button>
       </div>
       <button type="button" id="btn-yazboz" class="btn btn--quiet btn--sm" hidden title="Canlı Yazboz defteri">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -85,6 +87,7 @@
         <span>Ses açık</span>
       </button>
       <button type="button" id="btn-rules" class="btn btn--quiet btn--sm">Kurallar</button>
+      <button type="button" id="btn-stand-up" class="btn btn--quiet btn--sm" hidden title="Masadan kalkıp 3D salonda gezin veya diğer masaları izle">Masadan Kalk</button>
       <button type="button" id="btn-leave" class="btn btn--quiet btn--sm" hidden>Masadan Ayrıl</button>
     </div>
   </header>
@@ -263,8 +266,9 @@
               <label for="join-code">Oda koduyla katıl</label>
               <div class="join-row">
                 <input id="join-code" name="roomCode" type="text" maxlength="6" placeholder="4K9M" autocomplete="off">
-                <button type="submit" class="btn">Masaya Gir</button>
-                <button type="button" id="btn-join-spectator" class="btn btn--quiet">Yancı / İzle</button>
+                <button type="submit" class="btn">Okey Masasına Gir</button>
+                <button type="button" id="btn-join-billiard" class="btn btn--quiet">Bilardo Oyna</button>
+                <button type="button" id="btn-join-spectator" class="btn btn--quiet">Gezin / İzle</button>
               </div>
               <p id="join-help" class="field__help" aria-live="polite"></p>
             </div>
@@ -298,7 +302,7 @@
                   <th scope="col">Masa</th>
                   <th scope="col">Kod</th>
                   <th scope="col">Kural</th>
-                  <th scope="col">Oyuncu</th>
+                  <th scope="col">Oyuncular</th>
                   <th scope="col">İşlem</th>
                 </tr>
               </thead>
@@ -315,7 +319,7 @@
         <div class="waiting-head">
           <div>
             <h1 id="wait-room-title">Oda Hazırlığı</h1>
-            <p id="wait-room-subtitle" class="lead">Koltuk seçebilir, boş koltuklara bot ekleyerek oyunu başlatabilirsiniz.</p>
+            <p id="wait-room-subtitle" class="lead">Okey masasına oturabilir, yan taraftaki bilardo masasına geçebilir veya 3D salonda gezinebilirsiniz.</p>
           </div>
           <div class="code-share">
             <span id="wait-room-code" class="code-badge num"></span>
@@ -327,6 +331,14 @@
         </div>
 
         <div id="wait-seats-grid" class="wait-seats"></div>
+
+        <section id="wait-billiard-panel" class="wait-billiard" aria-label="Bilardo Masası">
+          <div class="wait-billiard__head">
+            <strong>Bilardo Masası (8-Top · 2 Kişilik)</strong>
+            <span id="wait-billiard-status" class="pill">Hazır</span>
+          </div>
+          <div id="wait-billiard-seats" class="wait-billiard__seats"></div>
+        </section>
 
         <div id="wait-host-controls" class="wait-controls" hidden>
           <div class="field field--inline">
@@ -389,7 +401,10 @@
 
         <div class="wait-footer">
           <p id="wait-status-msg" class="field__help" aria-live="polite"></p>
-          <button type="button" id="btn-start-match" class="btn btn--primary" hidden>Oyunu Başlat</button>
+          <div class="wait-footer__actions">
+            <button type="button" id="btn-enter-3d-hall" class="btn btn--quiet">3D Salonda Gezin / Bilardo</button>
+            <button type="button" id="btn-start-match" class="btn btn--primary" hidden>Okeyi Başlat</button>
+          </div>
         </div>
       </div>
     </section>
@@ -400,7 +415,7 @@
       <div id="hud-speech-bubble" class="hud-speech-bubble" role="status" aria-live="polite" hidden></div>
       <div id="spectator-bar" class="spectator-bar" hidden aria-label="Yancı ve izleyici kontrolleri"></div>
 
-      <div class="bottom-dock">
+      <div id="okey-bottom-dock" class="bottom-dock">
         <div id="hud-banner" class="hud-banner" role="status" aria-live="polite">
           <span id="hud-turn-text">Oyun hazır</span>
         </div>
@@ -460,6 +475,48 @@
             <button type="button" id="btn-discard-tile" class="btn btn--accent-3 btn--sm" hidden>Taş At</button>
             <button type="button" id="btn-show-round-summary" class="btn btn--quiet btn--sm" hidden>El Sonucu</button>
             <button type="button" id="btn-hud-next-round" class="btn btn--primary btn--sm" hidden>Sonraki El</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 8-Ball Billiard HUD Bar -->
+      <div id="billiard-hud" class="billiard-hud" hidden aria-label="Bilardo masası kontrolleri">
+        <div class="billiard-hud__top">
+          <div id="billiard-players-bar" class="billiard-players"></div>
+          <span id="billiard-hud-status" class="billiard-hud__status" role="status" aria-live="polite">Bilardo masası hazır</span>
+        </div>
+        <div class="billiard-hud__controls">
+          <button type="button" id="btn-billiard-place" class="btn btn--sm" hidden title="Masa çuhasına tıklayarak beyaz topu yerleştir">Beyaz Topu Koy</button>
+          <div id="billiard-power-wrap" class="billiard-power-wrap">
+            <label for="billiard-power">Güç</label>
+            <input id="billiard-power" class="billiard-power-range" type="range" min="15" max="100" value="68" aria-label="Vuruş gücü">
+            <span id="billiard-power-val" class="num">%68</span>
+          </div>
+          <button type="button" id="btn-billiard-shoot" class="btn btn--primary btn--sm" hidden>Vur</button>
+          <button type="button" id="btn-billiard-start" class="btn btn--primary btn--sm" hidden>Bilardo Başlat</button>
+          <button type="button" id="btn-billiard-bot" class="btn btn--quiet btn--sm" hidden>Bot Ekle</button>
+          <button type="button" id="btn-billiard-stand" class="btn btn--quiet btn--sm">Masadan Kalk</button>
+        </div>
+      </div>
+
+      <!-- Freeroam / Spectator Walk Bar -->
+      <div id="freeroam-hud" class="freeroam-hud" hidden aria-label="Salonda gezinme ve izleme">
+        <div class="freeroam-hud__info">
+          <span id="freeroam-hint" class="freeroam-hud__hint">WASD / Yön Tuşları: Yürü · Shift: Koş · Fare sürükle: Bak</span>
+          <span id="freeroam-status" class="freeroam-hud__status"></span>
+        </div>
+        <div class="freeroam-hud__actions">
+          <div class="freeroam-warps" role="group" aria-label="Hızlı ışınlan">
+            <button type="button" class="btn btn--quiet btn--sm" data-warp="okey">Okey Masası</button>
+            <button type="button" class="btn btn--quiet btn--sm" data-warp="billiard">Bilardo</button>
+            <button type="button" class="btn btn--quiet btn--sm" data-warp="tea">Çay Ocağı</button>
+            <button type="button" class="btn btn--quiet btn--sm" data-warp="tv">TV Önü</button>
+          </div>
+          <div class="freeroam-join-btns">
+            <button type="button" id="btn-roam-join-okey" class="btn btn--primary btn--sm">Okey'e Otur</button>
+            <button type="button" id="btn-roam-join-billiard" class="btn btn--sm">Bilardo Oyna</button>
+            <button type="button" id="btn-roam-start-okey" class="btn btn--primary btn--sm" hidden>Okeyi Başlat</button>
+            <button type="button" id="btn-roam-back-wait" class="btn btn--quiet btn--sm" hidden>Bekleme Odası</button>
           </div>
         </div>
       </div>

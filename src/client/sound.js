@@ -764,6 +764,87 @@ class SoundFX {
       src.start(t);
     });
   }
+
+  playBilliardCueShot(power = 0.6) {
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const p = Math.max(0.2, Math.min(1, Number(power) || 0.6));
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(520 + p * 220, now);
+    osc.frequency.exponentialRampToValueAtTime(140, now + 0.055);
+    gain.gain.setValueAtTime(0.18 + p * 0.22, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.065);
+    osc.connect(gain);
+    this.routeNode(gain, 0.28);
+    osc.start(now);
+    osc.stop(now + 0.07);
+  }
+
+  playBilliardHit(intensity = 0.7) {
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const vol = Math.max(0.08, Math.min(0.95, Number(intensity) || 0.7));
+
+    // Crisp phenolic resin billiard clack (dual high-Q modal partials)
+    [2240, 3860].forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq * (0.97 + Math.random() * 0.06), now);
+      osc.frequency.exponentialRampToValueAtTime(freq * 0.72, now + 0.045);
+      gain.gain.setValueAtTime((idx === 0 ? 0.24 : 0.16) * vol, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.055);
+      osc.connect(gain);
+      this.routeNode(gain, 0.34);
+      osc.start(now);
+      osc.stop(now + 0.06);
+    });
+  }
+
+  playBilliardCushion(intensity = 0.5) {
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const vol = Math.max(0.06, Math.min(0.85, Number(intensity) || 0.5));
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(175, now);
+    osc.frequency.exponentialRampToValueAtTime(68, now + 0.08);
+    gain.gain.setValueAtTime(0.22 * vol, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+    osc.connect(gain);
+    this.routeNode(gain, 0.25);
+    osc.start(now);
+    osc.stop(now + 0.1);
+  }
+
+  playBilliardPocket() {
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    [195, 145].forEach((freq, idx) => {
+      const t = now + idx * 0.055;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, t);
+      osc.frequency.exponentialRampToValueAtTime(80, t + 0.09);
+      gain.gain.setValueAtTime(0.24, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+      osc.connect(gain);
+      this.routeNode(gain, 0.42);
+      osc.start(t);
+      osc.stop(t + 0.11);
+    });
+  }
 }
 
 export const soundFX = new SoundFX();

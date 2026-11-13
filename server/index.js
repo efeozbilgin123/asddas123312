@@ -123,7 +123,21 @@ io.on('connection', (socket) => {
         }
         roomManager.broadcastRoomState(room);
         syncedSeat = true;
+      } else if (room.billiard?.findHumanSeat(playerId)) {
+        const bSeat = room.billiard.findHumanSeat(playerId);
+        if (room.cleanupTimer) {
+          clearTimeout(room.cleanupTimer);
+          room.cleanupTimer = null;
+        }
+        bSeat.connected = true;
+        roomManager.broadcastRoomState(room);
+        roomManager.broadcastRoomBilliard(room);
+        syncedSeat = true;
       } else if (room.spectators instanceof Map && room.spectators.has(playerId)) {
+        if (room.cleanupTimer) {
+          clearTimeout(room.cleanupTimer);
+          room.cleanupTimer = null;
+        }
         const spec = room.spectators.get(playerId);
         spec.connected = true;
         roomManager.broadcastRoomState(room);
@@ -190,7 +204,8 @@ io.on('connection', (socket) => {
       playerId,
       playerName: data?.playerName,
       playerAvatar: data?.playerAvatar,
-      asSpectator: Boolean(data?.asSpectator)
+      asSpectator: Boolean(data?.asSpectator),
+      activity: typeof data?.activity === 'string' ? data.activity : 'auto'
     });
     if (res.ok) {
       const payload = roomManager.getRoomPayloadForPlayer(res.room, playerId);
@@ -211,12 +226,100 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack(res);
   });
 
+  safeOn('room:standUp', (_data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.standUp({ roomCode: code, playerId });
+    if (typeof ack === 'function') ack(res);
+  });
+
   safeOn('room:takeSeat', (data, ack) => {
     const code = roomManager.playerToRoom.get(playerId);
     const res = roomManager.takeSeat({
       roomCode: code,
       playerId,
       targetSeatIndex: data?.seatIndex
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:billiardJoin', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.billiardJoin({
+      roomCode: code,
+      playerId,
+      seatIndex: data?.seatIndex
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:billiardLeave', (_data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.billiardLeave({ roomCode: code, playerId });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:billiardToggleBot', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.billiardToggleBot({
+      roomCode: code,
+      playerId,
+      seatIndex: Number(data?.seatIndex)
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:billiardStart', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.billiardStart({
+      roomCode: code,
+      playerId,
+      autoFillBot: data?.autoFillBot !== false
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:billiardAim', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.billiardAim({
+      roomCode: code,
+      playerId,
+      angle: data?.angle,
+      power: data?.power
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:billiardPlaceBall', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.billiardPlaceBall({
+      roomCode: code,
+      playerId,
+      x: data?.x,
+      z: data?.z
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:billiardShoot', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.billiardShoot({
+      roomCode: code,
+      playerId,
+      angle: data?.angle,
+      power: data?.power
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:roamMove', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.roamMove({
+      roomCode: code,
+      playerId,
+      x: data?.x,
+      z: data?.z,
+      yaw: data?.yaw,
+      active: data?.active !== false
     });
     if (typeof ack === 'function') ack(res);
   });

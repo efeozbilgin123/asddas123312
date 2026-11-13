@@ -1040,6 +1040,76 @@ export function getDeckCountBadgeTexture(count = 0) {
   return tex;
 }
 
+const billiardBallCache = new Map();
+const BILLIARD_COLORS = [
+  '#FAF6EC', // 0 cue
+  '#F5C400', // 1 yellow
+  '#1456C8', // 2 blue
+  '#D41628', // 3 red
+  '#6E229E', // 4 purple
+  '#F06818', // 5 orange
+  '#147A3E', // 6 green
+  '#7D1C24', // 7 maroon
+  '#14161A', // 8 black
+  '#F5C400', // 9 yellow stripe
+  '#1456C8', // 10 blue stripe
+  '#D41628', // 11 red stripe
+  '#6E229E', // 12 purple stripe
+  '#F06818', // 13 orange stripe
+  '#147A3E', // 14 green stripe
+  '#7D1C24'  // 15 maroon stripe
+];
+
+export function getBilliardBallTexture(ballId = 0) {
+  const id = Math.max(0, Math.min(15, Number(ballId) || 0));
+  if (billiardBallCache.has(id)) return billiardBallCache.get(id);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+
+  const color = BILLIARD_COLORS[id] || '#FAF6EC';
+  if (id === 0) {
+    ctx.fillStyle = '#FAF6EC';
+    ctx.fillRect(0, 0, 256, 128);
+    // Subtle training red dot on cue ball
+    ctx.fillStyle = '#C92A2A';
+    ctx.beginPath();
+    ctx.arc(128, 64, 9, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    const isStripe = id >= 9;
+    if (isStripe) {
+      ctx.fillStyle = '#FAF6EC';
+      ctx.fillRect(0, 0, 256, 128);
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 34, 256, 60);
+    } else {
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, 256, 128);
+    }
+
+    // Two opposite white number discs along equator
+    for (const cx of [64, 192]) {
+      ctx.fillStyle = '#FCF9F2';
+      ctx.beginPath();
+      ctx.arc(cx, 64, 22, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#14161A';
+      ctx.font = '800 22px "Plus Jakarta Sans", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(id), cx, 65);
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  billiardBallCache.set(id, tex);
+  return tex;
+}
+
 export function getWindowNightTexture() {
   return getWindowAtmosphereTexture('rainy');
 }

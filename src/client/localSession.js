@@ -704,6 +704,9 @@ export class LocalSingleplayerClient {
           res = { ok: false, error: 'Geçersiz kedi seçimi.' };
           break;
         }
+        const action = ['pet', 'mama', 'milk'].includes(String(data?.action || 'pet'))
+          ? String(data?.action || 'pet')
+          : 'pet';
         if (this.socialStats[this.viewerSeatIndex]) {
           this.socialStats[this.viewerSeatIndex].catsPetted += 1;
         }
@@ -712,6 +715,7 @@ export class LocalSingleplayerClient {
           id: this.catPetSeq,
           catIndex: idx,
           cat,
+          action,
           seatIndex: this.viewerSeatIndex,
           name: this.playerName,
           socialStats: this.socialStats,

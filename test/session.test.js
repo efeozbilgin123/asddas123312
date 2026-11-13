@@ -1904,3 +1904,85 @@ test('LocalSingleplayerClient handles live cozy options, TV set/stop, drink sip/
   assert.equal(ambOff.ok, true);
   assert.equal(states[states.length - 1].ambianceTrack, null);
 });
+
+test('GameSession tracks roundDiscardsBySeat including pickedUp state across draw/return/finish', () => {
+  const session = new GameSession({
+    roomCode: 'DISC',
+    seatsConfig: [
+      { playerId: 'p0', name: 'Ali', isBot: false },
+      { playerId: 'p1', name: 'Veli', isBot: false },
+      { playerId: 'p2', name: 'Can', isBot: false },
+      { playerId: 'p3', name: 'Deniz', isBot: false }
+    ],
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
+    onStateChange: () => {}
+  });
+
+  session.startRound();
+  const seat1Tile = session.seats[1].hand.find((t) => !isOkeyTile(t, session.okeyTarget)) || session.seats[1].hand[0];
+  assert.equal(session.discardTile(1, seat1Tile.id).ok, true);
+  assert.equal(session.roundDiscardsBySeat[1].length, 1);
+  assert.equal(session.roundDiscardsBySeat[1][0].pickedUp, false);
+
+  assert.equal(session.drawFromDiscard(2).ok, true);
+  assert.equal(session.roundDiscardsBySeat[1][0].pickedUp, true);
+
+  assert.equal(session.returnPickedDiscard(2).ok, true);
+  assert.equal(session.roundDiscardsBySeat[1][0].pickedUp, false);
+
+  assert.equal(session.drawFromDeck(2).ok, true);
+  const seat2Tile = session.seats[2].hand.find((t) => !isOkeyTile(t, session.okeyTarget)) || session.seats[2].hand[0];
+  assert.equal(session.discardTile(2, seat2Tile.id).ok, true);
+  assert.equal(session.drawFromDiscard(3).ok, true);
+  assert.equal(session.roundDiscardsBySeat[2][0].pickedUp, true);
+
+  session.finishRound(null, false, 'Test sonu');
+  assert.ok(session.roundSummary);
+  assert.equal(session.roundSummary.discardsBySeat.length, 4);
+  assert.equal(session.roundSummary.discardsBySeat[1].name, 'Veli');
+  assert.equal(session.roundSummary.discardsBySeat[1].tiles[0].id, seat1Tile.id);
+  assert.equal(session.roundSummary.discardsBySeat[1].tiles[0].pickedUp, false);
+  assert.equal(session.roundSummary.discardsBySeat[2].tiles[0].id, seat2Tile.id);
+  assert.equal(session.roundSummary.discardsBySeat[2].tiles[0].pickedUp, true);
+
+  session.destroy();
+});
+
+test('GameSession.getClientView supports spectator overview and behind-seat views without revealing controls', () => {
+  const session = new GameSession({
+    roomCode: 'SPEC',
+    seatsConfig: [
+      { playerId: 'p0', name: 'Ali', isBot: false },
+      { playerId: 'p1', name: 'Veli', isBot: false },
+      { playerId: 'p2', name: 'Can', isBot: false },
+      { playerId: 'p3', name: 'Deniz', isBot: false }
+    ],
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
+    onStateChange: () => {}
+  });
+
+  session.startRound();
+  session.pickedDiscardTileId = session.seats[1].hand[0].id;
+
+  const overview = session.getClientView(0, { isSpectator: true, watchSeatIndex: null });
+  assert.equal(overview.isSpectator, true);
+  assert.equal(overview.watchSeatIndex, null);
+  assert.equal(overview.pickedDiscardTileId, null);
+  assert.equal(overview.seats.every((s) => s.hand === null && s.tileCount === null), true);
+
+  const behindSeat1 = session.getClientView(0, { isSpectator: true, watchSeatIndex: 1 });
+  assert.equal(behindSeat1.isSpectator, true);
+  assert.equal(behindSeat1.watchSeatIndex, 1);
+  assert.equal(behindSeat1.viewerSeatIndex, 1);
+  assert.equal(behindSeat1.pickedDiscardTileId, null);
+  assert.equal(Array.isArray(behindSeat1.seats[1].hand), true);
+  assert.equal(behindSeat1.seats[1].hand.length, 22);
+  assert.equal(behindSeat1.seats[1].tileCount, 22);
+  assert.equal(behindSeat1.seats[0].hand, null);
+  assert.equal(behindSeat1.seats[0].tileCount, null);
+  assert.equal(behindSeat1.seats[2].hand, null);
+  assert.equal(behindSeat1.seats[3].hand, null);
+
+  session.destroy();
+});
+

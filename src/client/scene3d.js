@@ -11,7 +11,6 @@ import {
   createSpeechBubbleTexture,
   createTvScreenTexture,
   getAvatarTexture,
-  getCatPortraitTexture,
   getDiscardPadTexture,
   getFeltTexture,
   getKahveBackdropTexture,
@@ -278,6 +277,9 @@ export class OkeyTable3D {
     this.tileTheme = 'ivory';
     this.rackTheme = 'walnut';
     this.roomAtmosphere = 'rainy';
+    this.qualityMode = 'auto';
+    this.tvWallWidthPx = 960;
+    this.tvWallHeightPx = 540;
     this.tvState = null;
     this.tvUpdater = null;
     this.tvScreenMesh = null;
@@ -368,6 +370,16 @@ export class OkeyTable3D {
     this.dynamicGroup = new THREE.Group();
     this.scene.add(this.dynamicGroup);
 
+    this.sideTablesDynamicGroup = new THREE.Group();
+    this.scene.add(this.sideTablesDynamicGroup);
+    this._lastSideTablesSig = '';
+
+    this.diceGroup = new THREE.Group();
+    this.diceGroup.visible = false;
+    this.scene.add(this.diceGroup);
+    this.diceMeshes = [];
+    this.diceAnim = null;
+
     this.orderGroup = new THREE.Group();
     this.scene.add(this.orderGroup);
     this.bubbleGroup = new THREE.Group();
@@ -391,6 +403,7 @@ export class OkeyTable3D {
     this.buildEnvironment();
     this.buildTable();
     this.buildRacks();
+    this.buildDiceMeshes();
     this.buildDemoSetup();
     this.bindEvents();
 
@@ -401,20 +414,229 @@ export class OkeyTable3D {
   }
 
   applyEffectivePixelRatio() {
+    const rawDpr = window.devicePixelRatio || 1;
     let target = this.basePixelRatio;
-    if (this._perfTier === 1) {
-      target = Math.min(target, 1.0);
-    } else if (this._perfTier >= 2) {
-      target = Math.min(target, 0.85);
-    }
-    if (this.musicPerfMode) {
-      target = Math.min(target, 1.05);
+    if (this.qualityMode === 'performance') {
+      target = Math.min(rawDpr, 0.9);
+    } else if (this.qualityMode === 'high') {
+      target = Math.min(rawDpr, 1.75);
+    } else {
+      if (this._perfTier === 1) {
+        target = Math.min(target, 1.0);
+      } else if (this._perfTier >= 2) {
+        target = Math.min(target, 0.85);
+      }
+      if (this.musicPerfMode) {
+        target = Math.min(target, 1.05);
+      }
     }
     if (Math.abs(target - this.activePixelRatio) > 0.02) {
       this.activePixelRatio = target;
       this.renderer.setPixelRatio(target);
       this.onResize();
     }
+  }
+
+  setQualityMode(mode = 'auto') {
+    const valid = mode === 'high' || mode === 'performance' ? mode : 'auto';
+    this.qualityMode = valid;
+    this.renderer.shadowMap.enabled = valid !== 'performance';
+    if (this.rainGroup) {
+      this.rainGroup.visible = valid !== 'performance' && this.roomAtmosphere === 'rainy';
+    }
+    for (const sp of this.steamParticles) {
+      if (sp?.mesh) sp.mesh.visible = valid !== 'performance';
+    }
+    const nextW = valid === 'performance' ? 640 : 960;
+    const nextH = valid === 'performance' ? 360 : 540;
+    if (this.tvWallWidthPx !== nextW || this.tvWallHeightPx !== nextH) {
+      this.tvWallWidthPx = nextW;
+      this.tvWallHeightPx = nextH;
+      if (this.tvWallHostEl) {
+        this.tvWallHostEl.style.width = `${nextW}px`;
+        this.tvWallHostEl.style.height = `${nextH}px`;
+      }
+      if (this.tvWallCssObj) {
+        this.tvWallCssObj.scale.set(15.2 / nextW, 8.55 / nextH, 1);
+      }
+      this._css3dMatrixValid = false;
+    }
+    this.applyEffectivePixelRatio();
+    this.requestShadowUpdate(2);
+  }
+
+  buildDiceMeshes() {
+    const diceMat = new THREE.MeshStandardMaterial({
+      color: '#FBF7EE',
+      roughness: 0.25,
+      metalness: 0.04
+    });
+    const pipMat = new THREE.MeshBasicMaterial({ color: '#1B1815' });
+    const diceGeom = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+    const pipGeom = new THREE.CylinderGeometry(0.036, 0.036, 0.018, 8);
+    this.envDisposableGeoms.push(diceGeom, pipGeom);
+    this.envDisposableMats.push(diceMat, pipMat);
+
+    const pipOffsets = [
+      // +Y face (1)
+      { pos: [0, 0.205, 0], rot: [0, 0, 0] },
+      // -Y face (6)
+      { pos: [-0.09, -0.205, -0.1], rot: [0, 0, 0] },
+      { pos: [-0.09, -0.205, 0], rot: [0, 0, 0] },
+      { pos: [-0.09, -0.205, 0.1], rot: [0, 0, 0] },
+      { pos: [0.09, -0.205, -0.1], rot: [0, 0, 0] },
+      { pos: [0.09, -0.205, 0], rot: [0, 0, 0] },
+      { pos: [0.09, -0.205, 0.1], rot: [0, 0, 0] },
+      // +Z face (2)
+      { pos: [-0.09, 0.09, 0.205], rot: [Math.PI / 2, 0, 0] },
+      { pos: [0.09, -0.09, 0.205], rot: [Math.PI / 2, 0, 0] },
+      // -Z face (5)
+      { pos: [0, 0, -0.205], rot: [Math.PI / 2, 0, 0] },
+      { pos: [-0.09, 0.09, -0.205], rot: [Math.PI / 2, 0, 0] },
+      { pos: [0.09, 0.09, -0.205], rot: [Math.PI / 2, 0, 0] },
+      { pos: [-0.09, -0.09, -0.205], rot: [Math.PI / 2, 0, 0] },
+      { pos: [0.09, -0.09, -0.205], rot: [Math.PI / 2, 0, 0] },
+      // +X face (3)
+      { pos: [0.205, 0.09, -0.09], rot: [0, 0, Math.PI / 2] },
+      { pos: [0.205, 0, 0], rot: [0, 0, Math.PI / 2] },
+      { pos: [0.205, -0.09, 0.09], rot: [0, 0, Math.PI / 2] },
+      // -X face (4)
+      { pos: [-0.205, 0.09, 0.09], rot: [0, 0, Math.PI / 2] },
+      { pos: [-0.205, 0.09, -0.09], rot: [0, 0, Math.PI / 2] },
+      { pos: [-0.205, -0.09, 0.09], rot: [0, 0, Math.PI / 2] },
+      { pos: [-0.205, -0.09, -0.09], rot: [0, 0, Math.PI / 2] }
+    ];
+
+    for (let i = 0; i < 2; i += 1) {
+      const die = new THREE.Group();
+      const cube = new THREE.Mesh(diceGeom, diceMat);
+      cube.castShadow = true;
+      die.add(cube);
+      for (const p of pipOffsets) {
+        const pip = new THREE.Mesh(pipGeom, pipMat);
+        pip.position.set(...p.pos);
+        pip.rotation.set(...p.rot);
+        die.add(pip);
+      }
+      this.diceGroup.add(die);
+      this.diceMeshes.push(die);
+    }
+  }
+
+  triggerDiceRoll() {
+    if (this.reducedMotion || this.diceMeshes.length < 2) return;
+    const faceRots = [
+      [0, 0, 0],
+      [Math.PI / 2, 0, 0],
+      [-Math.PI / 2, 0, 0],
+      [0, 0, Math.PI / 2],
+      [0, 0, -Math.PI / 2],
+      [Math.PI, 0, 0]
+    ];
+    this.diceGroup.visible = true;
+    this.diceAnim = {
+      elapsed: 0,
+      duration: 0.78,
+      holdDuration: 0.72,
+      dice: this.diceMeshes.map((mesh, idx) => {
+        const f = faceRots[Math.floor(Math.random() * faceRots.length)];
+        return {
+          mesh,
+          startPos: new THREE.Vector3(idx === 0 ? -1.1 : 1.1, 2.35, -2.5),
+          endPos: new THREE.Vector3(idx === 0 ? -0.42 : 0.42, 0.25, idx === 0 ? -1.35 : -1.05),
+          startRot: new THREE.Euler(Math.random() * 6, Math.random() * 6, Math.random() * 6),
+          endRot: new THREE.Euler(
+            f[0] + Math.PI * 4,
+            Math.random() * Math.PI * 2 + Math.PI * 2,
+            f[2] + Math.PI * 4
+          )
+        };
+      })
+    };
+  }
+
+  setLobbyRooms(rooms = [], currentRoomCode = null) {
+    const others = (Array.isArray(rooms) ? rooms : [])
+      .filter((r) => r && r.code && r.code !== currentRoomCode)
+      .slice(0, 4);
+    const sig = JSON.stringify(
+      others.map((r) => ({
+        c: r.code,
+        n: r.name,
+        s: r.status,
+        h: r.humanCount,
+        seats: (r.seats || []).map((st) => [st.type, st.name, st.avatar])
+      }))
+    );
+    if (sig === this._lastSideTablesSig) return;
+    this._lastSideTablesSig = sig;
+
+    while (this.sideTablesDynamicGroup.children.length > 0) {
+      const child = this.sideTablesDynamicGroup.children[0];
+      this.sideTablesDynamicGroup.remove(child);
+    }
+
+    const tableCoords = [
+      { x: -16.2, z: -15.2, rotY: 0.18 },
+      { x: 16.2, z: -15.2, rotY: -0.22 },
+      { x: -17.4, z: 10.2, rotY: -0.15 },
+      { x: 17.4, z: 10.2, rotY: 0.2 }
+    ];
+    const seatLocalOffsets = [
+      { x: 0, z: 2.85, rotY: Math.PI },
+      { x: 2.85, z: 0, rotY: -Math.PI / 2 },
+      { x: 0, z: -2.85, rotY: 0 },
+      { x: -2.85, z: 0, rotY: Math.PI / 2 }
+    ];
+
+    others.forEach((room, idx) => {
+      const tc = tableCoords[idx];
+      if (!tc) return;
+      const tGroup = new THREE.Group();
+      tGroup.position.set(tc.x, 0, tc.z);
+      tGroup.rotation.y = tc.rotY;
+
+      const seats = Array.isArray(room.seats) ? room.seats : [];
+      seats.forEach((s, sIdx) => {
+        if (!s || s.type === 'empty' || !seatLocalOffsets[sIdx]) return;
+        const off = seatLocalOffsets[sIdx];
+        const pGroup = new THREE.Group();
+        pGroup.position.set(off.x, -0.35, off.z);
+        pGroup.rotation.y = off.rotY;
+
+        const color = s.type === 'bot' ? '#43627D' : '#8A3B2E';
+        let bodyMat = this.colorMatCache.get(`side-${color}`);
+        if (!bodyMat) {
+          bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.72 });
+          this.colorMatCache.set(`side-${color}`, bodyMat);
+        }
+        const bust = new THREE.Mesh(this.bustGeom, bodyMat);
+        bust.scale.setScalar(0.84);
+        pGroup.add(bust);
+
+        const avatarTex = getAvatarTexture(s.avatar || `avatar-${(sIdx % 16) + 1}`, s.name || 'O');
+        let avMat = this.avatarMatCache.get(`side-av-${s.avatar || sIdx}`);
+        if (!avMat) {
+          avMat = new THREE.MeshBasicMaterial({ map: avatarTex });
+          this.avatarMatCache.set(`side-av-${s.avatar || sIdx}`, avMat);
+        }
+        const badge = new THREE.Mesh(new THREE.CircleGeometry(0.45, 16), avMat);
+        badge.position.set(0, 1.45, 0.32);
+        pGroup.add(badge);
+        tGroup.add(pGroup);
+      });
+
+      const rawTitle = (room.name || room.code || 'Masa').slice(0, 12);
+      const signLabel = `${rawTitle} (${room.humanCount || 0}/4)`;
+      const signTex = createNameplateTexture(signLabel, { isActive: room.status === 'playing' });
+      const signMat = new THREE.SpriteMaterial({ map: signTex, transparent: true, depthWrite: false });
+      const signSprite = new THREE.Sprite(signMat);
+      signSprite.position.set(0, 3.15, 0);
+      signSprite.scale.set(4.2, 1.05, 1);
+      tGroup.add(signSprite);
+
+      this.sideTablesDynamicGroup.add(tGroup);
+    });
   }
 
   requestShadowUpdate(frames = 2) {
@@ -1079,9 +1301,33 @@ export class OkeyTable3D {
 
   buildKahvehaneCats(woodMat, brassMat) {
     const spots = [
-      { pos: [-10.8, -1.05, 5.4], rotY: 0.75 },
-      { pos: [10.8, -1.05, 5.0], rotY: -0.78 },
-      { pos: [-10.8, -1.05, -6.2], rotY: 0.48 }
+      {
+        pos: [-10.8, -1.05, 5.4],
+        rotY: 0.75,
+        waypoints: [
+          [-10.8, -0.85, 5.4],
+          [-11.8, -2.35, -0.5],
+          [-9.4, -2.35, -10.5]
+        ]
+      },
+      {
+        pos: [10.8, -1.05, 5.0],
+        rotY: -0.78,
+        waypoints: [
+          [10.8, -0.85, 5.0],
+          [11.8, -2.35, -2.5],
+          [9.8, -2.35, 10.6]
+        ]
+      },
+      {
+        pos: [-10.8, -1.05, -6.2],
+        rotY: 0.48,
+        waypoints: [
+          [-10.8, -0.85, -6.2],
+          [-8.4, -2.35, -13.2],
+          [-4.6, -2.35, -16.8]
+        ]
+      }
     ];
     this.catModels = [];
 
@@ -1106,6 +1352,11 @@ export class OkeyTable3D {
       cushion.position.y = 0.04;
       cushion.castShadow = true;
       root.add(cushion);
+      this.scene.add(root);
+
+      const mover = new THREE.Group();
+      mover.position.set(...spot.waypoints[0]);
+      mover.rotation.y = spot.rotY;
 
       // Sculpted stylized Persian / Tabby cat
       const furMat = new THREE.MeshStandardMaterial({ color: cat.furColor, roughness: 0.82 });
@@ -1114,8 +1365,6 @@ export class OkeyTable3D {
       const noseMat = new THREE.MeshBasicMaterial({ color: idx === 2 ? '#4D3B3F' : '#DC8C92' });
 
       const catGroup = new THREE.Group();
-      catGroup.position.y = 0.2;
-
       const scale = idx === 1 ? 0.84 : 1.0; // Fırtına is a cute kitten
       catGroup.scale.setScalar(scale);
 
@@ -1169,40 +1418,35 @@ export class OkeyTable3D {
       tail.rotation.z = -0.45;
       catGroup.add(tail);
 
-      root.add(catGroup);
+      mover.add(catGroup);
 
-      // Small framed real photo stand next to the cat cushion
-      const frameGroup = new THREE.Group();
-      frameGroup.position.set(0.86, 0.34, -0.28);
-      frameGroup.rotation.y = -0.22;
-      const frameBack = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.76, 0.06), brassMat);
-      frameGroup.add(frameBack);
-      const photoMat = new THREE.MeshBasicMaterial({ map: getCatPortraitTexture(cat.id) });
-      const photoPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.66), photoMat);
-      photoPlane.position.z = 0.036;
-      frameGroup.add(photoPlane);
-      root.add(frameGroup);
-
-      // Generous invisible click hitbox over cat + portrait
+      // Generous invisible click hitbox moving with the cat
       const hitbox = new THREE.Mesh(
-        new THREE.CylinderGeometry(1.1, 1.1, 1.65, 10),
+        new THREE.CylinderGeometry(1.05, 1.05, 1.55, 10),
         new THREE.MeshBasicMaterial({ visible: false })
       );
-      hitbox.position.y = 0.62;
+      hitbox.position.y = 0.55;
       hitbox.userData = { kind: 'cat', catIndex: idx };
-      root.add(hitbox);
+      mover.add(hitbox);
 
       this.envInteractables.push(hitbox);
       this.catModels.push({
         catIndex: idx,
+        mover,
         head,
         tail,
         catGroup,
+        waypoints: spot.waypoints.map((w) => new THREE.Vector3(...w)),
+        homeRotY: spot.rotY,
+        waypointIdx: 0,
+        targetIdx: 0,
+        moveProgress: 1,
+        wanderWait: 5 + idx * 3.2,
         reactionTimer: 0,
         phase: idx * 2.1
       });
-      this.envDisposableMats.push(cushionMat, furMat, earInnerMat, eyeMat, noseMat, photoMat, hitbox.material);
-      this.scene.add(root);
+      this.envDisposableMats.push(cushionMat, furMat, earInnerMat, eyeMat, noseMat, hitbox.material);
+      this.scene.add(mover);
     });
   }
 
@@ -2353,11 +2597,19 @@ export class OkeyTable3D {
       this.setCameraPreset('fp');
     }
 
-    const isMyTurn = state.phase === 'playing' && state.currentSeat === viewerIdx;
+    const isMyTurn = !state.isSpectator && state.phase === 'playing' && state.currentSeat === viewerIdx;
     const isFreshRoundDeal = !sameRound && !instant && !this.reducedMotion && state.phase === 'playing';
     this.lastRenderedRound = state.roundNumber;
 
-    if (!skipSlotSync && mySeat?.hand) {
+    if (isFreshRoundDeal) {
+      this.triggerDiceRoll();
+      soundFX.playDiceRoll();
+    }
+
+    if (state.isSpectator && !mySeat?.hand) {
+      this.handSlotData.fill(null);
+      this.selectedTileIds.clear();
+    } else if (!skipSlotSync && mySeat?.hand) {
       this.syncHandToSlots(mySeat.hand);
     }
 
@@ -2702,6 +2954,7 @@ export class OkeyTable3D {
   }
 
   isMyPlayTurn() {
+    if (this.currentState?.isSpectator) return false;
     const viewerIdx = this.currentState?.viewerSeatIndex ?? 0;
     return Boolean(
       this.currentState?.phase === 'playing' &&
@@ -2822,6 +3075,10 @@ export class OkeyTable3D {
 
       const hit = hits[0].object;
       const data = hit.userData;
+
+      if (this.currentState?.isSpectator && data.kind !== 'cat' && data.kind !== 'tv') {
+        return;
+      }
 
       if (data.kind === 'handTile') {
         this.cancelActiveInteractions();
@@ -3104,9 +3361,55 @@ export class OkeyTable3D {
         const actualFromIdx = this.handSlotData.findIndex((t) => t && t.id === drag.tile.id);
         const fromIdx = actualFromIdx !== -1 ? actualFromIdx : drag.fromSlotIdx;
         if (targetSlotIdx != null && targetSlotIdx !== fromIdx && fromIdx >= 0 && fromIdx < this.handSlotData.length) {
-          const targetTile = this.handSlotData[targetSlotIdx];
-          this.handSlotData[targetSlotIdx] = drag.tile;
-          this.handSlotData[fromIdx] = targetTile;
+          if (this.handSlotData[targetSlotIdx] == null) {
+            this.handSlotData[targetSlotIdx] = drag.tile;
+            this.handSlotData[fromIdx] = null;
+          } else {
+            // Insert-shift: vacate fromIdx first, then slide intermediate tiles toward nearest empty slot
+            this.handSlotData[fromIdx] = null;
+            const rowStart = targetSlotIdx < RACK_COLS ? 0 : RACK_COLS;
+            const rowEnd = rowStart + RACK_COLS - 1;
+            let emptyIdx = -1;
+            const maxDist = this.handSlotData.length;
+            const preferRightFirst = targetSlotIdx > fromIdx;
+            for (let d = 1; d < RACK_COLS; d += 1) {
+              const first = preferRightFirst ? targetSlotIdx + d : targetSlotIdx - d;
+              const second = preferRightFirst ? targetSlotIdx - d : targetSlotIdx + d;
+              if (first >= rowStart && first <= rowEnd && this.handSlotData[first] == null) {
+                emptyIdx = first;
+                break;
+              }
+              if (second >= rowStart && second <= rowEnd && this.handSlotData[second] == null) {
+                emptyIdx = second;
+                break;
+              }
+            }
+            if (emptyIdx === -1) {
+              for (let d = 1; d < maxDist; d += 1) {
+                if (targetSlotIdx + d < maxDist && this.handSlotData[targetSlotIdx + d] == null) {
+                  emptyIdx = targetSlotIdx + d;
+                  break;
+                }
+                if (targetSlotIdx - d >= 0 && this.handSlotData[targetSlotIdx - d] == null) {
+                  emptyIdx = targetSlotIdx - d;
+                  break;
+                }
+              }
+            }
+            if (emptyIdx > targetSlotIdx) {
+              for (let i = emptyIdx; i > targetSlotIdx; i -= 1) {
+                this.handSlotData[i] = this.handSlotData[i - 1];
+              }
+              this.handSlotData[targetSlotIdx] = drag.tile;
+            } else if (emptyIdx >= 0 && emptyIdx < targetSlotIdx) {
+              for (let i = emptyIdx; i < targetSlotIdx; i += 1) {
+                this.handSlotData[i] = this.handSlotData[i + 1];
+              }
+              this.handSlotData[targetSlotIdx] = drag.tile;
+            } else {
+              this.handSlotData[targetSlotIdx] = drag.tile;
+            }
+          }
           this.callbacks.onRackReorder?.();
         }
         if (this.currentState) {
@@ -3239,7 +3542,7 @@ export class OkeyTable3D {
       mat.needsUpdate = true;
     }
     if (this.rainGroup) {
-      this.rainGroup.visible = valid === 'rainy';
+      this.rainGroup.visible = this.qualityMode !== 'performance' && valid === 'rainy';
     }
     if (valid === 'afternoon') {
       this.scene.background?.set('#2A1A10');
@@ -3448,24 +3751,26 @@ export class OkeyTable3D {
     this._lastFrameNow = frameNow;
     this._frameCounter += 1;
 
-    if (rawDt > 26 && rawDt < 250) {
-      this._perfSlowFrames += 1;
-      this._perfFastFrames = 0;
-      if (this._perfSlowFrames >= 25 && this._perfTier < 2) {
-        this._perfTier += 1;
-        this._perfSlowFrames = 0;
-        this.applyEffectivePixelRatio();
-      }
-    } else if (rawDt < 19) {
-      this._perfFastFrames += 1;
-      this._perfSlowFrames = 0;
-      if (this._perfFastFrames >= 120 && this._perfTier > 0) {
-        this._perfTier -= 1;
+    if (this.qualityMode === 'auto') {
+      if (rawDt > 26 && rawDt < 250) {
+        this._perfSlowFrames += 1;
         this._perfFastFrames = 0;
-        this.applyEffectivePixelRatio();
+        if (this._perfSlowFrames >= 25 && this._perfTier < 2) {
+          this._perfTier += 1;
+          this._perfSlowFrames = 0;
+          this.applyEffectivePixelRatio();
+        }
+      } else if (rawDt < 19) {
+        this._perfFastFrames += 1;
+        this._perfSlowFrames = 0;
+        if (this._perfFastFrames >= 120 && this._perfTier > 0) {
+          this._perfTier -= 1;
+          this._perfFastFrames = 0;
+          this.applyEffectivePixelRatio();
+        }
+      } else {
+        this._perfSlowFrames = Math.max(0, this._perfSlowFrames - 1);
       }
-    } else {
-      this._perfSlowFrames = Math.max(0, this._perfSlowFrames - 1);
     }
 
     const dt = Math.min(this.clock.getDelta(), 0.05);
@@ -3486,6 +3791,7 @@ export class OkeyTable3D {
     // Gentle window raindrops via single InstancedMesh draw call
     if (
       !this.reducedMotion &&
+      this.qualityMode !== 'performance' &&
       this.roomAtmosphere === 'rainy' &&
       this.rainGroup &&
       this.rainDrops.length > 0
@@ -3516,10 +3822,55 @@ export class OkeyTable3D {
       }
     }
 
-    // Kahvehane cats idle breathing + pet reaction wiggle
+    // Kahvehane cats gentle wandering, breathing + interaction bounce
     if (this.catModels.length > 0) {
       for (const c of this.catModels) {
         c.phase += dt * 1.8;
+        let walkingBob = 0;
+
+        if (!this.reducedMotion && c.mover && c.waypoints?.length > 1) {
+          if (c.reactionTimer > 0) {
+            c.wanderWait = Math.max(c.wanderWait, 3.5);
+          } else if (c.moveProgress < 1) {
+            const fromPt = c.waypoints[c.waypointIdx];
+            const toPt = c.waypoints[c.targetIdx];
+            const dist = Math.max(0.5, fromPt.distanceTo(toPt));
+            c.moveProgress = Math.min(1, c.moveProgress + (dt * 1.55) / dist);
+            const ease = c.moveProgress * c.moveProgress * (3 - 2 * c.moveProgress);
+            c.mover.position.lerpVectors(fromPt, toPt, ease);
+            // Smooth arc when hopping up/down cushion
+            if (Math.abs(fromPt.y - toPt.y) > 0.4) {
+              c.mover.position.y += Math.sin(c.moveProgress * Math.PI) * 0.55;
+            }
+            const dx = toPt.x - fromPt.x;
+            const dz = toPt.z - fromPt.z;
+            if (Math.hypot(dx, dz) > 0.05) {
+              const targetAngle = Math.atan2(dx, dz);
+              let diff = targetAngle - c.mover.rotation.y;
+              while (diff > Math.PI) diff -= Math.PI * 2;
+              while (diff < -Math.PI) diff += Math.PI * 2;
+              c.mover.rotation.y += diff * Math.min(1, dt * 6);
+            }
+            walkingBob = Math.abs(Math.sin(c.phase * 3.8)) * 0.055;
+            if (c.moveProgress >= 1) {
+              c.waypointIdx = c.targetIdx;
+              c.wanderWait = c.waypointIdx === 0 ? (7 + Math.random() * 8) : (4 + Math.random() * 5);
+            }
+          } else {
+            if (c.waypointIdx === 0) {
+              let diff = c.homeRotY - c.mover.rotation.y;
+              while (diff > Math.PI) diff -= Math.PI * 2;
+              while (diff < -Math.PI) diff += Math.PI * 2;
+              c.mover.rotation.y += diff * Math.min(1, dt * 4);
+            }
+            c.wanderWait -= dt;
+            if (c.wanderWait <= 0) {
+              c.targetIdx = (c.waypointIdx + 1) % c.waypoints.length;
+              c.moveProgress = 0;
+            }
+          }
+        }
+
         if (c.reactionTimer > 0) {
           c.reactionTimer = Math.max(0, c.reactionTimer - dt);
           if (!this.reducedMotion) {
@@ -3527,14 +3878,35 @@ export class OkeyTable3D {
             c.head.rotation.z = Math.sin(w) * 0.24;
             c.head.rotation.x = Math.cos(w * 0.7) * 0.14;
             c.tail.rotation.z = -0.45 + Math.sin(w * 1.3) * 0.35;
-            c.catGroup.position.y = 0.2 + Math.abs(Math.sin(w * 0.5)) * 0.1;
+            c.catGroup.position.y = Math.abs(Math.sin(w * 0.5)) * 0.12;
           }
         } else {
           c.head.rotation.z = this.reducedMotion ? 0 : Math.sin(c.phase * 0.6) * 0.05;
           c.head.rotation.x = this.reducedMotion ? 0 : Math.cos(c.phase * 0.45) * 0.03;
           c.tail.rotation.z = -0.45 + (this.reducedMotion ? 0 : Math.sin(c.phase * 1.2) * 0.14);
-          c.catGroup.position.y = 0.2;
+          c.catGroup.position.y = walkingBob;
         }
+      }
+    }
+
+    // 3D Round-start Dice Roll Animation
+    if (this.diceAnim) {
+      this.diceAnim.elapsed += dt;
+      const t = Math.min(1, this.diceAnim.elapsed / this.diceAnim.duration);
+      const bounce = Math.abs(Math.sin(t * Math.PI * 3.0)) * (1 - t) * 1.15;
+      for (const d of this.diceAnim.dice) {
+        d.mesh.position.lerpVectors(d.startPos, d.endPos, 1 - (1 - t) ** 2);
+        d.mesh.position.y = THREE.MathUtils.lerp(d.startPos.y, d.endPos.y, t) + bounce;
+        const rotEase = 1 - (1 - t) ** 3;
+        d.mesh.rotation.set(
+          THREE.MathUtils.lerp(d.startRot.x, d.endRot.x, rotEase),
+          THREE.MathUtils.lerp(d.startRot.y, d.endRot.y, rotEase),
+          THREE.MathUtils.lerp(d.startRot.z, d.endRot.z, rotEase)
+        );
+      }
+      if (this.diceAnim.elapsed >= this.diceAnim.duration + this.diceAnim.holdDuration) {
+        this.diceAnim = null;
+        this.diceGroup.visible = false;
       }
     }
 
@@ -3551,8 +3923,9 @@ export class OkeyTable3D {
     }
 
     // Gentle rising steam particles over hot Kahvehane drinks/food
-    if (!this.reducedMotion && this.steamParticles.length > 0) {
+    if (!this.reducedMotion && this.qualityMode !== 'performance' && this.steamParticles.length > 0) {
       for (const sp of this.steamParticles) {
+        if (!sp.mesh.visible) sp.mesh.visible = true;
         sp.phase = (sp.phase + dt * 0.42) % 1;
         sp.mesh.position.y = sp.baseY + sp.phase * 0.68;
         sp.mesh.position.x = sp.baseX + Math.sin(sp.phase * Math.PI * 2) * 0.05;

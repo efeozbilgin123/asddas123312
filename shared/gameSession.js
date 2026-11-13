@@ -56,6 +56,7 @@ export class GameSession {
     this.deck = [];
     this.tableMelds = [];
     this.discardPiles = [[], [], [], []];
+    this.roundDiscardsBySeat = [[], [], [], []];
     this.pickedDiscardTileId = null;
     this.pickedDiscardFromSeat = null;
     this.lastDrawnTileId = null;
@@ -142,6 +143,7 @@ export class GameSession {
 
     this.tableMelds = [];
     this.discardPiles = [[], [], [], []];
+    this.roundDiscardsBySeat = [[], [], [], []];
     this.pickedDiscardTileId = null;
     this.pickedDiscardFromSeat = null;
     this.lastDrawnTileId = null;
@@ -387,6 +389,15 @@ export class GameSession {
     }
 
     const tile = pile.pop();
+    const seatLog = this.roundDiscardsBySeat?.[leftSeat];
+    if (seatLog && seatLog.length > 0) {
+      for (let i = seatLog.length - 1; i >= 0; i -= 1) {
+        if (seatLog[i].id === tile.id && !seatLog[i].pickedUp) {
+          seatLog[i].pickedUp = true;
+          break;
+        }
+      }
+    }
     const seat = this.seats[seatIndex];
     seat.hand.push(tile);
     this.turnPhase = 'play';
@@ -424,6 +435,15 @@ export class GameSession {
     const [tile] = seat.hand.splice(idx, 1);
     const fromSeat = this.pickedDiscardFromSeat ?? (seatIndex + 3) % 4;
     this.discardPiles[fromSeat].push(tile);
+    const seatLog = this.roundDiscardsBySeat?.[fromSeat];
+    if (seatLog && seatLog.length > 0) {
+      for (let i = seatLog.length - 1; i >= 0; i -= 1) {
+        if (seatLog[i].id === tile.id && seatLog[i].pickedUp) {
+          seatLog[i].pickedUp = false;
+          break;
+        }
+      }
+    }
     this.pickedDiscardTileId = null;
     this.pickedDiscardFromSeat = null;
     this.lastDrawnTileId = null;
@@ -752,6 +772,10 @@ export class GameSession {
     }
 
     this.discardPiles[seatIndex].push(tile);
+    if (!Array.isArray(this.roundDiscardsBySeat)) {
+      this.roundDiscardsBySeat = [[], [], [], []];
+    }
+    this.roundDiscardsBySeat[seatIndex].push({ ...tile, pickedUp: false });
     this.pickedDiscardTileId = null;
     this.pickedDiscardFromSeat = null;
     this.lastDrawnTileId = null;
@@ -860,7 +884,12 @@ export class GameSession {
       roundCancelled,
       deckExhausted: !roundCancelled && winnerSeat === null,
       message,
-      rows: breakdown
+      rows: breakdown,
+      discardsBySeat: (this.roundDiscardsBySeat || [[], [], [], []]).map((arr, idx) => ({
+        seatIndex: idx,
+        name: this.seats[idx]?.name || `Oyuncu ${idx + 1}`,
+        tiles: arr.map((t) => ({ ...t }))
+      }))
     };
     this.roundHistory.push({
       roundNumber: this.roundNumber,
@@ -880,7 +909,16 @@ export class GameSession {
     this.notify();
   }
 
-  getClientView(viewerSeatIndex) {
+  getClientView(viewerSeatIndex, { isSpectator = false, watchSeatIndex = null } = {}) {
+    const spectatorMode = Boolean(isSpectator);
+    const parsedWatch =
+      watchSeatIndex !== null && watchSeatIndex !== undefined ? Number(watchSeatIndex) : null;
+    const validWatchSeat =
+      spectatorMode && Number.isInteger(parsedWatch) && parsedWatch >= 0 && parsedWatch <= 3
+        ? parsedWatch
+        : null;
+    const revealedSeat = spectatorMode ? validWatchSeat : viewerSeatIndex;
+    const displaySeatIndex = spectatorMode ? (validWatchSeat ?? 0) : viewerSeatIndex;
     const teamScores = [
       this.seats[0].totalScore + this.seats[2].totalScore,
       this.seats[1].totalScore + this.seats[3].totalScore
@@ -896,8 +934,8 @@ export class GameSession {
       phase: this.phase,
       turnPhase: this.turnPhase,
       currentSeat: this.currentSeat,
-      openThreshold: this.getOpenThreshold(viewerSeatIndex),
-      pairThreshold: this.getPairThreshold(viewerSeatIndex),
+      openThreshold: this.getOpenThreshold(displaySeatIndex),
+      pairThreshold: this.getPairThreshold(displaySeatIndex),
       teamOpenThresholds: [...this.teamOpenThresholds],
       teamPairThresholds: [...this.teamPairThresholds],
       gosterge: this.gosterge,
@@ -909,16 +947,18 @@ export class GameSession {
         topTile: pile.length > 0 ? pile[pile.length - 1] : null
       })),
       pickedDiscardTileId:
-        viewerSeatIndex === this.currentSeat ? this.pickedDiscardTileId : null,
+        !spectatorMode && viewerSeatIndex === this.currentSeat ? this.pickedDiscardTileId : null,
       pickedDiscardFromSeat:
-        viewerSeatIndex === this.currentSeat ? this.pickedDiscardFromSeat : null,
+        !spectatorMode && viewerSeatIndex === this.currentSeat ? this.pickedDiscardFromSeat : null,
       committedMeldThisTurn:
-        viewerSeatIndex === this.currentSeat ? this.committedMeldThisTurn : false,
+        !spectatorMode && viewerSeatIndex === this.currentSeat ? this.committedMeldThisTurn : false,
       turnEndsAt: this.turnEndsAt,
       roundSummary: this.roundSummary,
       roundHistory: this.roundHistory,
       lastEvent: this.lastEvent,
-      viewerSeatIndex,
+      viewerSeatIndex: displaySeatIndex,
+      isSpectator: spectatorMode,
+      watchSeatIndex: validWatchSeat,
       seats: this.seats.map((s) => ({
         seatIndex: s.seatIndex,
         teamIndex: s.seatIndex % 2,
@@ -926,7 +966,7 @@ export class GameSession {
         avatar: s.avatar,
         isBot: s.isBot,
         connected: s.connected,
-        tileCount: s.seatIndex === viewerSeatIndex ? s.hand.length : null,
+        tileCount: s.seatIndex === revealedSeat ? s.hand.length : null,
         opened: s.opened,
         openMode: s.openMode,
         openedPoints: s.openedPoints,
@@ -938,7 +978,7 @@ export class GameSession {
           pairsOpens: 0,
           islekCount: 0
         },
-        hand: s.seatIndex === viewerSeatIndex ? s.hand : null
+        hand: s.seatIndex === revealedSeat ? s.hand : null
       }))
     };
   }

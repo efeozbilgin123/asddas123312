@@ -139,38 +139,32 @@ export const KAHVE_CATS = Object.freeze([
     index: 0,
     id: 'cat-1',
     name: 'Yumak',
-    breed: 'Krem İran Kedisi',
-    spot: 'Sol köşe minderi',
-    photo: '/assets/cat-1.jpg',
     furColor: '#DDD4C6',
     accentColor: '#9E8D7B',
-    eyeColor: '#4F778D',
-    reaction: 'mırıldanarak kafasını eline yasladı!'
+    eyeColor: '#4F778D'
   },
   {
     index: 1,
     id: 'cat-2',
     name: 'Fırtına',
-    breed: 'Tekir Yavru',
-    spot: 'Sağ köşe minderi',
-    photo: '/assets/cat-2.jpg',
     furColor: '#8B7968',
     accentColor: '#3C322A',
-    eyeColor: '#B57B32',
-    reaction: 'patisini uzatıp neşeyle miyavladı!'
+    eyeColor: '#B57B32'
   },
   {
     index: 2,
     id: 'cat-3',
     name: 'Kömür',
-    breed: 'Siyah İran Kedisi',
-    spot: 'Ocakbaşı köşesi',
-    photo: '/assets/cat-3.jpg',
     furColor: '#1E1B1C',
     accentColor: '#352E30',
-    eyeColor: '#E5B822',
-    reaction: 'altın gözlerini kısarak gürül gürül mırladı!'
+    eyeColor: '#E5B822'
   }
+]);
+
+export const KAHVE_CAT_ACTIONS = Object.freeze([
+  { id: 'pet', label: 'Sev' },
+  { id: 'mama', label: 'Mama Ver' },
+  { id: 'milk', label: 'Süt Ver' }
 ]);
 
 export function normalizeRoomAtmosphere(val) {

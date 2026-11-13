@@ -73,6 +73,7 @@ const els = {
   btnMusic: document.getElementById('btn-music'),
   btnTv: document.getElementById('btn-tv'),
   btnCozyPrefs: document.getElementById('btn-cozy-prefs'),
+  btnQuality: document.getElementById('btn-quality'),
   btnSound: document.getElementById('btn-sound'),
   btnRules: document.getElementById('btn-rules'),
   btnLeave: document.getElementById('btn-leave'),
@@ -103,6 +104,7 @@ const els = {
 
   joinCodeForm: document.getElementById('join-code-form'),
   joinCode: document.getElementById('join-code'),
+  btnJoinSpectator: document.getElementById('btn-join-spectator'),
   joinHelp: document.getElementById('join-help'),
 
   btnRefreshRooms: document.getElementById('btn-refresh-rooms'),
@@ -129,6 +131,7 @@ const els = {
   waitAtmosphere: document.getElementById('wait-atmosphere'),
   waitAmbiance: document.getElementById('wait-ambiance'),
   waitAmbiancePill: document.getElementById('wait-ambiance-pill'),
+  waitSpectators: document.getElementById('wait-spectators'),
   waitStatusMsg: document.getElementById('wait-status-msg'),
   btnStartMatch: document.getElementById('btn-start-match'),
 
@@ -140,6 +143,7 @@ const els = {
   hudTurnText: document.getElementById('hud-turn-text'),
   gameAlertToast: document.getElementById('game-alert-toast'),
   hudSpeechBubble: document.getElementById('hud-speech-bubble'),
+  spectatorBar: document.getElementById('spectator-bar'),
 
   stagingBar: document.getElementById('staging-bar'),
   stagingGroups: document.getElementById('staging-groups'),
@@ -199,9 +203,11 @@ const els = {
   ambiancePlayerHost: document.getElementById('ambiance-player-host'),
 
   catToast: document.getElementById('cat-toast'),
-  catToastImg: document.getElementById('cat-toast-img'),
   catToastTitle: document.getElementById('cat-toast-title'),
   catToastText: document.getElementById('cat-toast-text'),
+  catMenu: document.getElementById('cat-menu'),
+  catMenuTitle: document.getElementById('cat-menu-title'),
+  btnCatMenuClose: document.getElementById('btn-cat-menu-close'),
 
   chatDrawer: document.getElementById('chat-drawer'),
   btnTableNudge: document.getElementById('btn-table-nudge'),
@@ -252,6 +258,7 @@ const els = {
   cozyAmbianceVolVal: document.getElementById('cozy-ambiance-vol-val'),
   cozyRackTheme: document.getElementById('cozy-rack-theme'),
   cozyTileTheme: document.getElementById('cozy-tile-theme'),
+  cozyQualitySelect: document.getElementById('cozy-quality-select'),
 
   dialogYazboz: document.getElementById('dialog-yazboz'),
   yazbozEmpty: document.getElementById('yazboz-empty'),
@@ -274,6 +281,7 @@ const els = {
   roundDialogMsg: document.getElementById('round-dialog-msg'),
   roundTeamScores: document.getElementById('round-team-scores'),
   roundTbody: document.getElementById('round-tbody'),
+  roundDiscards: document.getElementById('round-discards'),
   roundAdisyon: document.getElementById('round-adisyon'),
   btnRoundLeave: document.getElementById('btn-round-leave'),
   btnNextRound: document.getElementById('btn-next-round'),
@@ -371,6 +379,7 @@ els.avatarUpload?.addEventListener('change', (e) => {
 
 let currentRoom = null;
 let localClient = null;
+let lastLobbyRooms = [];
 let secretUnlocked = false;
 let stagedGroups = []; // [{ id, mode: 'series'|'pairs', tiles, points }]
 let liveAutoAnalysis = { seriesPoints: 0, seriesGroups: [], pairCount: 0, pairGroups: [] };
@@ -383,13 +392,16 @@ let chatUnreadCount = 0;
 let lastRoundModalNumber = 0;
 let lastTurnSeatSeen = null;
 let lastTurnRoundSeen = null;
+let lastWatchSeatRendered = undefined;
 let bannerNotice = '';
 let noticeTimer = null;
 let hudBubbleTimer = null;
 let catToastTimer = null;
+let activeCatMenuIndex = null;
 
 let selectedRackTheme = localStorage.getItem('yuzbir_rack_theme') || 'walnut';
 let selectedTileTheme = localStorage.getItem('yuzbir_tile_theme') || 'ivory';
+let selectedQualityMode = localStorage.getItem('yuzbir_quality_mode') || 'auto';
 let ambianceVolPct = Math.max(0, Math.min(100, Number(localStorage.getItem('yuzbir_ambiance_vol') ?? 25) || 0));
 let ambianceMuted = localStorage.getItem('yuzbir_ambiance_muted') === '1';
 let activeRoomAmbiance = 'none';
@@ -409,16 +421,19 @@ function showCatToast(payload) {
   if (!els.catToast || !payload) return;
   const cat = payload.cat || KAHVE_CATS[Number(payload.catIndex)] || KAHVE_CATS[0];
   if (!cat) return;
-  if (els.catToastImg) {
-    els.catToastImg.src = cat.photo || '/assets/cat-1.jpg';
-    els.catToastImg.alt = cat.name || 'Kahvehane kedisi';
-  }
   if (els.catToastTitle) {
-    els.catToastTitle.textContent = `${cat.name} (${cat.breed})`;
+    els.catToastTitle.textContent = cat.name;
   }
   if (els.catToastText) {
     const actor = payload.name || 'Bir oyuncu';
-    els.catToastText.textContent = `${actor} sevdi · ${cat.name} ${cat.reaction}`;
+    const act = payload.action || 'pet';
+    if (act === 'mama') {
+      els.catToastText.textContent = `${actor} mama verdi`;
+    } else if (act === 'milk') {
+      els.catToastText.textContent = `${actor} süt verdi`;
+    } else {
+      els.catToastText.textContent = `${actor} sevdi`;
+    }
   }
   els.catToast.hidden = false;
   if (catToastTimer) clearTimeout(catToastTimer);
@@ -441,8 +456,25 @@ function handleIncomingCatPet(payload) {
   showCatToast(payload);
 }
 
+function closeCatMenu() {
+  activeCatMenuIndex = null;
+  if (els.catMenu) els.catMenu.hidden = true;
+}
+
+function openCatMenu(catIndex) {
+  if (!currentRoom || !els.catMenu) return;
+  const idx = Number(catIndex);
+  const cat = KAHVE_CATS[idx];
+  if (!cat) return;
+  activeCatMenuIndex = idx;
+  if (els.catMenuTitle) {
+    els.catMenuTitle.textContent = cat.name;
+  }
+  els.catMenu.hidden = false;
+}
+
 function handleDrinkSip() {
-  if (!currentRoom) return;
+  if (!currentRoom || currentRoom.isSpectator) return;
   sendGameAction('room:orderSip', {}, (res) => {
     if (!res?.ok) {
       if (res?.error) showNotice(res.error, 2600);
@@ -469,14 +501,27 @@ function handleDrinkSip() {
   });
 }
 
-function handlePetCat(catIndex) {
+function handleCatAction(catIndex, action = 'pet') {
   if (!currentRoom) return;
-  sendGameAction('room:catPet', { catIndex }, (res) => {
+  const idx = Number(catIndex);
+  if (!Number.isInteger(idx) || !KAHVE_CATS[idx]) return;
+  closeCatMenu();
+  sendGameAction('room:catPet', { catIndex: idx, action }, (res) => {
     if (res?.ok && res.payload) {
       handleIncomingCatPet(res.payload);
+    } else if (res?.error) {
+      showNotice(res.error, 2600);
     }
   });
 }
+
+els.btnCatMenuClose?.addEventListener('click', closeCatMenu);
+els.catMenu?.querySelectorAll('[data-cat-action]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    if (activeCatMenuIndex === null) return;
+    handleCatAction(activeCatMenuIndex, btn.dataset.catAction || 'pet');
+  });
+});
 
 const socket = io({
   auth: { playerId }
@@ -501,8 +546,12 @@ const scene3d = new OkeyTable3D(els.canvas, {
     updateGameControls();
   },
   onDrinkClick: () => handleDrinkSip(),
-  onCatClick: (catIndex) => handlePetCat(catIndex),
-  onTvClick: () => openTvDialog()
+  onCatClick: (catIndex) => openCatMenu(catIndex),
+  onTvClick: () => {
+    if (currentRoom && !currentRoom.isSpectator) {
+      openTvDialog();
+    }
+  }
 });
 
 function applyTableTheme(themeId, persist = true) {
@@ -547,6 +596,26 @@ function applyTileTheme(themeId, persist = true) {
     btn.classList.toggle('is-active', active);
     btn.setAttribute('aria-pressed', String(active));
   });
+}
+
+function applyQualityMode(mode = 'auto', persist = true) {
+  const valid = mode === 'high' || mode === 'performance' ? mode : 'auto';
+  selectedQualityMode = valid;
+  if (persist) {
+    localStorage.setItem('yuzbir_quality_mode', valid);
+  }
+  scene3d.setQualityMode(valid);
+  const labelMap = {
+    auto: 'Kalite: Oto',
+    high: 'Kalite: Yüksek',
+    performance: 'Kalite: Perf.'
+  };
+  if (els.btnQuality) {
+    els.btnQuality.textContent = labelMap[valid] || 'Kalite: Oto';
+  }
+  if (els.cozyQualitySelect) {
+    els.cozyQualitySelect.value = valid;
+  }
 }
 
 let activeAmbianceTrackKey = null;
@@ -766,7 +835,19 @@ window.addEventListener('keydown', resumeAudioOnGesture, { passive: true });
 applyTableTheme(localStorage.getItem('yuzbir_table_theme') || 'green', false);
 applyRackTheme(selectedRackTheme, false);
 applyTileTheme(selectedTileTheme, false);
+applyQualityMode(selectedQualityMode, false);
 scene3d.setRoomAtmosphere(els.optAtmosphere?.value || 'rainy');
+
+els.btnQuality?.addEventListener('click', () => {
+  const order = ['auto', 'high', 'performance'];
+  const idx = order.indexOf(selectedQualityMode);
+  const next = order[(idx + 1) % order.length];
+  applyQualityMode(next, true);
+});
+
+els.cozyQualitySelect?.addEventListener('change', (e) => {
+  applyQualityMode(e.target.value, true);
+});
 
 els.themePicker?.querySelectorAll('.theme-dot').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -834,7 +915,7 @@ function appendChatMessageEl(entry) {
 
   const li = document.createElement('li');
   const mySeatIdx = currentRoom?.viewerSeatIndex ?? 0;
-  const isMine = entry.seatIndex === mySeatIdx;
+  const isMine = !currentRoom?.isSpectator && !entry.isSpectator && entry.seatIndex === mySeatIdx;
   li.className = `chat-msg${isMine ? ' is-mine' : ''}`;
 
   const head = document.createElement('div');
@@ -842,7 +923,11 @@ function appendChatMessageEl(entry) {
 
   const author = document.createElement('span');
   author.className = 'chat-msg__author';
-  author.textContent = isMine ? `${entry.name} (Siz)` : (entry.name || 'Oyuncu');
+  author.textContent = isMine
+    ? `${entry.name} (Siz)`
+    : entry.isSpectator
+      ? `${entry.name || 'İzleyici'} (Yancı)`
+      : (entry.name || 'Oyuncu');
 
   const time = document.createElement('span');
   time.className = 'chat-msg__time';
@@ -886,13 +971,17 @@ function handleIncomingChat(entry) {
   soundFX.playChatBlip();
 
   const viewerIdx = currentRoom?.viewerSeatIndex ?? 0;
-  const rel = (Number(entry.seatIndex) - Number(viewerIdx) + 4) % 4;
 
   if (currentRoom?.status === 'playing') {
-    if (rel === 0) {
-      showHudSpeechBubble(entry.name, entry.text);
+    if (entry.isSpectator || entry.seatIndex == null) {
+      showHudSpeechBubble(`${entry.name || 'İzleyici'} (Yancı)`, entry.text);
     } else {
-      scene3d.showSeatBubble(entry.seatIndex, entry.name, entry.text, viewerIdx);
+      const rel = (Number(entry.seatIndex) - Number(viewerIdx) + 4) % 4;
+      if (rel === 0) {
+        showHudSpeechBubble(entry.name, entry.text);
+      } else {
+        scene3d.showSeatBubble(entry.seatIndex, entry.name, entry.text, viewerIdx);
+      }
     }
   }
 
@@ -982,16 +1071,26 @@ function setRoomsRegionState(mode, rooms = []) {
 
       const tdCount = document.createElement('td');
       tdCount.className = 'num';
-      tdCount.textContent = `${r.humanCount} / 4`;
+      tdCount.textContent = r.spectatorCount > 0
+        ? `${r.humanCount} / 4 · ${r.spectatorCount} izleyici`
+        : `${r.humanCount} / 4`;
 
       const tdAct = document.createElement('td');
+      tdAct.className = 'room-actions-cell';
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'btn btn--sm';
       btn.textContent = 'Katıl';
-      btn.disabled = r.openSeats === 0 && r.status === 'playing';
-      btn.addEventListener('click', () => joinRoomByCode(r.code));
-      tdAct.appendChild(btn);
+      btn.disabled = (r.openSeats === 0 && r.status === 'playing') || r.humanCount >= 4;
+      btn.addEventListener('click', () => joinRoomByCode(r.code, { asSpectator: false }));
+
+      const watchBtn = document.createElement('button');
+      watchBtn.type = 'button';
+      watchBtn.className = 'btn btn--quiet btn--sm';
+      watchBtn.textContent = 'İzle';
+      watchBtn.addEventListener('click', () => joinRoomByCode(r.code, { asSpectator: true }));
+
+      tdAct.append(btn, watchBtn);
 
       tr.append(tdName, tdCode, tdRule, tdCount, tdAct);
       els.roomsTbody.appendChild(tr);
@@ -1111,7 +1210,7 @@ function createRoom(quickStart) {
   );
 }
 
-function joinRoomByCode(code) {
+function joinRoomByCode(code, { asSpectator = false } = {}) {
   const name = validatePlayerName();
   if (!name) return;
 
@@ -1134,7 +1233,7 @@ function joinRoomByCode(code) {
 
   socket.emit(
     'room:join',
-    { roomCode: clean, playerName: name, playerAvatar: selectedAvatar },
+    { roomCode: clean, playerName: name, playerAvatar: selectedAvatar, asSpectator: Boolean(asSpectator) },
     (res) => {
       if (!res?.ok) {
         els.joinCode.setAttribute('aria-invalid', 'true');
@@ -1151,10 +1250,12 @@ function refreshRooms() {
       setRoomsRegionState('error');
       return;
     }
-    if (!res.rooms || res.rooms.length === 0) {
+    lastLobbyRooms = Array.isArray(res.rooms) ? res.rooms : [];
+    scene3d.setLobbyRooms(lastLobbyRooms, currentRoom?.code || null);
+    if (lastLobbyRooms.length === 0) {
       setRoomsRegionState('empty');
     } else {
-      setRoomsRegionState('full', res.rooms);
+      setRoomsRegionState('full', lastLobbyRooms);
     }
   });
 }
@@ -1979,6 +2080,7 @@ function switchView(room) {
   const prevRoom = currentRoom;
   currentRoom = room;
   if (!room) {
+    closeCatMenu();
     els.viewLobby.hidden = false;
     els.viewWaiting.hidden = true;
     els.viewGame.hidden = true;
@@ -1990,6 +2092,8 @@ function switchView(room) {
     }
     if (els.chatDrawer) els.chatDrawer.hidden = true;
     if (els.hudSpeechBubble) els.hudSpeechBubble.hidden = true;
+    if (els.spectatorBar) els.spectatorBar.hidden = true;
+    if (els.waitSpectators) els.waitSpectators.hidden = true;
     if (els.catToast) els.catToast.hidden = true;
     if (els.btnOrders) els.btnOrders.hidden = true;
     if (els.btnMusic) els.btnMusic.hidden = true;
@@ -2006,6 +2110,7 @@ function switchView(room) {
     lastRoundModalNumber = 0;
     lastTurnSeatSeen = null;
     lastTurnRoundSeen = null;
+    lastWatchSeatRendered = undefined;
     lastOrderIdSeen = 0;
     lastChatIdSeen = 0;
     lastNudgeIdSeen = 0;
@@ -2045,8 +2150,11 @@ function switchView(room) {
     scene3d.setRoomAtmosphere(els.optAtmosphere?.value || 'rainy');
     scene3d.setRoomOrders(null, 0);
     scene3d.renderGameState(null);
+    scene3d.setLobbyRooms(lastLobbyRooms, null);
     return;
   }
+
+  scene3d.setLobbyRooms(lastLobbyRooms, room.code);
 
   if (!prevRoom && room.lastOrder?.id) {
     lastOrderIdSeen = Number(room.lastOrder.id);
@@ -2055,12 +2163,21 @@ function switchView(room) {
     renderOrdersTargetSelect();
   }
 
+  const isSpec = Boolean(room.isSpectator);
   els.btnLeave.hidden = false;
   if (els.btnChat) els.btnChat.hidden = false;
   if (els.btnYazboz) els.btnYazboz.hidden = !room.game;
-  if (els.btnOrders) els.btnOrders.hidden = false;
-  if (els.btnMusic) els.btnMusic.hidden = false;
-  if (els.btnTv) els.btnTv.hidden = false;
+  if (els.btnOrders) els.btnOrders.hidden = isSpec;
+  if (els.btnWaitOrders) els.btnWaitOrders.hidden = isSpec;
+  if (els.btnMusic) els.btnMusic.hidden = isSpec;
+  if (els.btnWaitMusic) els.btnWaitMusic.hidden = isSpec;
+  if (els.btnTv) els.btnTv.hidden = isSpec;
+  if (els.btnWaitTv) els.btnWaitTv.hidden = isSpec;
+  if (els.tvSwitchBtn) els.tvSwitchBtn.hidden = isSpec;
+  if (els.tvStop) els.tvStop.hidden = isSpec;
+  if (els.musicDockAdd) els.musicDockAdd.hidden = isSpec;
+  if (els.musicDockStop) els.musicDockStop.hidden = isSpec;
+  if (els.musicQueueAdd) els.musicQueueAdd.hidden = isSpec;
   if (els.btnCozyPrefs) els.btnCozyPrefs.hidden = false;
 
   const atmo = room.options?.roomAtmosphere || 'rainy';
@@ -2085,6 +2202,17 @@ function switchView(room) {
   applyRoomOrders(room.orders || null, room.lastOrder || null, room.viewerSeatIndex ?? 0);
   syncChatHistory(room.chatHistory, { announceNew: Boolean(prevRoom) });
 
+  if (!isSpec) {
+    lastWatchSeatRendered = undefined;
+  } else if (room.status === 'playing' && room.watchSeatIndex !== lastWatchSeatRendered) {
+    lastWatchSeatRendered = room.watchSeatIndex ?? null;
+    const camPreset = lastWatchSeatRendered == null ? 'table' : 'fp';
+    scene3d.setCameraPreset(camPreset);
+    els.cameraGroup?.querySelectorAll('.seg__btn').forEach((b) => {
+      b.classList.toggle('is-active', b.dataset.cam === camPreset);
+    });
+  }
+
   if (room.status === 'waiting') {
     els.viewLobby.hidden = true;
     els.viewWaiting.hidden = false;
@@ -2093,6 +2221,7 @@ function switchView(room) {
     els.roomPill.hidden = false;
     els.roomPill.textContent = `Oda ${room.code}`;
     els.cameraGroup.hidden = true;
+    if (els.spectatorBar) els.spectatorBar.hidden = true;
     showGameAlert('', 'islek', 0);
     renderWaitingRoom(room);
     scene3d.renderGameState(null);
@@ -2145,7 +2274,7 @@ function renderWaitingRoom(room) {
   const mySeatIdx = room.viewerSeatIndex ?? 0;
 
   room.seats.forEach((seat) => {
-    const isMine = seat.seatIndex === mySeatIdx;
+    const isMine = !room.isSpectator && seat.seatIndex === mySeatIdx;
     const card = document.createElement('div');
     card.className = `wait-seat${isMine ? ' wait-seat--mine' : ''}`;
 
@@ -2188,7 +2317,24 @@ function renderWaitingRoom(room) {
     const actions = document.createElement('div');
     actions.className = 'wait-seat__actions';
 
-    if (!isMine) {
+    if (room.isSpectator) {
+      if (seat.type === 'empty' || seat.type === 'bot' || (seat.type === 'human' && !seat.connected)) {
+        const sitBtn = document.createElement('button');
+        sitBtn.type = 'button';
+        sitBtn.className = 'btn btn--primary btn--sm';
+        sitBtn.textContent = 'Koltuk Kap';
+        sitBtn.addEventListener('click', () => {
+          socket.emit('room:takeSeat', { seatIndex: seat.seatIndex }, (res) => {
+            if (!res?.ok) {
+              els.waitStatusMsg.textContent = res?.error || 'Koltuğa geçilemedi.';
+            } else {
+              els.waitStatusMsg.textContent = '';
+            }
+          });
+        });
+        actions.appendChild(sitBtn);
+      }
+    } else if (!isMine) {
       const moveBtn = document.createElement('button');
       moveBtn.type = 'button';
       moveBtn.className = 'btn btn--quiet btn--sm';
@@ -2224,6 +2370,100 @@ function renderWaitingRoom(room) {
 
     els.waitSeatsGrid.appendChild(card);
   });
+
+  if (els.waitSpectators) {
+    const specs = Array.isArray(room.spectators) ? room.spectators : [];
+    const openSeatExists = room.seats.some(
+      (s) => s.type === 'empty' || s.type === 'bot' || (s.type === 'human' && !s.connected)
+    );
+    els.waitSpectators.innerHTML = '';
+    if (specs.length > 0 || room.isSpectator) {
+      els.waitSpectators.hidden = false;
+      const label = document.createElement('span');
+      const names = specs.map((sp) => sp.name).filter(Boolean).join(', ');
+      label.textContent = specs.length > 0
+        ? `Yancı / İzleyiciler (${specs.length}): ${names}`
+        : 'Yancı modundasınız.';
+      els.waitSpectators.appendChild(label);
+      if (room.isSpectator && openSeatExists) {
+        const sitBtn = document.createElement('button');
+        sitBtn.type = 'button';
+        sitBtn.className = 'btn btn--primary btn--sm';
+        sitBtn.textContent = 'Boş Koltuğa Geç';
+        sitBtn.addEventListener('click', () => {
+          socket.emit('room:takeSeat', {}, (res) => {
+            if (!res?.ok) {
+              els.waitStatusMsg.textContent = res?.error || 'Koltuğa geçilemedi.';
+            } else {
+              els.waitStatusMsg.textContent = '';
+            }
+          });
+        });
+        els.waitSpectators.appendChild(sitBtn);
+      }
+    } else {
+      els.waitSpectators.hidden = true;
+    }
+  }
+}
+
+function renderSpectatorBar(room, game) {
+  if (!els.spectatorBar) return;
+  if (!room?.isSpectator) {
+    els.spectatorBar.hidden = true;
+    els.spectatorBar.innerHTML = '';
+    return;
+  }
+
+  els.spectatorBar.hidden = false;
+  els.spectatorBar.innerHTML = '';
+
+  const label = document.createElement('span');
+  label.className = 'spectator-bar__label';
+  label.textContent = 'Yancı Modu';
+  els.spectatorBar.appendChild(label);
+
+  const watchIdx = room.watchSeatIndex ?? null;
+
+  const overBtn = document.createElement('button');
+  overBtn.type = 'button';
+  overBtn.className = `btn btn--quiet btn--sm spectator-bar__btn${watchIdx === null ? ' is-active' : ''}`;
+  overBtn.textContent = 'Genel Bakış';
+  overBtn.addEventListener('click', () => {
+    socket.emit('room:watchSeat', { seatIndex: null }, (res) => {
+      if (!res?.ok && res?.error) showNotice(res.error);
+    });
+  });
+  els.spectatorBar.appendChild(overBtn);
+
+  (game?.seats || []).forEach((seat, idx) => {
+    const seatBtn = document.createElement('button');
+    seatBtn.type = 'button';
+    seatBtn.className = `btn btn--quiet btn--sm spectator-bar__btn${watchIdx === idx ? ' is-active' : ''}`;
+    seatBtn.textContent = seat?.name || `Koltuk ${idx + 1}`;
+    seatBtn.addEventListener('click', () => {
+      socket.emit('room:watchSeat', { seatIndex: idx }, (res) => {
+        if (!res?.ok && res?.error) showNotice(res.error);
+      });
+    });
+    els.spectatorBar.appendChild(seatBtn);
+  });
+
+  const openSeat = (room.seats || []).some(
+    (s) => s.type === 'empty' || (s.type === 'human' && !s.connected)
+  );
+  if (openSeat) {
+    const takeBtn = document.createElement('button');
+    takeBtn.type = 'button';
+    takeBtn.className = 'btn btn--primary btn--sm';
+    takeBtn.textContent = 'Koltuk Kap';
+    takeBtn.addEventListener('click', () => {
+      socket.emit('room:takeSeat', {}, (res) => {
+        if (!res?.ok && res?.error) showNotice(res.error);
+      });
+    });
+    els.spectatorBar.appendChild(takeBtn);
+  }
 }
 
 function renderGameRoom(room) {
@@ -2287,7 +2527,7 @@ function renderGameRoom(room) {
     } else if (ev.type === 'lay_meld' || ev.type === 'layoff') {
       soundFX.playTileClack(1.08);
     }
-    if (els.dialogSecret.open && !els.secretPanelView.hidden) {
+    if (!room.isSpectator && els.dialogSecret.open && !els.secretPanelView.hidden) {
       sendGameAction('admin:snapshot', {}, (res) => {
         if (res?.ok && res.snapshot) renderSecretSnapshot(res.snapshot);
       });
@@ -2296,6 +2536,7 @@ function renderGameRoom(room) {
 
   // Soft kahvehane turn bell when turn arrives at viewer
   if (
+    !room.isSpectator &&
     game.phase === 'playing' &&
     game.currentSeat === game.viewerSeatIndex &&
     (lastTurnSeatSeen !== game.currentSeat || lastTurnRoundSeen !== game.roundNumber)
@@ -2320,10 +2561,11 @@ function renderGameRoom(room) {
   const viewerIdx = game.viewerSeatIndex;
   const handIds = new Set((game.seats[viewerIdx]?.hand || []).map((t) => t.id));
   stagedGroups = stagedGroups.filter((g) => g.tiles.every((t) => handIds.has(t.id)));
-  if (game.seats[viewerIdx]?.opened) {
+  if (room.isSpectator || game.seats[viewerIdx]?.opened) {
     stagedGroups = [];
   }
 
+  renderSpectatorBar(room, game);
   updateTurnBanner();
   updateGameControls();
 
@@ -2345,6 +2587,22 @@ function updateTurnBanner() {
     return;
   }
 
+  if (currentRoom?.isSpectator) {
+    if (game.phase === 'roundOver') {
+      const baseMsg = game.roundSummary?.message || 'El tamamlandı.';
+      els.hudTurnText.textContent = `${baseMsg} · Yancı modu`;
+      return;
+    }
+    const activeSeat = game.seats[game.currentSeat];
+    if (currentRoom.watchSeatIndex === null || currentRoom.watchSeatIndex === undefined) {
+      els.hudTurnText.textContent = `Yancı modu · Genel Bakış · ${activeSeat?.name || 'Oyuncu'} hamle yapıyor.`;
+    } else {
+      const watchedSeat = game.seats[currentRoom.watchSeatIndex];
+      els.hudTurnText.textContent = `Yancı modu · ${watchedSeat?.name || 'Koltuk'} arkasından izleniyor · ${activeSeat?.name || 'Oyuncu'} hamle yapıyor.`;
+    }
+    return;
+  }
+
   if (game.phase === 'roundOver') {
     const baseMsg = game.roundSummary?.message || 'El tamamlandı.';
     els.hudTurnText.textContent = currentRoom?.isHost
@@ -2354,7 +2612,7 @@ function updateTurnBanner() {
   }
 
   const activeSeat = game.seats[game.currentSeat];
-  const isMe = game.currentSeat === game.viewerSeatIndex;
+  const isMe = !currentRoom?.isSpectator && game.currentSeat === game.viewerSeatIndex;
   if (isMe) {
     if (game.turnPhase === 'draw') {
       els.hudTurnText.textContent = 'Sıra sizde: ortadan taş çekin veya solunuzdaki taşı alın.';
@@ -2371,6 +2629,69 @@ function updateTurnBanner() {
 function updateGameControls() {
   const game = currentRoom?.game;
   if (!game) return;
+
+  const isSpectator = Boolean(currentRoom?.isSpectator);
+  if (els.btnSortRuns) els.btnSortRuns.hidden = isSpectator;
+  if (els.btnSortPairs) els.btnSortPairs.hidden = isSpectator;
+
+  if (isSpectator) {
+    els.btnDrawDeck.hidden = true;
+    els.btnDrawDiscard.hidden = true;
+    els.btnReturnDiscard.hidden = true;
+    if (els.btnOpenSeries) els.btnOpenSeries.hidden = true;
+    if (els.btnOpenPairs) els.btnOpenPairs.hidden = true;
+    els.btnStageGroup.hidden = true;
+    els.btnLayMeld.hidden = true;
+    els.btnDiscardTile.hidden = true;
+    els.btnClearSel.hidden = true;
+    els.stagingBar.hidden = true;
+    els.selectionHint.textContent = '';
+
+    const watchIdx = currentRoom.watchSeatIndex;
+    const watchedSeat = watchIdx !== null && watchIdx !== undefined ? game.seats[watchIdx] : null;
+    if (watchedSeat?.hand) {
+      const openReq = game.openThreshold || 101;
+      const pairReq = game.pairThreshold || 5;
+      const watchAnalysis = analyzeHandLive(
+        scene3d.getRackSlots(),
+        watchedSeat.hand,
+        game.okeyTarget,
+        14,
+        null,
+        game.gosterge
+      );
+      if (els.hudSeriesCount) {
+        els.hudSeriesCount.textContent = watchedSeat.opened
+          ? `${watchAnalysis.seriesPoints} p`
+          : `${watchAnalysis.seriesPoints} / ${openReq}`;
+        els.hudSeriesCount.classList.remove('is-ready');
+      }
+      if (els.hudPairsCount) {
+        els.hudPairsCount.textContent = watchedSeat.opened
+          ? `${watchAnalysis.pairCount} ç`
+          : `${watchAnalysis.pairCount} / ${pairReq}`;
+        els.hudPairsCount.classList.remove('is-ready');
+      }
+    } else {
+      if (els.hudSeriesCount) {
+        els.hudSeriesCount.textContent = '-';
+        els.hudSeriesCount.classList.remove('is-ready');
+      }
+      if (els.hudPairsCount) {
+        els.hudPairsCount.textContent = '-';
+        els.hudPairsCount.classList.remove('is-ready');
+      }
+    }
+
+    const isRoundOver = game.phase === 'roundOver' && Boolean(game.roundSummary);
+    if (els.btnShowRoundSummary) {
+      els.btnShowRoundSummary.hidden = !isRoundOver;
+    }
+    if (els.btnHudNextRound) {
+      els.btnHudNextRound.hidden = true;
+    }
+    return;
+  }
 
   const viewerIdx = game.viewerSeatIndex;
   const mySeat = game.seats[viewerIdx];
@@ -2774,6 +3095,51 @@ function openRoundSummaryDialog(room, summary) {
     els.roundTbody.appendChild(tr);
   });
 
+  if (els.roundDiscards) {
+    const list = Array.isArray(summary.discardsBySeat) ? summary.discardsBySeat : [];
+    const hasAny = list.some((s) => Array.isArray(s.tiles) && s.tiles.length > 0);
+    els.roundDiscards.innerHTML = '';
+    if (hasAny) {
+      els.roundDiscards.hidden = false;
+      const title = document.createElement('strong');
+      title.className = 'round-discards__title';
+      title.textContent = 'Bu El Atılan Taşlar';
+      const grid = document.createElement('div');
+      grid.className = 'round-discards__grid';
+      list.forEach((entry) => {
+        const row = document.createElement('div');
+        row.className = 'round-discards__row';
+        const who = document.createElement('span');
+        who.className = 'round-discards__name';
+        who.textContent = entry.name || `Oyuncu ${(entry.seatIndex ?? 0) + 1}`;
+        const tilesWrap = document.createElement('div');
+        tilesWrap.className = 'round-discards__tiles';
+        const tiles = Array.isArray(entry.tiles) ? entry.tiles : [];
+        if (tiles.length === 0) {
+          const empty = document.createElement('span');
+          empty.className = 'round-discards__empty';
+          empty.textContent = 'Taş atılmadı';
+          tilesWrap.appendChild(empty);
+        } else {
+          tiles.forEach((tile) => {
+            const chip = document.createElement('span');
+            const isOk = isOkeyTile(tile, room?.game?.okeyTarget);
+            chip.className = `tile-chip tile-chip--${tile.color} discard-chip${tile.pickedUp ? ' is-picked' : ''}${isOk ? ' is-okey' : ''}`;
+            chip.textContent = tile.isFakeOkey ? '✦' : String(tile.number);
+            const label = formatTileLabel(tile);
+            chip.title = tile.pickedUp ? `${label} (yandan alındı)` : label;
+            tilesWrap.appendChild(chip);
+          });
+        }
+        row.append(who, tilesWrap);
+        grid.appendChild(row);
+      });
+      els.roundDiscards.append(title, grid);
+    } else {
+      els.roundDiscards.hidden = true;
+    }
+  }
+
   if (summary.matchComplete) {
     renderAdisyonReceipt(els.roundAdisyon, room, room.game);
   } else if (els.roundAdisyon) {
@@ -2859,6 +3225,9 @@ els.btnCreateRoom.addEventListener('click', () => createRoom(false));
 els.joinCodeForm.addEventListener('submit', (e) => {
   e.preventDefault();
   joinRoomByCode(els.joinCode.value);
+});
+els.btnJoinSpectator?.addEventListener('click', () => {
+  joinRoomByCode(els.joinCode.value, { asSpectator: true });
 });
 
 els.btnRefreshRooms.addEventListener('click', refreshRooms);
@@ -3548,7 +3917,7 @@ function renderYazbozDialog() {
       const th = document.createElement('th');
       th.scope = 'col';
       const teamTag = isPaired ? `[T${(idx % 2) + 1}] ` : '';
-      const selfTag = idx === game.viewerSeatIndex ? ' (Siz)' : '';
+      const selfTag = !currentRoom?.isSpectator && idx === game.viewerSeatIndex ? ' (Siz)' : '';
       th.textContent = `${teamTag}${seat?.name || `Koltuk ${idx + 1}`}${selfTag}`;
       tr.appendChild(th);
     });
@@ -4121,6 +4490,10 @@ document.querySelectorAll('[data-close-dialog]').forEach((btn) => {
 
 // Secret Tile Vault (5 rapid taps on wordmark OR Ctrl+Shift+O / Ctrl+Shift+G)
 function openSecretVault() {
+  if (currentRoom?.isSpectator) {
+    showNotice('İzleyici modunda gizli kasa kullanılamaz.');
+    return;
+  }
   if (!currentRoom?.game || currentRoom.game.phase !== 'playing') {
     showNotice('Gizli kasa yalnızca aktif el sırasında kullanılabilir.');
     return;
@@ -4170,6 +4543,36 @@ window.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key.toLowerCase() === 'o' || e.key.toLowerCase() === 'g')) {
     e.preventDefault();
     openSecretVault();
+    return;
+  }
+
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const activeEl = document.activeElement;
+  const tag = activeEl?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || activeEl?.isContentEditable) {
+    return;
+  }
+  if (document.querySelector('dialog[open]')) return;
+  if (!currentRoom?.game || currentRoom.status !== 'playing' || currentRoom.isSpectator) {
+    return;
+  }
+
+  if (e.code === 'KeyS') {
+    e.preventDefault();
+    els.btnSortRuns?.click();
+  } else if (e.code === 'KeyC') {
+    e.preventDefault();
+    els.btnSortPairs?.click();
+  } else if (e.code === 'Space') {
+    if (e.shiftKey) {
+      if (els.btnDrawDiscard && !els.btnDrawDiscard.hidden) {
+        e.preventDefault();
+        els.btnDrawDiscard.click();
+      }
+    } else if (els.btnDrawDeck && !els.btnDrawDeck.hidden) {
+      e.preventDefault();
+      els.btnDrawDeck.click();
+    }
   }
 });
 
@@ -4330,10 +4733,12 @@ socket.on('connect_error', () => {
 });
 
 socket.on('rooms:list', (rooms) => {
-  if (!Array.isArray(rooms) || rooms.length === 0) {
+  lastLobbyRooms = Array.isArray(rooms) ? rooms : [];
+  scene3d.setLobbyRooms(lastLobbyRooms, currentRoom?.code || null);
+  if (lastLobbyRooms.length === 0) {
     setRoomsRegionState('empty');
   } else {
-    setRoomsRegionState('full', rooms);
+    setRoomsRegionState('full', lastLobbyRooms);
   }
 });
 

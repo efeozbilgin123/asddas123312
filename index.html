@@ -76,6 +76,7 @@
         </svg>
         <span>Masa &amp; Ortam</span>
       </button>
+      <button type="button" id="btn-quality" class="btn btn--quiet btn--sm" title="Grafik kalitesini değiştir">Kalite: Oto</button>
       <button type="button" id="btn-sound" class="btn btn--quiet btn--sm" aria-pressed="false" title="Ses efektleri">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M11 5L6 9H2v6h4l5 4V5z"/>
@@ -263,6 +264,7 @@
               <div class="join-row">
                 <input id="join-code" name="roomCode" type="text" maxlength="6" placeholder="4K9M" autocomplete="off">
                 <button type="submit" class="btn">Masaya Gir</button>
+                <button type="button" id="btn-join-spectator" class="btn btn--quiet">Yancı / İzle</button>
               </div>
               <p id="join-help" class="field__help" aria-live="polite"></p>
             </div>
@@ -383,6 +385,7 @@
         </div>
 
         <p id="wait-ambiance-pill" class="wait-ambiance-pill" hidden></p>
+        <div id="wait-spectators" class="wait-spectators" hidden></div>
 
         <div class="wait-footer">
           <p id="wait-status-msg" class="field__help" aria-live="polite"></p>
@@ -395,6 +398,7 @@
     <section id="view-game" class="game-hud" hidden aria-label="Oyun arayüzü">
       <div id="game-alert-toast" class="game-alert-toast" role="alert" aria-live="assertive" hidden></div>
       <div id="hud-speech-bubble" class="hud-speech-bubble" role="status" aria-live="polite" hidden></div>
+      <div id="spectator-bar" class="spectator-bar" hidden aria-label="Yancı ve izleyici kontrolleri"></div>
 
       <div class="bottom-dock">
         <div id="hud-banner" class="hud-banner" role="status" aria-live="polite">
@@ -528,12 +532,22 @@
     <!-- Hidden YouTube Background Ambiance Audio Host -->
     <div id="ambiance-player-host" class="ambiance-player-host" aria-hidden="true"></div>
 
-    <!-- Cozy Cat Pet Reaction Toast -->
+    <!-- Cozy Cat Reaction Toast (Name Only) -->
     <div id="cat-toast" class="cat-toast" role="status" aria-live="polite" hidden>
-      <img id="cat-toast-img" class="cat-toast__img" src="/assets/cat-1.jpg" alt="Kahvehane kedisi">
       <div class="cat-toast__body">
         <strong id="cat-toast-title">Yumak</strong>
         <span id="cat-toast-text">mırıldanıyor!</span>
+      </div>
+    </div>
+
+    <!-- Cat Action Menu (Name Only) -->
+    <div id="cat-menu" class="cat-menu" role="dialog" aria-label="Kedi etkileşimi" hidden>
+      <strong id="cat-menu-title" class="cat-menu__title">Yumak</strong>
+      <div class="cat-menu__actions">
+        <button type="button" class="btn btn--sm btn--primary" data-cat-action="pet">Sev</button>
+        <button type="button" class="btn btn--sm" data-cat-action="mama">Mama Ver</button>
+        <button type="button" class="btn btn--sm" data-cat-action="milk">Süt Ver</button>
+        <button type="button" id="btn-cat-menu-close" class="btn btn--quiet btn--sm">Kapat</button>
       </div>
     </div>
 
@@ -748,6 +762,21 @@
         </div>
         <div id="cozy-tile-theme" class="theme-pills" role="group" aria-label="Taş dokusu seçimi"></div>
       </section>
+
+      <section class="cozy-section">
+        <div class="cozy-section__head">
+          <strong>Grafik &amp; Performans</strong>
+          <span class="field__help">Cihazınıza göre FPS ve görüntü ayarı</span>
+        </div>
+        <div class="field">
+          <label for="cozy-quality-select">3D grafik kalitesi</label>
+          <select id="cozy-quality-select">
+            <option value="auto">Otomatik (Önerilen)</option>
+            <option value="high">Yüksek Kalite (Gölgeler &amp; Tam Çözünürlük)</option>
+            <option value="performance">Performans Modu (Maksimum FPS)</option>
+          </select>
+        </div>
+      </section>
     </div>
   </dialog>
 
@@ -766,7 +795,7 @@
         <li><strong>Yandan Taş Alma:</strong> Solunuzdaki taş alanı ıstakanızın hemen solundadır. Yandan taş alırsanız o tur içinde açtığınız perlerde kullanmalısınız (katlamalıda çift açandan alınan taşla yalnızca çifte açılır). Yere atılan Okey taşı yandan alınamaz.</li>
         <li><strong>Cezalar:</strong> El ortasında yere Okey atma (+101), eli bitiremeyip elde Okey bırakma (+101), işlek taş atma (+101) ve hiç el açamama (+202) ceza puanı yazar. Çift açan oyuncuların elinde kalan taşların cezası 2x sayılır.</li>
         <li><strong>Bitiş Çarpanları:</strong> Okey atarak, çiftten veya elden (aynı turda açıp tek taş atarak) bitişte puanlar 2x; bu durumlar birleştiğinde (ör. elden veya çiftten Okey atarak) 4x olur.</li>
-        <li><strong>3D Sürükle &amp; Çift Tıkla:</strong> Taşları tutup ıstakada kaydırarak yer değiştirebilir, masadaki yeşil perlere veya sağdaki parlak TAŞ AT alanına sürükleyip bırakabilirsiniz. Istakadaki bir taşa çift tıklayarak taşı ters çevirebilirsiniz.</li>
+        <li><strong>3D Sürükle &amp; Kısayollar:</strong> Taşları ıstakada kaydırarak araya yerleştirebilir veya çift tıklayarak ters çevirebilirsiniz. Klavye: <code>S</code> Seri Diz, <code>C</code> Çift Diz, <code>Space</code> Ortadan Çek, <code>Shift+Space</code> Yandan Al.</li>
       </ul>
     </div>
   </dialog>
@@ -797,6 +826,7 @@
           <tbody id="round-tbody"></tbody>
         </table>
       </div>
+      <div id="round-discards" class="round-discards" hidden></div>
       <div id="round-adisyon" class="adisyon-receipt" hidden></div>
       <div class="dialog__actions">
         <button type="button" id="btn-round-leave" class="btn btn--quiet">Masadan Ayrıl</button>

@@ -563,3 +563,93 @@ test('resolveAmbianceInput and RoomManager.resolveAndSetRoomAmbiance handle pres
   );
 });
 
+test('RoomManager supports unlimited spectators, watchSeat, takeSeat, cat mama/milk actions, and side-table summaries', () => {
+  const io = createMockIo();
+  const rm = new RoomManager(io);
+
+  const created = rm.createRoom({
+    playerId: 'h1',
+    playerName: 'Efe',
+    roomName: 'Yancı Masası'
+  });
+  assert.equal(created.ok, true);
+  const code = created.room.code;
+
+  rm.joinRoom({ roomCode: code, playerId: 'p2', playerName: 'Arhan' });
+  rm.joinRoom({ roomCode: code, playerId: 'p3', playerName: 'Ece' });
+  rm.joinRoom({ roomCode: code, playerId: 'p4', playerName: 'Mert' });
+  assert.equal(rm.startGame(code, 'h1').ok, true);
+
+  // Unlimited spectators (>4) can join an active full table
+  for (let i = 1; i <= 5; i += 1) {
+    const sp = rm.joinRoom({
+      roomCode: code,
+      playerId: `sp${i}`,
+      playerName: `Yancı ${i}`,
+      asSpectator: true
+    });
+    assert.equal(sp.ok, true);
+    assert.equal(sp.isSpectator, true);
+  }
+
+  const rooms = rm.listPublicRooms();
+  const entry = rooms.find((r) => r.code === code);
+  assert.ok(entry);
+  assert.equal(entry.spectatorCount, 5);
+  assert.equal(entry.seats.length, 4);
+
+  const sp1Overview = rm.getRoomPayloadForPlayer(created.room, 'sp1');
+  assert.equal(sp1Overview.isSpectator, true);
+  assert.equal(sp1Overview.watchSeatIndex, null);
+  assert.equal(sp1Overview.game.seats.every((s) => s.hand === null), true);
+
+  // Switch spectator watch view behind seat 2
+  const watchRes = rm.watchSeat({ roomCode: code, playerId: 'sp1', seatIndex: 2 });
+  assert.equal(watchRes.ok, true);
+  assert.equal(watchRes.watchSeatIndex, 2);
+  const sp1Watch2 = rm.getRoomPayloadForPlayer(created.room, 'sp1');
+  assert.equal(sp1Watch2.watchSeatIndex, 2);
+  assert.equal(Array.isArray(sp1Watch2.game.seats[2].hand), true);
+  assert.equal(sp1Watch2.game.seats[0].hand, null);
+
+  // Return to overview
+  assert.equal(rm.watchSeat({ roomCode: code, playerId: 'sp1', seatIndex: null }).ok, true);
+
+  // Spectators can interact with cats (Sev / Mama Ver / Süt Ver) and chat
+  const mamaRes = rm.petCat({ roomCode: code, playerId: 'sp1', catIndex: 1, action: 'mama' });
+  assert.equal(mamaRes.ok, true);
+  assert.equal(mamaRes.payload.cat.name, 'Fırtına');
+  assert.equal(mamaRes.payload.action, 'mama');
+  assert.equal(mamaRes.payload.isSpectator, true);
+
+  const milkRes = rm.petCat({ roomCode: code, playerId: 'sp2', catIndex: 2, action: 'milk' });
+  assert.equal(milkRes.ok, true);
+  assert.equal(milkRes.payload.cat.name, 'Kömür');
+  assert.equal(milkRes.payload.action, 'milk');
+
+  const chatRes = rm.sendChatMessage({ roomCode: code, playerId: 'sp1', text: 'Güzel el!' });
+  assert.equal(chatRes.ok, true);
+  assert.equal(chatRes.entry.isSpectator, true);
+  assert.equal(chatRes.entry.seatIndex, null);
+
+  // Cannot takeSeat when all 4 humans are connected
+  assert.equal(rm.takeSeat({ roomCode: code, playerId: 'sp1' }).ok, false);
+
+  // Disconnected seat can be claimed by a spectator
+  rm.leaveCurrentRoom('p4', { disconnectOnly: true });
+  const takeRes = rm.takeSeat({ roomCode: code, playerId: 'sp1' });
+  assert.equal(takeRes.ok, true);
+  assert.equal(takeRes.seatIndex, 3);
+  const sp1Seated = rm.getRoomPayloadForPlayer(created.room, 'sp1');
+  assert.equal(sp1Seated.isSpectator, false);
+  assert.equal(sp1Seated.viewerSeatIndex, 3);
+
+  // Spectator leaving updates count cleanly
+  rm.leaveCurrentRoom('sp2');
+  const afterLeave = rm.listPublicRooms().find((r) => r.code === code);
+  assert.equal(afterLeave.spectatorCount, 3);
+
+  created.room.session?.destroy();
+});
+
+

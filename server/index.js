@@ -123,6 +123,11 @@ io.on('connection', (socket) => {
         }
         roomManager.broadcastRoomState(room);
         syncedSeat = true;
+      } else if (room.spectators instanceof Map && room.spectators.has(playerId)) {
+        const spec = room.spectators.get(playerId);
+        spec.connected = true;
+        roomManager.broadcastRoomState(room);
+        syncedSeat = true;
       }
     }
   }
@@ -184,7 +189,8 @@ io.on('connection', (socket) => {
       roomCode: data?.roomCode,
       playerId,
       playerName: data?.playerName,
-      playerAvatar: data?.playerAvatar
+      playerAvatar: data?.playerAvatar,
+      asSpectator: Boolean(data?.asSpectator)
     });
     if (res.ok) {
       const payload = roomManager.getRoomPayloadForPlayer(res.room, playerId);
@@ -193,6 +199,26 @@ io.on('connection', (socket) => {
     } else if (typeof ack === 'function') {
       ack(res);
     }
+  });
+
+  safeOn('room:watchSeat', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.watchSeat({
+      roomCode: code,
+      playerId,
+      seatIndex: data?.seatIndex
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:takeSeat', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.takeSeat({
+      roomCode: code,
+      playerId,
+      targetSeatIndex: data?.seatIndex
+    });
+    if (typeof ack === 'function') ack(res);
   });
 
   safeOn('room:leave', (_data, ack) => {
@@ -420,7 +446,8 @@ io.on('connection', (socket) => {
     const res = roomManager.petCat({
       roomCode: code,
       playerId,
-      catIndex: data?.catIndex
+      catIndex: data?.catIndex,
+      action: data?.action || 'pet'
     });
     if (typeof ack === 'function') ack(res);
   });

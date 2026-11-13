@@ -729,6 +729,41 @@ class SoundFX {
     osc.stop(now + 1.1);
     lfo.stop(now + 1.1);
   }
+
+  playDiceRoll() {
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const offsets = [0, 0.09, 0.19, 0.31, 0.44];
+    offsets.forEach((off, i) => {
+      const t = now + off;
+      const dur = 0.042;
+      const len = Math.floor(ctx.sampleRate * dur);
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let s = 0; s < len; s += 1) {
+        const env = Math.exp((-s / len) * 4.5);
+        data[s] = (Math.random() * 2 - 1) * env;
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(1150 + i * 190, t);
+      bp.Q.value = 2.4;
+
+      const gain = ctx.createGain();
+      const vol = 0.14 * Math.pow(0.84, i);
+      gain.gain.setValueAtTime(vol, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+
+      src.connect(bp);
+      bp.connect(gain);
+      this.routeNode(gain, 0.45);
+      src.start(t);
+    });
+  }
 }
 
 export const soundFX = new SoundFX();

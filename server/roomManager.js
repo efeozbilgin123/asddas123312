@@ -9,6 +9,7 @@ import {
 import {
   createEmptySocialStats,
   isPresetAvatar,
+  KAHVE_CAT_ACTIONS,
   KAHVE_CATS,
   KAHVE_QUICK_CHATS,
   normalizeRoomAmbiance,
@@ -30,6 +31,7 @@ import { GameSession } from './gameSession.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const QUICK_CHAT_MAP = new Map(KAHVE_QUICK_CHATS.map((q) => [q.id, q]));
+const VALID_CAT_ACTIONS = new Set(KAHVE_CAT_ACTIONS.map((a) => a.id));
 
 function generateRoomCode(existing) {
   let code = '';
@@ -76,17 +78,67 @@ export class RoomManager {
     return this.rooms.get(String(code).trim().toUpperCase()) || null;
   }
 
+  findRoomParticipant(room, playerId) {
+    if (!room || !playerId) return null;
+    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
+    if (seat) {
+      return {
+        seat,
+        spectator: null,
+        seatIndex: seat.seatIndex,
+        name: seat.name || 'Oyuncu',
+        avatar: seat.avatar,
+        isSpectator: false
+      };
+    }
+    const spec = room.spectators instanceof Map ? room.spectators.get(playerId) : null;
+    if (spec) {
+      return {
+        seat: null,
+        spectator: spec,
+        seatIndex: null,
+        name: spec.name || 'Yancı',
+        avatar: spec.avatar,
+        isSpectator: true
+      };
+    }
+    return null;
+  }
+
+  getAllHumanRecipients(room) {
+    const ids = new Set();
+    for (const seat of room.seats) {
+      if (seat.type === 'human' && seat.playerId) {
+        ids.add(seat.playerId);
+      }
+    }
+    if (room.spectators instanceof Map) {
+      for (const spec of room.spectators.values()) {
+        if (spec?.playerId) ids.add(spec.playerId);
+      }
+    }
+    return Array.from(ids);
+  }
+
   listPublicRooms() {
     const list = [];
     for (const room of this.rooms.values()) {
       const humanCount = room.seats.filter((s) => s.type === 'human').length;
       const openSeats = room.seats.filter((s) => s.type === 'empty').length;
+      const spectatorCount = room.spectators instanceof Map ? room.spectators.size : 0;
       list.push({
         code: room.code,
         name: room.name,
         status: room.status,
         humanCount,
         openSeats,
+        spectatorCount,
+        seats: room.seats.map((s) => ({
+          seatIndex: s.seatIndex,
+          type: s.type,
+          name: s.name,
+          avatar: s.avatar
+        })),
         options: room.options,
         createdAt: room.createdAt
       });
@@ -118,6 +170,7 @@ export class RoomManager {
       status: 'waiting', // 'waiting' | 'playing'
       createdAt: Date.now(),
       cleanupTimer: null,
+      spectators: new Map(),
       music: null,
       musicQueue: [],
       musicQueueIndex: 0,
@@ -162,7 +215,7 @@ export class RoomManager {
     return { ok: true, room };
   }
 
-  joinRoom({ roomCode, playerId, playerName, playerAvatar }) {
+  joinRoom({ roomCode, playerId, playerName, playerAvatar, asSpectator = false }) {
     const code = String(roomCode || '').trim().toUpperCase();
     const room = this.rooms.get(code);
     if (!room) {
@@ -170,6 +223,9 @@ export class RoomManager {
     }
 
     const cleanName = (typeof playerName === 'string' ? playerName.trim().slice(0, 20) : '') || 'Oyuncu';
+    if (!(room.spectators instanceof Map)) {
+      room.spectators = new Map();
+    }
 
     // Check if player is reconnecting to an existing seat in this room
     const existingSeat = room.seats.find(
@@ -192,65 +248,185 @@ export class RoomManager {
         });
       }
       this.broadcastRoomState(room);
-      return { ok: true, room, seatIndex: existingSeat.seatIndex };
+      return { ok: true, room, seatIndex: existingSeat.seatIndex, isSpectator: false };
     }
 
-    this.leaveCurrentRoom(playerId);
-
-    if (room.status === 'playing') {
-      const openSeat = room.seats.find(
-        (s) => s.type === 'empty' || (s.type === 'human' && !s.connected)
-      );
-      if (!openSeat) {
-        return { ok: false, error: 'Bu masa dolu ve oyun devam ediyor.' };
-      }
+    const existingSpectator = room.spectators.get(playerId);
+    if (existingSpectator && asSpectator) {
       if (room.cleanupTimer) {
         clearTimeout(room.cleanupTimer);
         room.cleanupTimer = null;
       }
-      const prevPlayerId = openSeat.playerId;
-      if (prevPlayerId) {
-        this.playerToRoom.delete(prevPlayerId);
-        if (room.hostPlayerId === prevPlayerId) {
-          room.hostPlayerId = playerId;
-        }
-      }
-      openSeat.type = 'human';
-      openSeat.playerId = playerId;
-      openSeat.name = cleanName;
-      openSeat.avatar = normalizeAvatar(playerAvatar, openSeat.seatIndex);
-      openSeat.connected = true;
+      existingSpectator.connected = true;
+      existingSpectator.name = cleanName;
+      if (playerAvatar) existingSpectator.avatar = normalizeAvatar(playerAvatar, 0);
       this.playerToRoom.set(playerId, code);
-      if (room.session) {
-        room.session.updateSeatConnection(openSeat.seatIndex, {
-          playerId,
-          name: cleanName,
-          avatar: openSeat.avatar,
-          isBot: false,
-          connected: true
-        });
-      }
       this.broadcastRoomState(room);
       this.broadcastRoomsList();
-      return { ok: true, room, seatIndex: openSeat.seatIndex };
+      return { ok: true, room, isSpectator: true, watchSeatIndex: existingSpectator.watchSeatIndex };
     }
 
-    const emptySeat = room.seats.find((s) => s.type === 'empty');
-    const targetSeat = emptySeat || room.seats.find((s) => s.type === 'bot');
-    if (!targetSeat) {
-      return { ok: false, error: 'Masada boş koltuk kalmadı.' };
+    this.leaveCurrentRoom(playerId);
+
+    if (!asSpectator) {
+      if (room.status === 'playing') {
+        const openSeat = room.seats.find(
+          (s) => s.type === 'empty' || (s.type === 'human' && !s.connected)
+        );
+        if (openSeat) {
+          if (room.cleanupTimer) {
+            clearTimeout(room.cleanupTimer);
+            room.cleanupTimer = null;
+          }
+          const prevPlayerId = openSeat.playerId;
+          if (prevPlayerId) {
+            this.playerToRoom.delete(prevPlayerId);
+            if (room.hostPlayerId === prevPlayerId) {
+              room.hostPlayerId = playerId;
+            }
+          }
+          openSeat.type = 'human';
+          openSeat.playerId = playerId;
+          openSeat.name = cleanName;
+          openSeat.avatar = normalizeAvatar(playerAvatar, openSeat.seatIndex);
+          openSeat.connected = true;
+          this.playerToRoom.set(playerId, code);
+          if (room.session) {
+            room.session.updateSeatConnection(openSeat.seatIndex, {
+              playerId,
+              name: cleanName,
+              avatar: openSeat.avatar,
+              isBot: false,
+              connected: true
+            });
+          }
+          this.broadcastRoomState(room);
+          this.broadcastRoomsList();
+          return { ok: true, room, seatIndex: openSeat.seatIndex, isSpectator: false };
+        }
+      } else {
+        const emptySeat = room.seats.find((s) => s.type === 'empty');
+        const targetSeat = emptySeat || room.seats.find((s) => s.type === 'bot');
+        if (targetSeat) {
+          targetSeat.type = 'human';
+          targetSeat.playerId = playerId;
+          targetSeat.name = cleanName;
+          targetSeat.avatar = normalizeAvatar(playerAvatar, targetSeat.seatIndex);
+          targetSeat.connected = true;
+          this.playerToRoom.set(playerId, code);
+
+          this.broadcastRoomState(room);
+          this.broadcastRoomsList();
+          return { ok: true, room, seatIndex: targetSeat.seatIndex, isSpectator: false };
+        }
+      }
     }
 
-    targetSeat.type = 'human';
-    targetSeat.playerId = playerId;
-    targetSeat.name = cleanName;
-    targetSeat.avatar = normalizeAvatar(playerAvatar, targetSeat.seatIndex);
-    targetSeat.connected = true;
+    // Unlimited spectators ("Yancı"): join spectator list when requested or when all seats are full
+    if (room.cleanupTimer) {
+      clearTimeout(room.cleanupTimer);
+      room.cleanupTimer = null;
+    }
+    room.spectators.set(playerId, {
+      playerId,
+      name: cleanName,
+      avatar: normalizeAvatar(playerAvatar, room.spectators.size),
+      connected: true,
+      watchSeatIndex: null,
+      joinedAt: Date.now()
+    });
     this.playerToRoom.set(playerId, code);
 
     this.broadcastRoomState(room);
     this.broadcastRoomsList();
-    return { ok: true, room, seatIndex: targetSeat.seatIndex };
+    return { ok: true, room, isSpectator: true, watchSeatIndex: null };
+  }
+
+  watchSeat({ roomCode, playerId, seatIndex = null }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    if (!(room.spectators instanceof Map)) return { ok: false, error: 'İzleyici bulunamadı.' };
+    const spec = room.spectators.get(playerId);
+    if (!spec) {
+      return { ok: false, error: 'Yancı modu yalnızca izleyiciler için geçerlidir.' };
+    }
+
+    if (seatIndex === null || seatIndex === undefined || seatIndex === '') {
+      spec.watchSeatIndex = null;
+    } else {
+      const idx = Number(seatIndex);
+      if (!Number.isInteger(idx) || idx < 0 || idx > 3) {
+        return { ok: false, error: 'Geçersiz koltuk seçimi.' };
+      }
+      spec.watchSeatIndex = idx;
+    }
+
+    this.broadcastRoomState(room);
+    return { ok: true, watchSeatIndex: spec.watchSeatIndex };
+  }
+
+  takeSeat({ roomCode, playerId, targetSeatIndex = null }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    if (!(room.spectators instanceof Map) || !room.spectators.has(playerId)) {
+      return { ok: false, error: 'Zaten masada koltuktasınız veya izleyici değilsiniz.' };
+    }
+    const spec = room.spectators.get(playerId);
+
+    let seat = null;
+    const requestedIdx = targetSeatIndex !== null && targetSeatIndex !== undefined ? Number(targetSeatIndex) : null;
+    if (room.status === 'waiting') {
+      if (requestedIdx !== null && Number.isInteger(requestedIdx) && room.seats[requestedIdx]) {
+        const candidate = room.seats[requestedIdx];
+        if (candidate.type === 'empty' || candidate.type === 'bot') {
+          seat = candidate;
+        }
+      } else {
+        seat = room.seats.find((s) => s.type === 'empty') || room.seats.find((s) => s.type === 'bot') || null;
+      }
+    } else {
+      if (requestedIdx !== null && Number.isInteger(requestedIdx) && room.seats[requestedIdx]) {
+        const candidate = room.seats[requestedIdx];
+        if (candidate.type === 'empty' || (candidate.type === 'human' && !candidate.connected)) {
+          seat = candidate;
+        }
+      } else {
+        seat = room.seats.find((s) => s.type === 'empty' || (s.type === 'human' && !s.connected)) || null;
+      }
+    }
+
+    if (!seat) {
+      return { ok: false, error: 'Masada geçilebilecek boş koltuk yok.' };
+    }
+
+    const prevPlayerId = seat.playerId;
+    if (prevPlayerId && seat.type === 'human') {
+      this.playerToRoom.delete(prevPlayerId);
+      if (room.hostPlayerId === prevPlayerId) {
+        room.hostPlayerId = playerId;
+      }
+    }
+
+    room.spectators.delete(playerId);
+    seat.type = 'human';
+    seat.playerId = playerId;
+    seat.name = spec.name || 'Oyuncu';
+    seat.avatar = spec.avatar || normalizeAvatar(null, seat.seatIndex);
+    seat.connected = true;
+
+    if (room.session) {
+      room.session.updateSeatConnection(seat.seatIndex, {
+        playerId,
+        name: seat.name,
+        avatar: seat.avatar,
+        isBot: false,
+        connected: true
+      });
+    }
+
+    this.broadcastRoomState(room);
+    this.broadcastRoomsList();
+    return { ok: true, seatIndex: seat.seatIndex };
   }
 
   leaveCurrentRoom(playerId, { disconnectOnly = false } = {}) {
@@ -261,6 +437,20 @@ export class RoomManager {
     if (!room) {
       this.playerToRoom.delete(playerId);
       return null;
+    }
+
+    if (room.spectators instanceof Map && room.spectators.has(playerId)) {
+      const spec = room.spectators.get(playerId);
+      if (disconnectOnly && room.status === 'playing') {
+        spec.connected = false;
+        this.broadcastRoomState(room);
+        return room;
+      }
+      this.playerToRoom.delete(playerId);
+      room.spectators.delete(playerId);
+      this.broadcastRoomState(room);
+      this.broadcastRoomsList();
+      return room;
     }
 
     const seat = room.seats.find(
@@ -287,6 +477,15 @@ export class RoomManager {
             if (s.type === 'human' && s.playerId) {
               this.playerToRoom.delete(s.playerId);
             }
+          }
+          if (room.spectators instanceof Map) {
+            for (const sp of room.spectators.values()) {
+              if (sp?.playerId) {
+                this.playerToRoom.delete(sp.playerId);
+                this.io.to(`player:${sp.playerId}`).emit('room:state', null);
+              }
+            }
+            room.spectators.clear();
           }
           this.rooms.delete(code);
           this.broadcastRoomsList();
@@ -335,6 +534,15 @@ export class RoomManager {
         if (s.type === 'human' && s.playerId) {
           this.playerToRoom.delete(s.playerId);
         }
+      }
+      if (room.spectators instanceof Map) {
+        for (const sp of room.spectators.values()) {
+          if (sp?.playerId) {
+            this.playerToRoom.delete(sp.playerId);
+            this.io.to(`player:${sp.playerId}`).emit('room:state', null);
+          }
+        }
+        room.spectators.clear();
       }
       this.rooms.delete(code);
       this.broadcastRoomsList();
@@ -1019,18 +1227,14 @@ export class RoomManager {
   }
 
   broadcastRoomMusic(room) {
-    for (const seat of room.seats) {
-      if (seat.type === 'human' && seat.playerId) {
-        this.io.to(`player:${seat.playerId}`).emit('room:music', room.music);
-      }
+    for (const pid of this.getAllHumanRecipients(room)) {
+      this.io.to(`player:${pid}`).emit('room:music', room.music);
     }
   }
 
   broadcastRoomTv(room) {
-    for (const seat of room.seats) {
-      if (seat.type === 'human' && seat.playerId) {
-        this.io.to(`player:${seat.playerId}`).emit('room:tv', room.tv || null);
-      }
+    for (const pid of this.getAllHumanRecipients(room)) {
+      this.io.to(`player:${pid}`).emit('room:tv', room.tv || null);
     }
   }
 
@@ -1092,10 +1296,8 @@ export class RoomManager {
   }
 
   broadcastRoomAmbiance(room) {
-    for (const seat of room.seats) {
-      if (seat.type === 'human' && seat.playerId) {
-        this.io.to(`player:${seat.playerId}`).emit('room:ambiance', room.ambianceTrack || null);
-      }
+    for (const pid of this.getAllHumanRecipients(room)) {
+      this.io.to(`player:${pid}`).emit('room:ambiance', room.ambianceTrack || null);
     }
   }
 
@@ -1310,11 +1512,11 @@ export class RoomManager {
     };
   }
 
-  petCat({ roomCode, playerId, catIndex }) {
+  petCat({ roomCode, playerId, catIndex, action = 'pet' }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const sender = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!sender) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const sender = this.findRoomParticipant(room, playerId);
+    if (!sender) return { ok: false, error: 'Bu masada değilsiniz.' };
 
     const idx = Number(catIndex);
     const cat = Number.isInteger(idx) ? KAHVE_CATS[idx] : null;
@@ -1322,8 +1524,10 @@ export class RoomManager {
       return { ok: false, error: 'Geçersiz kedi seçimi.' };
     }
 
+    const cleanAction = VALID_CAT_ACTIONS.has(String(action || 'pet')) ? String(action || 'pet') : 'pet';
+
     if (!Array.isArray(room.socialStats)) room.socialStats = createEmptySocialStats();
-    if (room.socialStats[sender.seatIndex]) {
+    if (sender.seatIndex !== null && room.socialStats[sender.seatIndex]) {
       room.socialStats[sender.seatIndex].catsPetted += 1;
     }
 
@@ -1332,16 +1536,16 @@ export class RoomManager {
       id: room.catPetSeq,
       catIndex: idx,
       cat,
+      action: cleanAction,
       seatIndex: sender.seatIndex,
+      isSpectator: sender.isSpectator,
       name: sender.name || 'Oyuncu',
       socialStats: room.socialStats,
       at: Date.now()
     };
 
-    for (const seat of room.seats) {
-      if (seat.type === 'human' && seat.playerId) {
-        this.io.to(`player:${seat.playerId}`).emit('room:catPetted', payload);
-      }
+    for (const pid of this.getAllHumanRecipients(room)) {
+      this.io.to(`player:${pid}`).emit('room:catPetted', payload);
     }
     return { ok: true, payload };
   }
@@ -1371,18 +1575,16 @@ export class RoomManager {
       lastOrder: room.lastOrder,
       socialStats: room.socialStats || createEmptySocialStats()
     };
-    for (const seat of room.seats) {
-      if (seat.type === 'human' && seat.playerId) {
-        this.io.to(`player:${seat.playerId}`).emit('room:orders', payload);
-      }
+    for (const pid of this.getAllHumanRecipients(room)) {
+      this.io.to(`player:${pid}`).emit('room:orders', payload);
     }
   }
 
   sendChatMessage({ roomCode, playerId, text = '', quickId = null }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const sender = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!sender) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const sender = this.findRoomParticipant(room, playerId);
+    if (!sender) return { ok: false, error: 'Bu masada değilsiniz.' };
 
     const quick = quickId ? QUICK_CHAT_MAP.get(String(quickId)) : null;
     const rawText = quick ? quick.text : String(text || '');
@@ -1396,6 +1598,7 @@ export class RoomManager {
     const entry = {
       id: room.chatSeq,
       seatIndex: sender.seatIndex,
+      isSpectator: sender.isSpectator,
       name: sender.name || 'Oyuncu',
       avatar: sender.avatar,
       text: cleanText,
@@ -1407,10 +1610,8 @@ export class RoomManager {
       room.chatHistory.shift();
     }
 
-    for (const seat of room.seats) {
-      if (seat.type === 'human' && seat.playerId) {
-        this.io.to(`player:${seat.playerId}`).emit('room:chat', entry);
-      }
+    for (const pid of this.getAllHumanRecipients(room)) {
+      this.io.to(`player:${pid}`).emit('room:chat', entry);
     }
     return { ok: true, entry };
   }
@@ -1418,8 +1619,8 @@ export class RoomManager {
   sendTableNudge({ roomCode, playerId, targetSeatIndex = null }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    const sender = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
-    if (!sender) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    const sender = this.findRoomParticipant(room, playerId);
+    if (!sender) return { ok: false, error: 'Bu masada değilsiniz.' };
 
     if (!(room.nudgeCooldowns instanceof Map)) {
       room.nudgeCooldowns = new Map();
@@ -1443,15 +1644,14 @@ export class RoomManager {
     const nudge = {
       id: room.nudgeSeq,
       seatIndex: sender.seatIndex,
+      isSpectator: sender.isSpectator,
       name: sender.name || 'Oyuncu',
       targetSeatIndex: validTarget,
       sentAt: now
     };
 
-    for (const seat of room.seats) {
-      if (seat.type === 'human' && seat.playerId) {
-        this.io.to(`player:${seat.playerId}`).emit('room:nudge', nudge);
-      }
+    for (const pid of this.getAllHumanRecipients(room)) {
+      this.io.to(`player:${pid}`).emit('room:nudge', nudge);
     }
     return { ok: true, nudge };
   }
@@ -1460,13 +1660,30 @@ export class RoomManager {
     const mySeat = room.seats.find(
       (s) => s.type === 'human' && s.playerId === playerId
     );
-    const viewerSeatIndex = mySeat ? mySeat.seatIndex : 0;
+    const mySpectator = !mySeat && room.spectators instanceof Map
+      ? room.spectators.get(playerId) || null
+      : null;
+    const isSpectator = Boolean(mySpectator);
+    const watchSeatIndex = mySpectator ? mySpectator.watchSeatIndex : null;
+    const viewerSeatIndex = mySeat ? mySeat.seatIndex : (watchSeatIndex ?? 0);
+    const spectatorsList = room.spectators instanceof Map
+      ? Array.from(room.spectators.values()).map((sp) => ({
+          name: sp.name,
+          avatar: sp.avatar,
+          connected: sp.connected,
+          watchSeatIndex: sp.watchSeatIndex
+        }))
+      : [];
 
     return {
       code: room.code,
       name: room.name,
       status: room.status,
-      isHost: room.hostPlayerId === playerId,
+      isHost: !isSpectator && room.hostPlayerId === playerId,
+      isSpectator,
+      watchSeatIndex,
+      spectators: spectatorsList,
+      spectatorCount: spectatorsList.length,
       music: room.music || null,
       tv: room.tv || null,
       ambianceTrack: room.ambianceTrack || null,
@@ -1484,16 +1701,19 @@ export class RoomManager {
         avatar: s.avatar,
         connected: s.connected
       })),
-      game: room.session ? room.session.getClientView(viewerSeatIndex) : null
+      game: room.session
+        ? room.session.getClientView(mySeat ? mySeat.seatIndex : 0, {
+            isSpectator,
+            watchSeatIndex
+          })
+        : null
     };
   }
 
   broadcastRoomState(room) {
-    for (const seat of room.seats) {
-      if (seat.type === 'human' && seat.playerId) {
-        const payload = this.getRoomPayloadForPlayer(room, seat.playerId);
-        this.io.to(`player:${seat.playerId}`).emit('room:state', payload);
-      }
+    for (const pid of this.getAllHumanRecipients(room)) {
+      const payload = this.getRoomPayloadForPlayer(room, pid);
+      this.io.to(`player:${pid}`).emit('room:state', payload);
     }
   }
 

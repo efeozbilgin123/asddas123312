@@ -244,3 +244,207 @@ test('GameSession paired team mode exempts winner partner from 202 penalty and s
 
   session.destroy();
 });
+
+function tile(id, color, number, copy = 0) {
+  return { id, color, number, copy, isFakeOkey: false };
+}
+
+test('GameSession penalizes discarding Okey mid-game (+101) and blocks picking up discarded Okey', () => {
+  const session = new GameSession({
+    roomCode: 'OKEY',
+    seatsConfig: [
+      { playerId: 'p0', name: 'A', isBot: false },
+      { playerId: 'p1', name: 'B', isBot: false },
+      { playerId: 'p2', name: 'C', isBot: false },
+      { playerId: 'p3', name: 'D', isBot: false }
+    ],
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
+    onStateChange: () => {}
+  });
+
+  session.startRound();
+  session.okeyTarget = { color: 'red', number: 5 };
+  session.currentSeat = 1;
+  session.turnPhase = 'play';
+  const okeyTile = tile('ok-1', 'red', 5);
+  const keepTile = tile('k-1', 'blue', 7);
+  session.seats[1].hand = [okeyTile, keepTile];
+
+  const discRes = session.discardTile(1, okeyTile.id);
+  assert.equal(discRes.ok, true);
+  assert.equal(discRes.okeyDiscardPenalty, true);
+  assert.equal(session.seats[1].roundPenalties, 101);
+
+  // Next player (seat 2) cannot draw the discarded Okey from left discard
+  assert.equal(session.currentSeat, 2);
+  const pickRes = session.drawFromDiscard(2);
+  assert.equal(pickRes.ok, false);
+
+  session.destroy();
+});
+
+test('GameSession enforces pair-opener restrictions, katlamali pairThreshold, and 4-player pairs cancellation', () => {
+  const session = new GameSession({
+    roomCode: 'PAIRS',
+    seatsConfig: [
+      { playerId: 'p0', name: 'A', isBot: false },
+      { playerId: 'p1', name: 'B', isBot: false },
+      { playerId: 'p2', name: 'C', isBot: false },
+      { playerId: 'p3', name: 'D', isBot: false }
+    ],
+    options: { katlamali: true, islekPenalty: true, turnSeconds: 60 },
+    onStateChange: () => {}
+  });
+
+  session.startRound();
+  session.okeyTarget = { color: 'yellow', number: 1 };
+  assert.equal(session.pairThreshold, 5);
+
+  const makePairs = (prefix, count) => {
+    const groups = [];
+    const hand = [];
+    const colors = ['red', 'blue', 'black'];
+    for (let i = 0; i < count; i += 1) {
+      const num = (i % 10) + 2;
+      const color = colors[Math.floor(i / 10) % colors.length];
+      const t1 = tile(`${prefix}-a-${i}`, color, num, 0);
+      const t2 = tile(`${prefix}-b-${i}`, color, num, 1);
+      hand.push(t1, t2);
+      groups.push([t1.id, t2.id]);
+    }
+    return { groups, hand };
+  };
+
+  // Seat 0 opens with 5 pairs -> raises katlamali pairThreshold to 6
+  const p0 = makePairs('s0', 5);
+  const s0Extra = [
+    tile('s0-r1', 'red', 10),
+    tile('s0-r2', 'red', 11),
+    tile('s0-r3', 'red', 12),
+    tile('s0-p1', 'black', 9, 0),
+    tile('s0-p2', 'black', 9, 1),
+    tile('s0-k', 'blue', 13)
+  ];
+  session.seats[0].hand = [...p0.hand, ...s0Extra];
+  session.currentSeat = 0;
+  session.turnPhase = 'play';
+  const open0 = session.openHand(0, p0.groups, 'pairs');
+  assert.equal(open0.ok, true);
+  assert.equal(session.pairThreshold, 6);
+
+  // Pair-opener cannot lay a 3-tile series, but can lay an extra pair
+  const badSeries = session.layMeld(0, ['s0-r1', 's0-r2', 's0-r3']);
+  assert.equal(badSeries.ok, false);
+  const goodPair = session.layMeld(0, ['s0-p1', 's0-p2']);
+  assert.equal(goodPair.ok, true);
+
+  // Seat 0 discards -> Seat 1 picks discard from pair-opener and cannot open series
+  session.discardTile(0, 's0-k');
+  assert.equal(session.currentSeat, 1);
+  const p1 = makePairs('s1', 6);
+  const s1Series = [
+    tile('s1-r1', 'blue', 11),
+    tile('s1-r2', 'blue', 12),
+    tile('s1-r3', 'blue', 13),
+    tile('s1-r4', 'black', 11),
+    tile('s1-r5', 'black', 12),
+    tile('s1-r6', 'black', 13),
+    tile('s1-r7', 'red', 11),
+    tile('s1-r8', 'red', 12),
+    tile('s1-r9', 'red', 13)
+  ];
+  session.seats[1].hand = [...p1.hand, ...s1Series];
+  const pick1 = session.drawFromDiscard(1);
+  assert.equal(pick1.ok, true);
+  // Trying series with picked tile from pair-opener in katlamali is blocked
+  const badOpenSeries = session.openHand(
+    1,
+    [['s1-r1', 's1-r2', 's1-r3'], ['s1-r4', 's1-r5', 's1-r6'], ['s1-r7', 's1-r8', 's1-r9']],
+    'series'
+  );
+  assert.equal(badOpenSeries.ok, false);
+  session.returnPickedDiscard(1);
+
+  // Seat 1 draws and tries opening only 5 pairs (must fail because pairThreshold is 6)
+  session.drawFromDeck(1);
+  const tooFewPairs = session.openHand(1, p1.groups.slice(0, 5), 'pairs');
+  assert.equal(tooFewPairs.ok, false);
+
+  // Seat 1 opens 6 pairs -> pairThreshold becomes 7
+  const open1 = session.openHand(1, p1.groups, 'pairs');
+  assert.equal(open1.ok, true);
+  assert.equal(session.pairThreshold, 7);
+
+  // Seats 2 & 3 also open with pairs -> 4 players all opened pairs -> round cancelled!
+  const p2 = makePairs('s2', 7);
+  session.seats[2].hand = [...p2.hand, tile('s2-k', 'black', 3)];
+  session.currentSeat = 2;
+  session.turnPhase = 'play';
+  assert.equal(session.openHand(2, p2.groups, 'pairs').ok, true);
+
+  const p3 = makePairs('s3', 8);
+  session.seats[3].hand = [...p3.hand, tile('s3-k', 'black', 4)];
+  session.currentSeat = 3;
+  session.turnPhase = 'play';
+  const open3 = session.openHand(3, p3.groups, 'pairs');
+  assert.equal(open3.ok, true);
+  assert.equal(open3.roundCancelled, true);
+  assert.equal(session.phase, 'roundOver');
+  assert.equal(session.roundSummary.roundCancelled, true);
+  assert.deepEqual(
+    session.roundSummary.rows.map((r) => r.roundDelta),
+    [0, 0, 0, 0]
+  );
+
+  session.destroy();
+});
+
+test('GameSession detects elden bitme (opening and finishing on the same turn) for 2x score', () => {
+  const session = new GameSession({
+    roomCode: 'KAFA',
+    seatsConfig: [
+      { playerId: 'p0', name: 'A', isBot: false },
+      { playerId: 'p1', name: 'B', isBot: false },
+      { playerId: 'p2', name: 'C', isBot: false },
+      { playerId: 'p3', name: 'D', isBot: false }
+    ],
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
+    onStateChange: () => {}
+  });
+
+  session.startRound();
+  session.okeyTarget = { color: 'yellow', number: 1 };
+  session.currentSeat = 0;
+  session.turnPhase = 'play';
+  const finishTile = tile('fin', 'blue', 4);
+  session.seats[0].hand = [
+    tile('g1-1', 'red', 11),
+    tile('g1-2', 'red', 12),
+    tile('g1-3', 'red', 13), // 36
+    tile('g2-1', 'blue', 11),
+    tile('g2-2', 'blue', 12),
+    tile('g2-3', 'blue', 13), // 36
+    tile('g3-1', 'black', 10),
+    tile('g3-2', 'black', 11),
+    tile('g3-3', 'black', 12), // 33 -> total 105
+    finishTile
+  ];
+
+  const openRes = session.openHand(
+    0,
+    [
+      ['g1-1', 'g1-2', 'g1-3'],
+      ['g2-1', 'g2-2', 'g2-3'],
+      ['g3-1', 'g3-2', 'g3-3']
+    ],
+    'series'
+  );
+  assert.equal(openRes.ok, true);
+  const finRes = session.discardTile(0, finishTile.id);
+  assert.equal(finRes.ok, true);
+  assert.equal(session.roundSummary.finishedFromHand, true);
+  assert.equal(session.roundSummary.rows[0].roundDelta, -202);
+  assert.equal(session.roundSummary.rows[1].roundDelta, 404);
+
+  session.destroy();
+});

@@ -8,7 +8,11 @@ import { isDiscardPlayableOnTable } from './rules.js';
 import { effectiveTileProps, isOkeyTile } from './tiles.js';
 
 export function chooseBotDrawSource({ seat, leftDiscardTop, state }) {
-  if (!leftDiscardTop) return 'deck';
+  if (!leftDiscardTop || isOkeyTile(leftDiscardTop, state.okeyTarget)) return 'deck';
+
+  const leftSeatIdx = (seat.seatIndex + 3) % 4;
+  const leftSeat = state.seats?.[leftSeatIdx];
+  const katlamaliPairLock = Boolean(state.options?.katlamali && leftSeat?.openMode === 'pairs');
 
   // If bot already opened and can immediately lay off leftDiscardTop onto the table, take it!
   if (seat.opened) {
@@ -17,14 +21,22 @@ export function chooseBotDrawSource({ seat, leftDiscardTop, state }) {
     );
     if (canLayoff) return 'discard';
   } else {
-    // Check if taking leftDiscardTop lets the bot open immediately
-    const withTile = [...seat.hand, leftDiscardTop];
-    const openTry = findBestOpening(withTile, state.okeyTarget, state.openThreshold);
-    if (openTry.canOpen) {
-      const usesTile = openTry.groups.some((g) =>
-        g.slots.some((s) => s.tile.id === leftDiscardTop.id)
-      );
-      if (usesTile) return 'discard';
+    if (!katlamaliPairLock) {
+      const withTile = [...seat.hand, leftDiscardTop];
+      const openTry = findBestOpening(withTile, state.okeyTarget, state.openThreshold);
+      if (openTry.canOpen) {
+        const usesTile = openTry.groups.some((g) =>
+          g.slots.some((s) => s.tile.id === leftDiscardTop.id)
+        );
+        if (usesTile) return 'discard';
+      }
+    } else {
+      const withTile = [...seat.hand, leftDiscardTop];
+      const pairList = findPairsInHand(withTile, state.okeyTarget);
+      if (pairList.length >= (state.pairThreshold || 5)) {
+        const usesTile = pairList.some((pair) => pair.some((t) => t.id === leftDiscardTop.id));
+        if (usesTile) return 'discard';
+      }
     }
   }
 
@@ -41,12 +53,19 @@ export function computeBotTurnActions({ seat, state }) {
   let opened = seat.opened;
   let openMode = seat.openMode;
   const mustUseId = state.pickedDiscardTileId;
+  const pairTarget = state.pairThreshold || 5;
+  const pickedFromSeat = state.pickedDiscardFromSeat != null
+    ? state.seats?.[state.pickedDiscardFromSeat]
+    : null;
+  const katlamaliSeriesBlocked = Boolean(
+    mustUseId && state.options?.katlamali && pickedFromSeat?.openMode === 'pairs'
+  );
 
   // 1. Try opening if not yet opened
   if (!opened) {
     const opening = findBestOpening(workingHand, state.okeyTarget, state.openThreshold);
     const pairList = findPairsInHand(workingHand, state.okeyTarget);
-    const canOpenPairs = pairList.length >= 5;
+    const canOpenPairs = pairList.length >= pairTarget;
 
     const openingUsesMust =
       !mustUseId ||
@@ -55,7 +74,12 @@ export function computeBotTurnActions({ seat, state }) {
       !mustUseId ||
       pairList.some((pair) => pair.some((t) => t.id === mustUseId));
 
-    if (opening.canOpen && openingUsesMust && workingHand.length - opening.groups.reduce((n, g) => n + g.slots.length, 0) >= 1) {
+    if (
+      !katlamaliSeriesBlocked &&
+      opening.canOpen &&
+      openingUsesMust &&
+      workingHand.length - opening.groups.reduce((n, g) => n + g.slots.length, 0) >= 1
+    ) {
       const usedIds = new Set();
       const groupTileIds = [];
       for (const g of opening.groups) {

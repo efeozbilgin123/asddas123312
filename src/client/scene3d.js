@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { canLayoffTile } from '../../shared/melds.js';
+import { isOkeyTile } from '../../shared/tiles.js';
 import { soundFX } from './sound.js';
 import {
   createNameplateTexture,
@@ -920,7 +921,13 @@ export class OkeyTable3D {
           });
           tMesh.rotation.x = -Math.PI / 2;
           tMesh.position.set(baseCoord.x, 0.095 + i * (TILE_D + 0.004), baseCoord.z);
-          if (isTop && rel === 3 && isMyTurn && state.turnPhase === 'draw') {
+          if (
+            isTop &&
+            rel === 3 &&
+            isMyTurn &&
+            state.turnPhase === 'draw' &&
+            !isOkeyTile(pileInfo.topTile, state.okeyTarget)
+          ) {
             tMesh.userData = { kind: 'leftDiscard' };
             this.interactables.push(tMesh);
 

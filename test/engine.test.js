@@ -150,3 +150,61 @@ test('computeRoundScores calculates 202 for unopened and -101 for winner', () =>
   assert.equal(rows[2].roundDelta, 111);
   assert.equal(rows[3].roundDelta, 8);
 });
+
+test('computeRoundScores applies 2x/4x multipliers, flat +101 for held Okey, and 0 on roundCancelled', () => {
+  const okeyTarget = { color: 'red', number: 2 };
+
+  // Çiftten bitme (2x) + Elde Okey bırakma (+101 sabit)
+  const pairsWin = computeRoundScores({
+    seats: [
+      { seatIndex: 0, name: 'A', opened: true, openMode: 'pairs', hand: [], roundPenalties: 0 },
+      { seatIndex: 1, name: 'B', opened: false, openMode: null, hand: [t('1', 'blue', 9)], roundPenalties: 0 },
+      { seatIndex: 2, name: 'C', opened: true, openMode: 'series', hand: [t('2', 'red', 2), t('3', 'blue', 5)], roundPenalties: 0 },
+      { seatIndex: 3, name: 'D', opened: true, openMode: 'pairs', hand: [t('4', 'black', 3)], roundPenalties: 0 }
+    ],
+    winnerSeat: 0,
+    finishedWithOkey: false,
+    finishedFromPairs: true,
+    okeyTarget
+  });
+  assert.equal(pairsWin[0].roundDelta, -202);
+  assert.equal(pairsWin[1].roundDelta, 404);
+  assert.equal(pairsWin[2].handValue, 10);
+  assert.equal(pairsWin[2].penalties, 101);
+  assert.equal(pairsWin[2].roundDelta, 111);
+  assert.equal(pairsWin[3].roundDelta, 12);
+
+  // Elden (kafa) + Okeyle bitme (4x)
+  const kafaOkeyWin = computeRoundScores({
+    seats: [
+      { seatIndex: 0, name: 'A', opened: true, openMode: 'series', hand: [], roundPenalties: 0 },
+      { seatIndex: 1, name: 'B', opened: false, openMode: null, hand: [t('1', 'blue', 4)], roundPenalties: 0 },
+      { seatIndex: 2, name: 'C', opened: true, openMode: 'series', hand: [t('2', 'yellow', 5)], roundPenalties: 0 },
+      { seatIndex: 3, name: 'D', opened: true, openMode: 'series', hand: [], roundPenalties: 0 }
+    ],
+    winnerSeat: 0,
+    finishedWithOkey: true,
+    finishedFromHand: true,
+    okeyTarget
+  });
+  assert.equal(kafaOkeyWin[0].roundDelta, -404);
+  assert.equal(kafaOkeyWin[1].roundDelta, 808);
+  assert.equal(kafaOkeyWin[2].roundDelta, 20);
+
+  // 4 oyuncu da çift açınca el iptali (herkese 0)
+  const cancelled = computeRoundScores({
+    seats: [
+      { seatIndex: 0, name: 'A', opened: true, openMode: 'pairs', hand: [t('1', 'blue', 4)], roundPenalties: 101 },
+      { seatIndex: 1, name: 'B', opened: true, openMode: 'pairs', hand: [t('2', 'red', 7)], roundPenalties: 0 },
+      { seatIndex: 2, name: 'C', opened: true, openMode: 'pairs', hand: [t('3', 'black', 8)], roundPenalties: 0 },
+      { seatIndex: 3, name: 'D', opened: true, openMode: 'pairs', hand: [t('4', 'yellow', 9)], roundPenalties: 0 }
+    ],
+    winnerSeat: null,
+    roundCancelled: true,
+    okeyTarget
+  });
+  assert.deepEqual(
+    cancelled.map((r) => r.roundDelta),
+    [0, 0, 0, 0]
+  );
+});

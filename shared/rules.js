@@ -14,16 +14,37 @@ export function isDiscardPlayableOnTable(tile, tableMelds, okeyTarget) {
 export function computeRoundScores({
   seats,
   winnerSeat,
-  finishedWithOkey,
+  finishedWithOkey = false,
+  finishedFromPairs = false,
+  finishedFromHand = false,
+  roundCancelled = false,
   okeyTarget,
   teamMode = 'solo'
 }) {
-  const multiplier = finishedWithOkey ? 2 : 1;
+  if (roundCancelled) {
+    return seats.map((seat) => ({
+      seatIndex: seat.seatIndex,
+      teamIndex: seat.seatIndex % 2,
+      name: seat.name,
+      opened: seat.opened,
+      openMode: seat.openMode,
+      handValue: 0,
+      penalties: 0,
+      roundDelta: 0,
+      isWinner: false,
+      isWinningPartner: false
+    }));
+  }
+
+  let multiplier = 1;
+  if (finishedWithOkey) multiplier *= 2;
+  if (finishedFromPairs || finishedFromHand) multiplier *= 2;
+
   const winningTeam =
     teamMode === 'paired' && winnerSeat !== null ? winnerSeat % 2 : null;
 
   return seats.map((seat) => {
-    const penalties = seat.roundPenalties || 0;
+    const basePenalties = seat.roundPenalties || 0;
     const teamIndex = seat.seatIndex % 2;
 
     if (winnerSeat !== null && seat.seatIndex === winnerSeat) {
@@ -35,8 +56,8 @@ export function computeRoundScores({
         opened: seat.opened,
         openMode: seat.openMode,
         handValue: 0,
-        penalties,
-        roundDelta: bonus + penalties,
+        penalties: basePenalties,
+        roundDelta: bonus + basePenalties,
         isWinner: true,
         isWinningPartner: false
       };
@@ -50,8 +71,8 @@ export function computeRoundScores({
         opened: seat.opened,
         openMode: seat.openMode,
         handValue: 0,
-        penalties,
-        roundDelta: penalties,
+        penalties: basePenalties,
+        roundDelta: basePenalties,
         isWinner: false,
         isWinningPartner: true
       };
@@ -66,19 +87,26 @@ export function computeRoundScores({
         opened: false,
         openMode: null,
         handValue: unopenedPenalty,
-        penalties,
-        roundDelta: unopenedPenalty + penalties,
+        penalties: basePenalties,
+        roundDelta: unopenedPenalty + basePenalties,
         isWinner: false,
         isWinningPartner: false
       };
     }
 
-    const rawHand = seat.hand.reduce(
-      (sum, tile) => sum + tileHandPenaltyValue(tile, okeyTarget),
-      0
-    );
+    let rawHand = 0;
+    let okeyHoldPenalty = 0;
+    for (const tile of seat.hand) {
+      if (isOkeyTile(tile, okeyTarget)) {
+        okeyHoldPenalty += 101;
+      } else {
+        rawHand += tileHandPenaltyValue(tile, okeyTarget);
+      }
+    }
+
     const pairMultiplier = seat.openMode === 'pairs' ? 2 : 1;
     const handValue = rawHand * multiplier * pairMultiplier;
+    const penalties = basePenalties + okeyHoldPenalty;
 
     return {
       seatIndex: seat.seatIndex,

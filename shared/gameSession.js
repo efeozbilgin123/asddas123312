@@ -40,6 +40,7 @@ export class GameSession {
     this.turnPhase = 'draw'; // 'draw' | 'play'
     this.currentSeat = 0;
     this.openThreshold = 101;
+    this.pairThreshold = 5;
     this.gosterge = null;
     this.okeyTarget = null;
     this.deck = [];
@@ -48,6 +49,7 @@ export class GameSession {
     this.pickedDiscardTileId = null;
     this.pickedDiscardFromSeat = null;
     this.committedMeldThisTurn = false;
+    this.openedThisTurn = false;
     this.turnEndsAt = null;
     this.roundSummary = null;
     this.eventCounter = 0;
@@ -111,8 +113,10 @@ export class GameSession {
     this.pickedDiscardTileId = null;
     this.pickedDiscardFromSeat = null;
     this.committedMeldThisTurn = false;
+    this.openedThisTurn = false;
     this.roundSummary = null;
     this.openThreshold = 101;
+    this.pairThreshold = 5;
     this.phase = 'playing';
     this.currentSeat = starterSeat;
     this.turnPhase = 'play'; // Starter begins with 22 tiles and plays/discards
@@ -274,6 +278,7 @@ export class GameSession {
     this.pickedDiscardTileId = null;
     this.pickedDiscardFromSeat = null;
     this.committedMeldThisTurn = false;
+    this.openedThisTurn = false;
 
     this.emitEvent('draw_deck', seatIndex, null, `${seat.name} ortadan taş çekti.`);
     this.notify();
@@ -291,6 +296,11 @@ export class GameSession {
       return { ok: false, error: 'Sol tarafınızda alınabilecek taş yok.' };
     }
 
+    const top = pile[pile.length - 1];
+    if (isOkeyTile(top, this.okeyTarget)) {
+      return { ok: false, error: 'Yere atılan Okey taşı yandan alınamaz.' };
+    }
+
     const tile = pile.pop();
     const seat = this.seats[seatIndex];
     seat.hand.push(tile);
@@ -298,6 +308,7 @@ export class GameSession {
     this.pickedDiscardTileId = tile.id;
     this.pickedDiscardFromSeat = leftSeat;
     this.committedMeldThisTurn = false;
+    this.openedThisTurn = false;
 
     this.emitEvent('draw_discard', seatIndex, tile, `${seat.name} yandan taş aldı.`);
     this.notify();
@@ -343,6 +354,19 @@ export class GameSession {
       return { ok: false, error: 'Açmak için en az bir grup seçmelisiniz.' };
     }
 
+    if (
+      this.options.katlamali &&
+      this.pickedDiscardTileId &&
+      this.pickedDiscardFromSeat !== null &&
+      this.seats[this.pickedDiscardFromSeat]?.openMode === 'pairs' &&
+      mode !== 'pairs'
+    ) {
+      return {
+        ok: false,
+        error: 'Katlamalı oyunda çift açan oyuncudan alınan taşla yalnızca çifte açabilirsiniz.'
+      };
+    }
+
     const handMap = new Map(seat.hand.map((t) => [t.id, t]));
     const usedIds = new Set();
     const validatedGroups = [];
@@ -379,8 +403,8 @@ export class GameSession {
     }
 
     if (mode === 'pairs') {
-      if (validatedGroups.length < 5) {
-        return { ok: false, error: 'Çift açmak için en az 5 çift gerekir.' };
+      if (validatedGroups.length < this.pairThreshold) {
+        return { ok: false, error: `Çift açmak için en az ${this.pairThreshold} çift gerekir.` };
       }
     } else if (totalPoints < this.openThreshold) {
       return {
@@ -396,8 +420,6 @@ export class GameSession {
       };
     }
 
-    // Must leave at least 0 tiles? In 101 Okey you need 1 tile to discard, OR if 0 left you immediately win by melding?
-    // Standard 101 Okey: you finish by discarding your last tile (so opening leaves >= 1 tile unless all 22 meld, wait: if 0 left, let's require >= 1 tile to discard or allow winning if 0 left; actually standard 101 requires discarding the last tile, so keep >= 1 tile).
     if (seat.hand.length - usedIds.size < 1) {
       return {
         ok: false,
@@ -421,8 +443,12 @@ export class GameSession {
       });
     }
 
-    if (this.options.katlamali && mode !== 'pairs' && totalPoints >= this.openThreshold) {
-      this.openThreshold = totalPoints + 1;
+    if (this.options.katlamali) {
+      if (mode === 'pairs') {
+        this.pairThreshold = validatedGroups.length + 1;
+      } else if (totalPoints >= this.openThreshold) {
+        this.openThreshold = totalPoints + 1;
+      }
     }
 
     if (this.pickedDiscardTileId && usedIds.has(this.pickedDiscardTileId)) {
@@ -430,6 +456,17 @@ export class GameSession {
       this.pickedDiscardFromSeat = null;
     }
     this.committedMeldThisTurn = true;
+    this.openedThisTurn = true;
+
+    if (this.seats.every((s) => s.opened && s.openMode === 'pairs')) {
+      this.finishRound(
+        null,
+        false,
+        '4 oyuncu da çift açtığı için bu el iptal edildi! Hiçbir oyuncuya ceza yazılmadı.',
+        { roundCancelled: true }
+      );
+      return { ok: true, totalPoints, roundCancelled: true };
+    }
 
     const label = mode === 'pairs' ? `${validatedGroups.length} çift` : `${totalPoints} sayı`;
     this.emitEvent('open_hand', seatIndex, null, `${seat.name} ${label} ile elini açtı.`);
@@ -460,12 +497,19 @@ export class GameSession {
       tiles.push(t);
     }
 
+    if (seat.openMode === 'pairs' && tiles.length !== 2) {
+      return {
+        ok: false,
+        error: 'Çift açan oyuncu normal per açamaz; yalnızca çift indirebilir veya tek taş işleyebilir.'
+      };
+    }
+
     if (seat.hand.length - tiles.length < 1) {
       return { ok: false, error: 'Bitirmek için atacağınız son taş ıstakanızda kalmalıdır.' };
     }
 
     const res =
-      seat.openMode === 'pairs' && tiles.length === 2
+      seat.openMode === 'pairs'
         ? validatePair(tiles, this.okeyTarget)
         : validateGroup(tiles, this.okeyTarget);
 
@@ -555,10 +599,16 @@ export class GameSession {
     const [tile] = seat.hand.splice(tileIdx, 1);
     const isFinalWin = seat.hand.length === 0;
     const isOkeyFinish = isFinalWin && isOkeyTile(tile, this.okeyTarget);
+    const okeyDiscardPenalty = !isFinalWin && isOkeyTile(tile, this.okeyTarget);
+
+    if (okeyDiscardPenalty) {
+      seat.roundPenalties += 101;
+    }
 
     let islekTriggered = false;
     if (
       !isFinalWin &&
+      !okeyDiscardPenalty &&
       this.options.islekPenalty &&
       isDiscardPlayableOnTable(tile, this.tableMelds, this.okeyTarget)
     ) {
@@ -572,12 +622,27 @@ export class GameSession {
     this.committedMeldThisTurn = false;
 
     if (isFinalWin) {
-      const msg = isOkeyFinish
-        ? `${seat.name} Okey atarak eli bitirdi!`
-        : `${seat.name} eli bitirdi!`;
-      this.finishRound(seatIndex, isOkeyFinish, msg);
+      const finishedFromPairs = seat.openMode === 'pairs';
+      const finishedFromHand = this.openedThisTurn;
+      this.openedThisTurn = false;
+
+      const tags = [];
+      if (finishedFromPairs) tags.push('çiftten');
+      if (finishedFromHand) tags.push('elden (kafa)');
+      if (isOkeyFinish) tags.push('Okey atarak');
+      const mult = (isOkeyFinish ? 2 : 1) * (finishedFromPairs || finishedFromHand ? 2 : 1);
+      const multLabel = mult > 1 ? ` (${mult}×)` : '';
+      const tagText = tags.length > 0 ? ` ${tags.join(' ve ')}` : '';
+      const msg = `${seat.name}${tagText} eli bitirdi!${multLabel}`;
+
+      this.finishRound(seatIndex, isOkeyFinish, msg, {
+        finishedFromPairs,
+        finishedFromHand
+      });
       return { ok: true, roundEnded: true };
     }
+
+    this.openedThisTurn = false;
 
     if (this.deck.length === 0) {
       this.finishRound(null, false, 'Ortadaki deste bitti.');
@@ -586,9 +651,12 @@ export class GameSession {
 
     this.currentSeat = (seatIndex + 1) % 4;
     this.turnPhase = 'draw';
-    const notice = islekTriggered
-      ? `${seat.name} işlek taş attı (+101 ceza).`
-      : `${seat.name} taş attı.`;
+    let notice = `${seat.name} taş attı.`;
+    if (okeyDiscardPenalty) {
+      notice = `${seat.name} Okeyi yere attı (+101 ceza).`;
+    } else if (islekTriggered) {
+      notice = `${seat.name} işlek taş attı (+101 ceza).`;
+    }
     this.emitEvent('discard', seatIndex, tile, notice);
     this.resetTurnTimer();
 
@@ -596,10 +664,15 @@ export class GameSession {
       this.notify();
     }
     this.scheduleBotMove();
-    return { ok: true, islekTriggered };
+    return { ok: true, islekTriggered, okeyDiscardPenalty };
   }
 
-  finishRound(winnerSeat, finishedWithOkey, message) {
+  finishRound(
+    winnerSeat,
+    finishedWithOkey,
+    message,
+    { finishedFromPairs = false, finishedFromHand = false, roundCancelled = false } = {}
+  ) {
     this.destroy();
     this.phase = 'roundOver';
 
@@ -607,6 +680,9 @@ export class GameSession {
       seats: this.seats,
       winnerSeat,
       finishedWithOkey,
+      finishedFromPairs,
+      finishedFromHand,
+      roundCancelled,
       okeyTarget: this.okeyTarget,
       teamMode: this.options.teamMode
     });
@@ -632,7 +708,10 @@ export class GameSession {
       teamScores,
       winnerSeat,
       finishedWithOkey,
-      deckExhausted: winnerSeat === null,
+      finishedFromPairs,
+      finishedFromHand,
+      roundCancelled,
+      deckExhausted: !roundCancelled && winnerSeat === null,
       message,
       rows: breakdown
     };
@@ -658,6 +737,7 @@ export class GameSession {
       turnPhase: this.turnPhase,
       currentSeat: this.currentSeat,
       openThreshold: this.openThreshold,
+      pairThreshold: this.pairThreshold,
       gosterge: this.gosterge,
       okeyTarget: this.okeyTarget,
       deckCount: this.deck.length,
@@ -668,6 +748,8 @@ export class GameSession {
       })),
       pickedDiscardTileId:
         viewerSeatIndex === this.currentSeat ? this.pickedDiscardTileId : null,
+      pickedDiscardFromSeat:
+        viewerSeatIndex === this.currentSeat ? this.pickedDiscardFromSeat : null,
       committedMeldThisTurn:
         viewerSeatIndex === this.currentSeat ? this.committedMeldThisTurn : false,
       turnEndsAt: this.turnEndsAt,

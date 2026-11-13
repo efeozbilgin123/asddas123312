@@ -501,7 +501,9 @@ function renderGameRoom(room) {
 
   els.hudRound.textContent =
     game.maxRounds > 0 ? `${game.roundNumber} / ${game.maxRounds}` : String(game.roundNumber);
-  els.hudThreshold.textContent = String(game.openThreshold);
+  const pairThr = game.pairThreshold || 5;
+  els.hudThreshold.textContent =
+    pairThr > 5 ? `${game.openThreshold} · ${pairThr}ç` : String(game.openThreshold);
 
   if (game.okeyTarget) {
     const colorName = COLOR_LABELS[game.okeyTarget.color] || game.okeyTarget.color;
@@ -570,10 +572,11 @@ function updateGameControls() {
 
   const leftSeatIdx = (viewerIdx + 3) % 4;
   const leftTopTile = game.discardPiles[leftSeatIdx]?.topTile;
+  const leftTopIsOkey = Boolean(leftTopTile && isOkeyTile(leftTopTile, game.okeyTarget));
 
   els.btnDrawDeck.hidden = !isDrawPhase;
-  els.btnDrawDiscard.hidden = !(isDrawPhase && leftTopTile);
-  if (leftTopTile) {
+  els.btnDrawDiscard.hidden = !(isDrawPhase && leftTopTile && !leftTopIsOkey);
+  if (leftTopTile && !leftTopIsOkey) {
     els.btnDrawDiscard.textContent = `Yandan Al (${formatTileLabel(leftTopTile)})`;
   }
 
@@ -615,13 +618,13 @@ function updateGameControls() {
   const canStage =
     !mySeat?.opened &&
     ((validGroup && validGroup.valid) || (validPair && validPair.valid));
+  const canLayNewMeld =
+    mySeat?.openMode === 'pairs'
+      ? Boolean(validPair?.valid)
+      : Boolean(validGroup?.valid);
 
   els.btnStageGroup.hidden = !canStage;
-  els.btnLayMeld.hidden = !(
-    isPlayPhase &&
-    mySeat?.opened &&
-    ((validGroup && validGroup.valid) || (mySeat.openMode === 'pairs' && validPair?.valid))
-  );
+  els.btnLayMeld.hidden = !(isPlayPhase && mySeat?.opened && canLayNewMeld);
   els.btnDiscardTile.hidden = !(isPlayPhase && selected.length === 1);
 
   renderStagingBar(game, mySeat, isPlayPhase);
@@ -639,6 +642,7 @@ function renderStagingBar(game, mySeat, isPlayPhase) {
   let totalPoints = 0;
   let pairsCount = 0;
   const allPairs = stagedGroups.every((g) => g.mode === 'pairs');
+  const pairReq = game.pairThreshold || 5;
 
   stagedGroups.forEach((g) => {
     totalPoints += g.points;
@@ -664,8 +668,8 @@ function renderStagingBar(game, mySeat, isPlayPhase) {
   });
 
   if (allPairs) {
-    els.stagingTotal.textContent = `Çift: ${pairsCount} / 5`;
-    els.btnCommitOpen.disabled = !(isPlayPhase && pairsCount >= 5);
+    els.stagingTotal.textContent = `Çift: ${pairsCount} / ${pairReq}`;
+    els.btnCommitOpen.disabled = !(isPlayPhase && pairsCount >= pairReq);
   } else {
     els.stagingTotal.textContent = `Toplam: ${totalPoints} / ${game.openThreshold}`;
     els.btnCommitOpen.disabled = !(isPlayPhase && totalPoints >= game.openThreshold);
@@ -673,12 +677,20 @@ function renderStagingBar(game, mySeat, isPlayPhase) {
 }
 
 function openRoundSummaryDialog(room, summary) {
-  if (summary.matchComplete) {
+  const badges = [];
+  if (summary.finishedFromPairs) badges.push('Çiftten');
+  if (summary.finishedFromHand) badges.push('Elden');
+  if (summary.finishedWithOkey) badges.push('Okeyle');
+  const finishTag = badges.length > 0 ? ` · ${badges.join(' + ')}` : '';
+
+  if (summary.roundCancelled) {
+    els.roundDialogTitle.textContent = `${summary.roundNumber}. El İptal Edildi (4 Çift)`;
+  } else if (summary.matchComplete) {
     els.roundDialogTitle.textContent = `Oyun Tamamlandı (${summary.maxRounds} El)`;
   } else if (summary.deckExhausted) {
     els.roundDialogTitle.textContent = `${summary.roundNumber}. El · Deste Tükendi`;
   } else {
-    els.roundDialogTitle.textContent = `${summary.roundNumber}. El Sonucu`;
+    els.roundDialogTitle.textContent = `${summary.roundNumber}. El Sonucu${finishTag}`;
   }
 
   let msg = summary.message || '';
@@ -729,7 +741,11 @@ function openRoundSummaryDialog(room, summary) {
       : `${teamTag}${row.name}`;
 
     const tdOpen = document.createElement('td');
-    tdOpen.textContent = row.opened ? 'Açtı' : 'Açmadı';
+    tdOpen.textContent = row.opened
+      ? row.openMode === 'pairs'
+        ? 'Çift Açtı'
+        : 'Açtı'
+      : 'Açmadı';
 
     const tdHand = document.createElement('td');
     tdHand.className = 'num';
@@ -902,8 +918,18 @@ els.btnAutoStage.addEventListener('click', () => {
     return;
   }
 
-  const best = findBestOpening(mySeat.hand, game.okeyTarget, game.openThreshold);
-  if (best.groups.length > 0) {
+  const pairReq = game.pairThreshold || 5;
+  const pickedFromSeat =
+    game.pickedDiscardFromSeat != null ? game.seats?.[game.pickedDiscardFromSeat] : null;
+  const katlamaliPairOnly = Boolean(
+    game.options?.katlamali && game.pickedDiscardTileId && pickedFromSeat?.openMode === 'pairs'
+  );
+
+  const best = katlamaliPairOnly
+    ? { canOpen: false, groups: [], totalPoints: 0 }
+    : findBestOpening(mySeat.hand, game.okeyTarget, game.openThreshold);
+
+  if (best.groups.length > 0 && best.canOpen) {
     stagedGroups = best.groups.map((g, idx) => ({
       id: `auto-${Date.now()}-${idx}`,
       mode: 'series',
@@ -912,12 +938,9 @@ els.btnAutoStage.addEventListener('click', () => {
     }));
     scene3d.clearSelection();
     updateGameControls();
-    if (!best.canOpen) {
-      showNotice(`Bulunan en yüksek toplam ${best.totalPoints} sayı (açılış için ${game.openThreshold} gerekir).`);
-    }
   } else {
     const pairs = findPairsInHand(mySeat.hand, game.okeyTarget);
-    if (pairs.length >= 5) {
+    if (pairs.length >= pairReq) {
       stagedGroups = pairs.map((pair, idx) => ({
         id: `pair-${Date.now()}-${idx}`,
         mode: 'pairs',
@@ -926,6 +949,16 @@ els.btnAutoStage.addEventListener('click', () => {
       }));
       scene3d.clearSelection();
       updateGameControls();
+    } else if (best.groups.length > 0) {
+      stagedGroups = best.groups.map((g, idx) => ({
+        id: `auto-${Date.now()}-${idx}`,
+        mode: 'series',
+        tiles: g.slots.map((s) => s.tile),
+        points: g.points
+      }));
+      scene3d.clearSelection();
+      updateGameControls();
+      showNotice(`Bulunan en yüksek toplam ${best.totalPoints} sayı (açılış için ${game.openThreshold} gerekir).`);
     } else {
       showNotice('Istakada otomatik grup bulunamadı.');
     }

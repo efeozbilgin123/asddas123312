@@ -327,9 +327,42 @@ const els = {
 };
 
 els.playerName.value = savedName;
-const urlRoom = new URLSearchParams(window.location.search).get('room');
-if (urlRoom) {
-  els.joinCode.value = urlRoom.toUpperCase().slice(0, 6);
+const urlParams = new URLSearchParams(window.location.search);
+const pathRoomMatch = window.location.pathname.match(/^\/room\/([a-zA-Z0-9]{4,6})\/?$/i);
+const rawUrlRoom = urlParams.get('room') || urlParams.get('code') || pathRoomMatch?.[1] || '';
+const cleanUrlRoom = rawUrlRoom
+  .trim()
+  .toUpperCase()
+  .replace(/[^A-Z0-9]/g, '')
+  .slice(0, 6);
+const rawUrlMode = (urlParams.get('mode') || '').trim().toLowerCase();
+const pendingInviteMode = rawUrlMode === 'billiard' || rawUrlMode === 'spectator' ? rawUrlMode : 'auto';
+let pendingInviteRoomCode = cleanUrlRoom || null;
+if (cleanUrlRoom) {
+  els.joinCode.value = cleanUrlRoom;
+}
+
+function syncRoomQueryUrl(roomCode) {
+  try {
+    const url = new URL(window.location.href);
+    if (url.pathname.startsWith('/room/')) {
+      url.pathname = '/';
+    }
+    if (roomCode) {
+      url.searchParams.set('room', roomCode);
+    } else {
+      url.searchParams.delete('room');
+      url.searchParams.delete('code');
+      url.searchParams.delete('mode');
+    }
+    const nextRelative = `${url.pathname}${url.search}${url.hash}`;
+    const currRelative = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (nextRelative !== currRelative) {
+      window.history.replaceState({}, '', nextRelative);
+    }
+  } catch {
+    // Ignore history API errors
+  }
 }
 
 function setSelectedAvatar(avatarVal) {
@@ -1180,6 +1213,8 @@ function readLobbyOptions() {
 }
 
 function startSingleplayer() {
+  pendingInviteRoomCode = null;
+  syncRoomQueryUrl(null);
   const rawName = els.playerName.value.trim();
   const name = rawName || 'Oyuncu';
   if (rawName) {
@@ -1222,6 +1257,7 @@ function startSingleplayer() {
 }
 
 function createRoom(quickStart) {
+  pendingInviteRoomCode = null;
   const name = validatePlayerName();
   if (!name) return;
 
@@ -1266,7 +1302,13 @@ function createRoom(quickStart) {
   );
 }
 
-function joinRoomByCode(code, { asSpectator = false, activity = 'auto' } = {}) {
+function joinRoomByCode(
+  code,
+  { asSpectator = false, activity = 'auto', allowGuestFallback = false, fromInvite = false } = {}
+) {
+  if (allowGuestFallback && !els.playerName.value.trim()) {
+    els.playerName.value = `Misafir ${Math.floor(100 + Math.random() * 900)}`;
+  }
   const name = validatePlayerName();
   if (!name) return;
 
@@ -1285,7 +1327,7 @@ function joinRoomByCode(code, { asSpectator = false, activity = 'auto' } = {}) {
   }
 
   els.joinCode.removeAttribute('aria-invalid');
-  els.joinHelp.textContent = '';
+  els.joinHelp.textContent = fromInvite ? `${clean} odasına giriliyor...` : '';
 
   socket.emit(
     'room:join',
@@ -1300,6 +1342,12 @@ function joinRoomByCode(code, { asSpectator = false, activity = 'auto' } = {}) {
       if (!res?.ok) {
         els.joinCode.setAttribute('aria-invalid', 'true');
         els.joinHelp.textContent = res?.error || 'Odaya katılınamadı.';
+        if (fromInvite) {
+          syncRoomQueryUrl(null);
+          els.joinCode.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
+      } else {
+        els.joinHelp.textContent = '';
       }
     }
   );
@@ -2505,6 +2553,9 @@ function switchView(room) {
   }
 
   scene3d.setLobbyRooms(lastLobbyRooms, room.code);
+  if (!localClient && room.code) {
+    syncRoomQueryUrl(room.code);
+  }
 
   const myActivity = room.myActivity || (room.isSpectator ? 'spectator' : 'okey');
   const myId = localClient ? 'local-human' : playerId;
@@ -3609,6 +3660,8 @@ function handleLayoffTile(tileId, meldId) {
 }
 
 function leaveCurrentMatch() {
+  pendingInviteRoomCode = null;
+  syncRoomQueryUrl(null);
   if (els.dialogRound.open) els.dialogRound.close();
   if (localClient) {
     localClient.destroy();
@@ -5312,6 +5365,18 @@ socket.on('rooms:list', (rooms) => {
 socket.on('room:state', (room) => {
   if (!localClient) {
     switchView(room);
+    if (pendingInviteRoomCode) {
+      const inviteCode = pendingInviteRoomCode;
+      pendingInviteRoomCode = null;
+      if (!room || room.code !== inviteCode) {
+        joinRoomByCode(inviteCode, {
+          asSpectator: pendingInviteMode === 'spectator',
+          activity: pendingInviteMode,
+          allowGuestFallback: true,
+          fromInvite: true
+        });
+      }
+    }
   }
 });
 

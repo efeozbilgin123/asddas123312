@@ -805,5 +805,54 @@ test('LocalSingleplayerClient transitions cleanly between Okey, Billiards, and F
   assert.equal(last.seats[0].type, 'human');
 });
 
+test('RoomManager direct invite join handles case-insensitive codes, full active tables, and cross-room switching', () => {
+  const io = createMockIo();
+  const rm = new RoomManager(io);
 
+  const roomA = rm.createRoom({ playerId: 'host-a', playerName: 'Efe', roomName: 'Oda A' });
+  const roomB = rm.createRoom({ playerId: 'host-b', playerName: 'Kaan', roomName: 'Oda B' });
+  assert.equal(roomA.ok, true);
+  assert.equal(roomB.ok, true);
 
+  // Guest joins Room A via lowercase invite code with auto activity
+  const guestJoin = rm.joinRoom({
+    roomCode: ` ${roomA.room.code.toLowerCase()} `,
+    playerId: 'guest-1',
+    playerName: 'Misafir 101',
+    activity: 'auto'
+  });
+  assert.equal(guestJoin.ok, true);
+  assert.equal(guestJoin.activity, 'okey');
+  assert.equal(guestJoin.seatIndex, 1);
+
+  // Start Room A (fills remaining seats 2 & 3 with bots)
+  assert.equal(rm.startGame(roomA.room.code, 'host-a').ok, true);
+
+  // Late friend opening invite link enters as spectator/roamer when Okey seats are full
+  const lateJoin = rm.joinRoom({
+    roomCode: roomA.room.code,
+    playerId: 'late-1',
+    playerName: 'Misafir 202',
+    activity: 'auto'
+  });
+  assert.equal(lateJoin.ok, true);
+  assert.equal(lateJoin.isSpectator, true);
+  assert.equal(lateJoin.activity, 'spectator');
+
+  // Player currently in Room B opening invite link for Room A cleanly leaves B and joins A
+  const crossJoin = rm.joinRoom({
+    roomCode: roomA.room.code,
+    playerId: 'host-b',
+    playerName: 'Kaan',
+    activity: 'auto'
+  });
+  assert.equal(crossJoin.ok, true);
+  assert.equal(rm.playerToRoom.get('host-b'), roomA.room.code);
+  assert.equal(rm.getRoom(roomB.room.code), null);
+
+  rm.leaveCurrentRoom('host-a');
+  rm.leaveCurrentRoom('guest-1');
+  rm.leaveCurrentRoom('late-1');
+  rm.leaveCurrentRoom('host-b');
+  assert.equal(rm.getRoom(roomA.room.code), null);
+});

@@ -189,6 +189,7 @@ const els = {
   tvTitle: document.getElementById('tv-title'),
   tvUpdatedBy: document.getElementById('tv-updated-by'),
   tvSwitchBtn: document.getElementById('tv-switch-btn'),
+  tvModeBtn: document.getElementById('tv-mode-btn'),
   tvToggle: document.getElementById('tv-toggle'),
   tvExternalLink: document.getElementById('tv-external-link'),
   tvStop: document.getElementById('tv-stop'),
@@ -1680,6 +1681,57 @@ let activeTvKey = null;
 let activeTvData = null;
 let tvIframeEl = null;
 let tvFallbackIndex = 0;
+let tvDisplayMode = localStorage.getItem('yuzbir_tv_display_mode') === 'pip' ? 'pip' : 'wall';
+
+function syncTvHostPlacement() {
+  const wallHost = scene3d.getTvWallHostElement();
+  if (!activeTvData) {
+    scene3d.setTvWallVisible(false);
+    els.tvDock?.classList.remove('is-wall-mode');
+    if (els.tvModeBtn) {
+      els.tvModeBtn.hidden = true;
+      els.tvModeBtn.setAttribute('aria-pressed', 'false');
+    }
+    return;
+  }
+
+  const inGame = Boolean(currentRoom && currentRoom.status !== 'waiting');
+  const useWall = inGame && tvDisplayMode === 'wall' && Boolean(wallHost);
+
+  if (useWall) {
+    scene3d.setTvWallVisible(true);
+    els.tvDock?.classList.add('is-wall-mode');
+    els.tvDock?.classList.remove('is-minimized');
+    if (els.tvModeBtn) {
+      els.tvModeBtn.hidden = false;
+      els.tvModeBtn.textContent = "PIP'e Al";
+      els.tvModeBtn.setAttribute('aria-pressed', 'true');
+    }
+    if (els.tvToggle) {
+      els.tvToggle.hidden = true;
+    }
+    if (tvIframeEl && wallHost && tvIframeEl.parentElement !== wallHost) {
+      wallHost.appendChild(tvIframeEl);
+    }
+  } else {
+    scene3d.setTvWallVisible(false);
+    els.tvDock?.classList.remove('is-wall-mode');
+    if (els.tvModeBtn) {
+      els.tvModeBtn.hidden = !inGame;
+      els.tvModeBtn.textContent = 'Duvarda';
+      els.tvModeBtn.setAttribute('aria-pressed', 'false');
+    }
+    if (els.tvToggle) {
+      els.tvToggle.hidden = false;
+      const minimized = els.tvDock?.classList.contains('is-minimized') ?? false;
+      els.tvToggle.textContent = minimized ? 'Büyüt' : 'Küçült';
+      els.tvToggle.setAttribute('aria-expanded', String(!minimized));
+    }
+    if (tvIframeEl && els.tvPlayerHost && tvIframeEl.parentElement !== els.tvPlayerHost) {
+      els.tvPlayerHost.appendChild(tvIframeEl);
+    }
+  }
+}
 
 function handleTvPlaybackError() {
   if (!tvIframeEl || !activeTvData) return;
@@ -1702,16 +1754,25 @@ function applyRoomTv(tv) {
     activeTvData = null;
     tvIframeEl = null;
     tvFallbackIndex = 0;
+    scene3d.setTvWallVisible(false);
     if (els.tvDock) {
       els.tvDock.hidden = true;
       els.tvDock.classList.add('is-minimized');
+      els.tvDock.classList.remove('is-wall-mode');
+    }
+    if (els.tvModeBtn) {
+      els.tvModeBtn.hidden = true;
+      els.tvModeBtn.setAttribute('aria-pressed', 'false');
     }
     if (els.tvToggle) {
+      els.tvToggle.hidden = false;
       els.tvToggle.textContent = 'Büyüt';
       els.tvToggle.setAttribute('aria-expanded', 'false');
     }
     if (els.tvExternalLink) els.tvExternalLink.hidden = true;
     if (els.tvPlayerHost) els.tvPlayerHost.innerHTML = '';
+    const wallHost = scene3d.getTvWallHostElement();
+    if (wallHost) wallHost.innerHTML = '';
     return;
   }
 
@@ -1734,6 +1795,7 @@ function applyRoomTv(tv) {
 
   if (key === activeTvKey) {
     activeTvData = tv;
+    syncTvHostPlacement();
     return;
   }
 
@@ -1745,13 +1807,10 @@ function applyRoomTv(tv) {
   if (els.tvDock) {
     els.tvDock.classList.remove('is-minimized');
   }
-  if (els.tvToggle) {
-    els.tvToggle.textContent = 'Küçült';
-    els.tvToggle.setAttribute('aria-expanded', 'true');
-  }
 
-  if (!els.tvPlayerHost) return;
-  els.tvPlayerHost.innerHTML = '';
+  const wallHost = scene3d.getTvWallHostElement();
+  if (els.tvPlayerHost) els.tvPlayerHost.innerHTML = '';
+  if (wallHost) wallHost.innerHTML = '';
 
   let iframeSrc = tv.embedUrl;
   if (tv.provider === 'youtube' && !iframeSrc.includes('origin=')) {
@@ -1777,8 +1836,8 @@ function applyRoomTv(tv) {
       }
     }
   });
-  els.tvPlayerHost.appendChild(iframe);
   tvIframeEl = iframe;
+  syncTvHostPlacement();
 }
 
 window.addEventListener('message', (event) => {
@@ -1963,6 +2022,8 @@ function switchView(room) {
   }
   if (Object.prototype.hasOwnProperty.call(room, 'tv')) {
     applyRoomTv(room.tv || null);
+  } else if (activeTvData) {
+    syncTvHostPlacement();
   }
   applyRoomOrders(room.orders || null, room.lastOrder || null, room.viewerSeatIndex ?? 0);
   syncChatHistory(room.chatHistory, { announceNew: Boolean(prevRoom) });
@@ -3683,6 +3744,14 @@ els.tvToggle?.addEventListener('click', () => {
   const minimized = els.tvDock.classList.toggle('is-minimized');
   els.tvToggle.textContent = minimized ? 'Büyüt' : 'Küçült';
   els.tvToggle.setAttribute('aria-expanded', String(!minimized));
+});
+els.tvModeBtn?.addEventListener('click', () => {
+  tvDisplayMode = tvDisplayMode === 'wall' ? 'pip' : 'wall';
+  localStorage.setItem('yuzbir_tv_display_mode', tvDisplayMode);
+  if (tvDisplayMode === 'pip') {
+    els.tvDock?.classList.remove('is-minimized');
+  }
+  syncTvHostPlacement();
 });
 
 // Cozy Room Atmosphere, Ambiance & Rack/Tile Finish Dialog

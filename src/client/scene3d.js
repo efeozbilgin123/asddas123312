@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CSS3DObject, CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
 import { canLayoffTile } from '../../shared/melds.js';
 import { KAHVE_CATS, RACK_THEMES, TILE_THEMES } from '../../shared/presets.js';
 import { isOkeyTile } from '../../shared/tiles.js';
@@ -33,8 +34,8 @@ const RACK_SPACING_X = 0.67;
 const CAMERA_PRESETS = {
   fp: {
     pos: new THREE.Vector3(0, 6.1, 12.8),
-    target: new THREE.Vector3(0, 0.85, 2.0),
-    fov: 50
+    target: new THREE.Vector3(0, 1.35, 1.8),
+    fov: 55
   },
   table: {
     pos: new THREE.Vector3(0, 12.2, 14.4),
@@ -203,6 +204,20 @@ export class OkeyTable3D {
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.14;
+
+    this.css3dScene = new THREE.Scene();
+    this.css3dRenderer = new CSS3DRenderer();
+    this.css3dRenderer.setSize(width, height);
+    this.css3dRenderer.domElement.className = 'tv-css3d-layer';
+    this.css3dRenderer.domElement.style.display = 'none';
+    this.canvas.insertAdjacentElement('afterend', this.css3dRenderer.domElement);
+
+    this.tvWallHostEl = document.createElement('div');
+    this.tvWallHostEl.className = 'tv-css3d-screen';
+    this.tvWallCssObj = new CSS3DObject(this.tvWallHostEl);
+    this.tvWallCssObj.visible = false;
+    this.tvWallVisible = false;
+    this.tvWallWorldZ = -25.08;
 
     this.demoMode = true;
     this.reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false;
@@ -782,12 +797,12 @@ export class OkeyTable3D {
     // Wall-mounted Kahvehane TV on North back wall (right of Ocakbaşı, clickable)
     this.tvUpdater = createTvScreenTexture();
     const tvGroup = new THREE.Group();
-    tvGroup.position.set(7.6, 7.6, -roomHalf + 0.28);
+    tvGroup.position.set(7.6, 7.1, -roomHalf + 0.28);
     const tvChassisMat = new THREE.MeshStandardMaterial({ color: '#181412', roughness: 0.45, metalness: 0.25 });
-    const tvBezel = new THREE.Mesh(new THREE.BoxGeometry(5.3, 3.35, 0.24), tvChassisMat);
+    const tvBezel = new THREE.Mesh(new THREE.BoxGeometry(6.0, 3.55, 0.24), tvChassisMat);
     tvGroup.add(tvBezel);
     const tvScreenMat = new THREE.MeshBasicMaterial({ map: this.tvUpdater.texture });
-    const tvScreen = new THREE.Mesh(new THREE.PlaneGeometry(4.85, 2.95), tvScreenMat);
+    const tvScreen = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 3.15), tvScreenMat);
     tvScreen.position.z = 0.135;
     tvScreen.userData = { kind: 'tv' };
     tvGroup.add(tvScreen);
@@ -795,6 +810,13 @@ export class OkeyTable3D {
     this.envInteractables.push(tvScreen);
     this.envDisposableMats.push(clockMat, tvChassisMat, tvScreenMat);
     this.scene.add(tvGroup);
+
+    this.tvWallWorldZ = -roomHalf + 0.425;
+    if (this.tvWallCssObj) {
+      this.tvWallCssObj.position.set(7.6, 7.1, this.tvWallWorldZ);
+      this.tvWallCssObj.scale.set(5.6 / 640, 3.15 / 360, 1);
+      this.css3dScene.add(this.tvWallCssObj);
+    }
 
     // Atmosphere Windows on East & West walls with velvet drapes
     const curtainMat = new THREE.MeshStandardMaterial({ color: '#53191B', roughness: 0.88 });
@@ -3024,6 +3046,7 @@ export class OkeyTable3D {
       this.camera.aspect = w / h;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(w, h, false);
+      this.css3dRenderer?.setSize(w, h);
     };
 
     this.canvas.addEventListener('pointerdown', this.onPointerDown);
@@ -3060,6 +3083,22 @@ export class OkeyTable3D {
   setTvState(tvState = null) {
     this.tvState = tvState || null;
     this.tvUpdater?.update(this.tvState);
+  }
+
+  getTvWallHostElement() {
+    return this.tvWallHostEl;
+  }
+
+  setTvWallVisible(visible) {
+    const next = Boolean(visible);
+    if (this.tvWallVisible === next) return;
+    this.tvWallVisible = next;
+    if (this.tvWallCssObj) {
+      this.tvWallCssObj.visible = next;
+    }
+    if (this.css3dRenderer?.domElement) {
+      this.css3dRenderer.domElement.style.display = next ? '' : 'none';
+    }
   }
 
   setRoomAtmosphere(atmosphere = 'rainy') {
@@ -3447,11 +3486,19 @@ export class OkeyTable3D {
     this.camera.lookAt(this.camTarget);
 
     this.renderer.render(this.scene, this.camera);
+    if (this.tvWallVisible && this.css3dRenderer && this.tvWallCssObj) {
+      const inFrontOfWall = this.camera.position.z > (this.tvWallWorldZ + 0.8);
+      this.css3dRenderer.domElement.style.display = inFrontOfWall ? '' : 'none';
+      if (inFrontOfWall) {
+        this.css3dRenderer.render(this.css3dScene, this.camera);
+      }
+    }
   }
 
   destroy() {
     if (this.rafId) cancelAnimationFrame(this.rafId);
     this.cancelActiveInteractions();
+    this.css3dRenderer?.domElement?.remove();
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);

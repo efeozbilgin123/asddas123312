@@ -103,8 +103,11 @@ export const ROOM_AMBIANCES = Object.freeze([
 
 export const AMBIANCE_SEARCH_SUGGESTIONS = Object.freeze([
   { id: 'rain-thunder', label: 'Yağmur & Gök Gürültüsü', query: 'rain and distant thunder sound no music' },
-  { id: 'wood-fire', label: 'Kuzine & Odun Çıtırtısı', query: 'crackling wood fireplace ambience no music' },
+  { id: 'tin-roof', label: 'Çatıya Vuran Yağmur', query: 'rain on tin roof sound for sleeping no music' },
   { id: 'tea-house', label: 'Kahvehane & Çay Ocağı', query: 'cozy tea house rain cafe ambience no music' },
+  { id: 'turkish-kahve', label: 'Türk Kahvehanesi', query: 'turkish coffee shop background ambience no music' },
+  { id: 'wood-fire', label: 'Kuzine & Odun Çıtırtısı', query: 'crackling wood fireplace ambience no music' },
+  { id: 'fireplace-10h', label: 'Uzun Şömine Ateşi', query: 'crackling fireplace sound no music 10 hours' },
   { id: 'bosphorus', label: 'Boğaz Vapur & Martı', query: 'sea waves seagulls harbor ambient sound' },
   { id: 'night-crickets', label: 'Gece Cırcır Böcekleri', query: 'summer night crickets forest ambience sound' }
 ]);

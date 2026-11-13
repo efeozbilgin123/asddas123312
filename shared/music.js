@@ -25,7 +25,7 @@ export function buildTvEmbedUrl(videoId, origin = '') {
     playsinline: '1',
     iv_load_policy: '3',
     modestbranding: '1',
-    vq: 'medium'
+    vq: 'large'
   });
   if (origin && /^https?:\/\//i.test(origin)) {
     params.set('origin', origin);

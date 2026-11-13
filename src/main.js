@@ -190,6 +190,8 @@ const els = {
   tvUpdatedBy: document.getElementById('tv-updated-by'),
   tvSwitchBtn: document.getElementById('tv-switch-btn'),
   tvModeBtn: document.getElementById('tv-mode-btn'),
+  tvMuteBtn: document.getElementById('tv-mute-btn'),
+  tvVolume: document.getElementById('tv-volume'),
   tvToggle: document.getElementById('tv-toggle'),
   tvExternalLink: document.getElementById('tv-external-link'),
   tvStop: document.getElementById('tv-stop'),
@@ -1682,6 +1684,52 @@ let activeTvData = null;
 let tvIframeEl = null;
 let tvFallbackIndex = 0;
 let tvDisplayMode = localStorage.getItem('yuzbir_tv_display_mode') === 'pip' ? 'pip' : 'wall';
+const storedTvVolRaw = Number(localStorage.getItem('yuzbir_tv_volume'));
+let tvVolumePct = Number.isFinite(storedTvVolRaw)
+  ? Math.max(0, Math.min(100, Math.round(storedTvVolRaw)))
+  : 50;
+let lastNonZeroTvVolume = tvVolumePct > 0 ? tvVolumePct : 50;
+
+function postTvYouTubeCommand(func, args = []) {
+  if (!tvIframeEl || activeTvData?.provider !== 'youtube') return;
+  try {
+    tvIframeEl.contentWindow?.postMessage(
+      JSON.stringify({ event: 'command', func, args }),
+      'https://www.youtube.com'
+    );
+  } catch {
+    // Ignore cross-origin postMessage restrictions
+  }
+}
+
+function applyTvVolume(volPct) {
+  const raw = Number(volPct);
+  const pct = Math.max(0, Math.min(100, Math.round(Number.isFinite(raw) ? raw : 50)));
+  tvVolumePct = pct;
+  if (pct > 0) {
+    lastNonZeroTvVolume = pct;
+  }
+  localStorage.setItem('yuzbir_tv_volume', String(pct));
+  if (els.tvVolume) {
+    els.tvVolume.value = String(pct);
+  }
+  if (els.tvMuteBtn) {
+    const isMuted = pct === 0;
+    els.tvMuteBtn.textContent = isMuted ? 'Sessiz' : 'Ses';
+    els.tvMuteBtn.setAttribute('aria-pressed', String(isMuted));
+  }
+  if (tvIframeEl && activeTvData?.provider === 'youtube') {
+    if (pct === 0) {
+      postTvYouTubeCommand('mute');
+      postTvYouTubeCommand('setVolume', [0]);
+    } else {
+      postTvYouTubeCommand('unMute');
+      postTvYouTubeCommand('setVolume', [pct]);
+    }
+  }
+}
+
+applyTvVolume(tvVolumePct);
 
 function syncTvHostPlacement() {
   const wallHost = scene3d.getTvWallHostElement();
@@ -1764,6 +1812,8 @@ function applyRoomTv(tv) {
       els.tvModeBtn.hidden = true;
       els.tvModeBtn.setAttribute('aria-pressed', 'false');
     }
+    if (els.tvMuteBtn) els.tvMuteBtn.hidden = true;
+    if (els.tvVolume) els.tvVolume.hidden = true;
     if (els.tvToggle) {
       els.tvToggle.hidden = false;
       els.tvToggle.textContent = 'Büyüt';
@@ -1788,6 +1838,9 @@ function applyRoomTv(tv) {
   if (els.tvLiveBadge) {
     els.tvLiveBadge.hidden = !tv.isLive;
   }
+  const hasTvVolume = tv.provider === 'youtube';
+  if (els.tvMuteBtn) els.tvMuteBtn.hidden = !hasTvVolume;
+  if (els.tvVolume) els.tvVolume.hidden = !hasTvVolume;
   if (els.tvExternalLink) {
     els.tvExternalLink.href = tv.originalUrl || tv.embedUrl;
     els.tvExternalLink.hidden = false;
@@ -1834,6 +1887,7 @@ function applyRoomTv(tv) {
       } catch {
         // Ignore cross-origin restrictions
       }
+      applyTvVolume(tvVolumePct);
     }
   });
   tvIframeEl = iframe;
@@ -1868,7 +1922,10 @@ window.addEventListener('message', (event) => {
     } catch {
       return;
     }
-    if (tvPayload?.event === 'onError' && [100, 101, 150, 153].includes(Number(tvPayload.info))) {
+    if (tvPayload?.event === 'onReady') {
+      applyTvVolume(tvVolumePct);
+      postTvYouTubeCommand('playVideo');
+    } else if (tvPayload?.event === 'onError' && [100, 101, 150, 153].includes(Number(tvPayload.info))) {
       handleTvPlaybackError();
     }
     return;
@@ -3752,6 +3809,13 @@ els.tvModeBtn?.addEventListener('click', () => {
     els.tvDock?.classList.remove('is-minimized');
   }
   syncTvHostPlacement();
+});
+els.tvVolume?.addEventListener('input', (e) => {
+  applyTvVolume(e.target.value);
+});
+els.tvMuteBtn?.addEventListener('click', () => {
+  const nextVol = tvVolumePct > 0 ? 0 : (lastNonZeroTvVolume || 50);
+  applyTvVolume(nextVol);
 });
 
 // Cozy Room Atmosphere, Ambiance & Rack/Tile Finish Dialog

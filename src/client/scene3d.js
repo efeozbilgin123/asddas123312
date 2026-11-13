@@ -33,9 +33,9 @@ const RACK_SPACING_X = 0.67;
 
 const CAMERA_PRESETS = {
   fp: {
-    pos: new THREE.Vector3(0, 6.1, 12.8),
-    target: new THREE.Vector3(0, 1.35, 1.8),
-    fov: 55
+    pos: new THREE.Vector3(0, 5.6, 13.0),
+    target: new THREE.Vector3(0, 2.3, 1.8),
+    fov: 57
   },
   table: {
     pos: new THREE.Vector3(0, 12.2, 14.4),
@@ -780,30 +780,33 @@ export class OkeyTable3D {
       this.scene.add(wallGroup);
     });
 
-    // Ticking Round Wall Clock on North back wall (left of Ocakbaşı)
+    // Ticking Round Wall Clock on North back wall (left bay, clear of center TV)
     const clockGroup = new THREE.Group();
-    clockGroup.position.set(-7.6, 7.6, -roomHalf + 0.24);
+    clockGroup.position.set(-12.2, 10.6, -roomHalf + 0.24);
     const clockCase = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.38, 1.48, 0.28, 24),
+      new THREE.CylinderGeometry(1.22, 1.3, 0.26, 24),
       wainscotMat
     );
     clockCase.rotation.x = Math.PI / 2;
     clockGroup.add(clockCase);
-    const clockFace = new THREE.Mesh(new THREE.CircleGeometry(1.18, 24), clockMat);
-    clockFace.position.z = 0.16;
+    const clockFace = new THREE.Mesh(new THREE.CircleGeometry(1.06, 24), clockMat);
+    clockFace.position.z = 0.15;
     clockGroup.add(clockFace);
     this.scene.add(clockGroup);
 
-    // Wall-mounted Kahvehane TV on North back wall (right of Ocakbaşı, clickable)
+    // Large centered Kahvehane TV on North back wall (directly opposite viewer, clickable)
     this.tvUpdater = createTvScreenTexture();
     const tvGroup = new THREE.Group();
-    tvGroup.position.set(7.6, 7.1, -roomHalf + 0.28);
+    tvGroup.position.set(0, 8.5, -roomHalf + 0.32);
     const tvChassisMat = new THREE.MeshStandardMaterial({ color: '#181412', roughness: 0.45, metalness: 0.25 });
-    const tvBezel = new THREE.Mesh(new THREE.BoxGeometry(6.0, 3.55, 0.24), tvChassisMat);
+    const tvBezel = new THREE.Mesh(new THREE.BoxGeometry(15.7, 9.05, 0.26), tvChassisMat);
     tvGroup.add(tvBezel);
+    const tvShelfTrim = new THREE.Mesh(new THREE.BoxGeometry(15.86, 0.14, 0.32), trimBrassMat);
+    tvShelfTrim.position.y = -4.58;
+    tvGroup.add(tvShelfTrim);
     const tvScreenMat = new THREE.MeshBasicMaterial({ map: this.tvUpdater.texture });
-    const tvScreen = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 3.15), tvScreenMat);
-    tvScreen.position.z = 0.135;
+    const tvScreen = new THREE.Mesh(new THREE.PlaneGeometry(15.2, 8.55), tvScreenMat);
+    tvScreen.position.z = 0.145;
     tvScreen.userData = { kind: 'tv' };
     tvGroup.add(tvScreen);
     this.tvScreenMesh = tvScreen;
@@ -811,10 +814,10 @@ export class OkeyTable3D {
     this.envDisposableMats.push(clockMat, tvChassisMat, tvScreenMat);
     this.scene.add(tvGroup);
 
-    this.tvWallWorldZ = -roomHalf + 0.425;
+    this.tvWallWorldZ = -roomHalf + 0.48;
     if (this.tvWallCssObj) {
-      this.tvWallCssObj.position.set(7.6, 7.1, this.tvWallWorldZ);
-      this.tvWallCssObj.scale.set(5.6 / 640, 3.15 / 360, 1);
+      this.tvWallCssObj.position.set(0, 8.5, this.tvWallWorldZ);
+      this.tvWallCssObj.scale.set(15.2 / 960, 8.55 / 540, 1);
       this.css3dScene.add(this.tvWallCssObj);
     }
 
@@ -3487,7 +3490,11 @@ export class OkeyTable3D {
 
     this.renderer.render(this.scene, this.camera);
     if (this.tvWallVisible && this.css3dRenderer && this.tvWallCssObj) {
-      const inFrontOfWall = this.camera.position.z > (this.tvWallWorldZ + 0.8);
+      const camDir = this._tvTmpDir || (this._tvTmpDir = new THREE.Vector3());
+      const toTv = this._tvTmpToTv || (this._tvTmpToTv = new THREE.Vector3());
+      this.camera.getWorldDirection(camDir);
+      toTv.subVectors(this.tvWallCssObj.position, this.camera.position);
+      const inFrontOfWall = this.camera.position.z > (this.tvWallWorldZ + 0.8) && camDir.dot(toTv) > 0;
       this.css3dRenderer.domElement.style.display = inFrontOfWall ? '' : 'none';
       if (inFrontOfWall) {
         this.css3dRenderer.render(this.css3dScene, this.camera);

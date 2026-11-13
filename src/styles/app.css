@@ -1822,6 +1822,7 @@ body {
 .tv-dock__controls {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
   flex-shrink: 0;
 }
@@ -1858,7 +1859,7 @@ body {
 
 .tv-dock.is-wall-mode {
   width: auto;
-  max-width: min(410px, calc(100% - var(--space-lg)));
+  max-width: min(520px, calc(100% - var(--space-lg)));
 }
 
 .tv-dock.is-wall-mode .tv-dock__body {
@@ -1874,8 +1875,8 @@ body {
 }
 
 .tv-css3d-screen {
-  width: 640px;
-  height: 360px;
+  width: 960px;
+  height: 540px;
   background: #07090D;
   pointer-events: none;
   overflow: hidden;

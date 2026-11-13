@@ -1507,3 +1507,81 @@ test('LocalSingleplayerClient accepts avatar-7..16 and picks unique bot names fr
   client.destroy();
 });
 
+test('GameSession allows opening and laying 1-tile gosterge pair in pairs mode with zero score bonus/penalty', () => {
+  const session = new GameSession({
+    roomCode: 'GOST',
+    seatsConfig: [
+      { playerId: 'p0', name: 'A', isBot: false },
+      { playerId: 'p1', name: 'B', isBot: false },
+      { playerId: 'p2', name: 'C', isBot: false },
+      { playerId: 'p3', name: 'D', isBot: false }
+    ],
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
+    onStateChange: () => {}
+  });
+
+  session.startRound();
+  session.gosterge = { id: 'g-center', color: 'blue', number: 7, copy: 0, isFakeOkey: false };
+  session.okeyTarget = { color: 'blue', number: 8 };
+
+  const mk = (id, color, number, isFakeOkey = false) => ({ id, color, number, copy: 0, isFakeOkey });
+
+  // Seat 1 has 10 tiles: 4 normal pairs + 1 gosterge twin + 1 discard tile
+  session.currentSeat = 1;
+  session.turnPhase = 'play';
+  session.seats[1].hand = [
+    mk('p1a', 'red', 2), mk('p1b', 'red', 2),
+    mk('p2a', 'black', 4), mk('p2b', 'black', 4),
+    mk('p3a', 'yellow', 6), mk('p3b', 'yellow', 6),
+    mk('p4a', 'red', 9), mk('p4b', 'red', 9),
+    mk('gtwin', 'blue', 7),
+    mk('disc1', 'black', 12)
+  ];
+
+  // Series mode cannot open with a 1-tile gosterge group
+  const badSeries = session.openHand(1, [['gtwin']], 'series');
+  assert.equal(badSeries.ok, false);
+
+  // Pairs mode opens 5 pairs across 9 tiles, leaving 1 tile to discard, and adds zero round penalties
+  const openRes = session.openHand(1, [
+    ['p1a', 'p1b'],
+    ['p2a', 'p2b'],
+    ['p3a', 'p3b'],
+    ['p4a', 'p4b'],
+    ['gtwin']
+  ], 'pairs');
+  assert.equal(openRes.ok, true);
+  assert.equal(session.seats[1].opened, true);
+  assert.equal(session.seats[1].openMode, 'pairs');
+  assert.equal(session.seats[1].hand.length, 1);
+  assert.equal(session.tableMelds.length, 5);
+  assert.deepEqual(session.seats.map((s) => s.roundPenalties), [0, 0, 0, 0]);
+  assert.deepEqual(session.seats.map((s) => s.totalScore), [0, 0, 0, 0]);
+
+  // Seat 2 also opened in pairs earlier and now lays an extra 1-tile gosterge pair via layMeld
+  session.currentSeat = 2;
+  session.turnPhase = 'play';
+  session.seats[2].opened = true;
+  session.seats[2].openMode = 'pairs';
+  session.seats[2].hand = [mk('gtwin2', 'blue', 7), mk('non-g', 'red', 7), mk('disc2', 'yellow', 3)];
+
+  const badSingleLay = session.layMeld(2, ['non-g']);
+  assert.equal(badSingleLay.ok, false);
+
+  const goodLay = session.layMeld(2, ['gtwin2']);
+  assert.equal(goodLay.ok, true);
+  assert.equal(session.seats[2].hand.length, 2);
+
+  // Seat 3 opened in series cannot lay a 1-tile gosterge pair
+  session.currentSeat = 3;
+  session.turnPhase = 'play';
+  session.seats[3].opened = true;
+  session.seats[3].openMode = 'series';
+  session.seats[3].hand = [mk('gtwin3', 'blue', 7), mk('disc3', 'yellow', 4)];
+  const badSeriesLay = session.layMeld(3, ['gtwin3']);
+  assert.equal(badSeriesLay.ok, false);
+
+  session.destroy();
+});
+
+

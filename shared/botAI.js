@@ -5,7 +5,11 @@ import {
   validatePair
 } from './melds.js';
 import { isDiscardPlayableOnTable } from './rules.js';
-import { effectiveTileProps, isOkeyTile } from './tiles.js';
+import { effectiveTileProps, isGostergeTile, isOkeyTile } from './tiles.js';
+
+function countPairTiles(pairList) {
+  return pairList.reduce((n, p) => n + p.length, 0);
+}
 
 export function chooseBotDrawSource({ seat, leftDiscardTop, state }) {
   if (!leftDiscardTop || isOkeyTile(leftDiscardTop, state.okeyTarget)) return 'deck';
@@ -39,17 +43,17 @@ export function chooseBotDrawSource({ seat, leftDiscardTop, state }) {
       }
     } else {
       const withTile = [...seat.hand, leftDiscardTop];
-      const pairList = findPairsInHand(withTile, state.okeyTarget, leftDiscardTop.id);
+      const pairList = findPairsInHand(withTile, state.okeyTarget, leftDiscardTop.id, state.gosterge);
       let usablePairs = pairList;
-      if (withTile.length - usablePairs.length * 2 < 1 && usablePairs.length > pairTarget) {
+      if (withTile.length - countPairTiles(usablePairs) < 1 && usablePairs.length > pairTarget) {
         usablePairs = [...pairList];
-        for (let i = usablePairs.length - 1; i >= 0 && withTile.length - usablePairs.length * 2 < 1 && usablePairs.length > pairTarget; i -= 1) {
+        for (let i = usablePairs.length - 1; i >= 0 && withTile.length - countPairTiles(usablePairs) < 1 && usablePairs.length > pairTarget; i -= 1) {
           if (!usablePairs[i].some((t) => t.id === leftDiscardTop.id)) {
             usablePairs.splice(i, 1);
           }
         }
       }
-      if (usablePairs.length >= pairTarget && withTile.length - usablePairs.length * 2 >= 1) {
+      if (usablePairs.length >= pairTarget && withTile.length - countPairTiles(usablePairs) >= 1) {
         const usesTile = usablePairs.some((pair) => pair.some((t) => t.id === leftDiscardTop.id));
         if (usesTile) return 'discard';
       }
@@ -85,11 +89,11 @@ export function computeBotTurnActions({ seat, state }) {
   // 1. Try opening if not yet opened
   if (!opened) {
     const opening = findBestOpening(workingHand, state.okeyTarget, openTarget, mustUseId);
-    const pairList = findPairsInHand(workingHand, state.okeyTarget, mustUseId);
+    const pairList = findPairsInHand(workingHand, state.okeyTarget, mustUseId, state.gosterge);
     let selectedPairs = pairList;
-    if (workingHand.length - selectedPairs.length * 2 < 1 && selectedPairs.length > pairTarget) {
+    if (workingHand.length - countPairTiles(selectedPairs) < 1 && selectedPairs.length > pairTarget) {
       selectedPairs = [...pairList];
-      for (let i = selectedPairs.length - 1; i >= 0 && workingHand.length - selectedPairs.length * 2 < 1 && selectedPairs.length > pairTarget; i -= 1) {
+      for (let i = selectedPairs.length - 1; i >= 0 && workingHand.length - countPairTiles(selectedPairs) < 1 && selectedPairs.length > pairTarget; i -= 1) {
         if (!mustUseId || !selectedPairs[i].some((t) => t.id === mustUseId)) {
           selectedPairs.splice(i, 1);
         }
@@ -135,7 +139,7 @@ export function computeBotTurnActions({ seat, state }) {
           slots: g.slots
         });
       }
-    } else if (canOpenPairs && pairsUseMust && workingHand.length - selectedPairs.length * 2 >= 1) {
+    } else if (canOpenPairs && pairsUseMust && workingHand.length - countPairTiles(selectedPairs) >= 1) {
       const pairTileIds = selectedPairs.map((p) => p.map((t) => t.id));
       const usedIds = new Set(pairTileIds.flat());
       actions.push({
@@ -213,10 +217,11 @@ export function computeBotTurnActions({ seat, state }) {
     const extraPairs = findPairsInHand(
       workingHand,
       state.okeyTarget,
-      mustUseSatisfied ? null : mustUseId
+      mustUseSatisfied ? null : mustUseId,
+      state.gosterge
     );
     for (const pair of extraPairs) {
-      if (workingHand.length - 2 >= 1 && validatePair(pair, state.okeyTarget).valid) {
+      if (workingHand.length - pair.length >= 1 && validatePair(pair, state.okeyTarget, state.gosterge).valid) {
         const ids = pair.map((t) => t.id);
         if (!mustUseSatisfied && !ids.includes(mustUseId)) continue;
         mustUseSatisfied = true;
@@ -268,6 +273,9 @@ export function computeBotTurnActions({ seat, state }) {
 
     if (isOkeyTile(tile, state.okeyTarget)) {
       score -= 1000;
+    }
+    if (isGostergeTile(tile, state.gosterge) && openMode !== 'series') {
+      score -= 10;
     }
     if (isDiscardPlayableOnTable(tile, workingMelds, state.okeyTarget)) {
       score -= 500;

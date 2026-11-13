@@ -470,7 +470,7 @@ export class GameSession {
       }
 
       if (mode === 'pairs') {
-        const res = validatePair(tiles, this.okeyTarget);
+        const res = validatePair(tiles, this.okeyTarget, this.gosterge);
         if (!res.valid) return { ok: false, error: res.reason };
         validatedGroups.push(res);
         totalPoints += res.points;
@@ -579,7 +579,8 @@ export class GameSession {
 
     const seat = this.seats[seatIndex];
     if (!seat.opened) return { ok: false, error: 'Önce elinizi açmalısınız.' };
-    if (!Array.isArray(tileIds) || tileIds.length < 2) {
+    const minTileCount = seat.openMode === 'pairs' ? 1 : 2;
+    if (!Array.isArray(tileIds) || tileIds.length < minTileCount) {
       return { ok: false, error: 'Geçerli bir grup seçin.' };
     }
 
@@ -602,10 +603,14 @@ export class GameSession {
       };
     }
 
-    if (seat.openMode === 'pairs' && tiles.length !== 2) {
+    if (
+      seat.openMode === 'pairs' &&
+      tiles.length !== 2 &&
+      !(tiles.length === 1 && validatePair(tiles, this.okeyTarget, this.gosterge).valid)
+    ) {
       return {
         ok: false,
-        error: 'Çift açan oyuncu normal per açamaz; yalnızca çift indirebilir veya tek taş işleyebilir.'
+        error: 'Çift açan oyuncu normal per açamaz; yalnızca çift (veya gösterge taşı) indirebilir ya da tek taş işleyebilir.'
       };
     }
 
@@ -615,7 +620,7 @@ export class GameSession {
 
     const res =
       seat.openMode === 'pairs'
-        ? validatePair(tiles, this.okeyTarget)
+        ? validatePair(tiles, this.okeyTarget, this.gosterge)
         : validateGroup(tiles, this.okeyTarget);
 
     if (!res.valid) return { ok: false, error: res.reason };

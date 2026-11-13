@@ -1218,7 +1218,8 @@ function updateGameControls() {
     mySeat?.hand || [],
     game.okeyTarget,
     14,
-    mustUseTileId
+    mustUseTileId,
+    game.gosterge
   );
   const openReq = game.openThreshold || 101;
   const pairReq = game.pairThreshold || 5;
@@ -1230,7 +1231,8 @@ function updateGameControls() {
   const handCount = mySeat?.hand?.length || 0;
   const seriesUsedCount = liveAutoAnalysis.seriesGroups.reduce((n, g) => n + g.tiles.length, 0);
   const seriesLeavesDiscard = handCount - seriesUsedCount >= 1;
-  const pairsLeavesDiscard = handCount - liveAutoAnalysis.pairCount * 2 >= 1 || liveAutoAnalysis.pairCount > pairReq;
+  const pairsUsedCount = liveAutoAnalysis.pairGroups.reduce((n, g) => n + g.tiles.length, 0);
+  const pairsLeavesDiscard = handCount - pairsUsedCount >= 1 || liveAutoAnalysis.pairCount > pairReq;
 
   if (els.hudSeriesCount) {
     if (mySeat?.opened) {
@@ -1305,12 +1307,23 @@ function updateGameControls() {
 
   if (selected.length > 0) {
     if (selected.length === 1) {
-      selectionMsg = `1 taş seçili (${formatTileLabel(selected[0])})`;
-      if (isPlayPhase && mySeat?.opened) {
-        selectionMsg += ' · Masadaki yeşil gruplara tıklayıp işleyebilirsiniz';
+      const gPair = validatePair(selected, game.okeyTarget, game.gosterge);
+      if (gPair.valid) {
+        validPair = gPair;
+        selectionMsg = `Gösterge çifti (${formatTileLabel(selected[0])})`;
+        if (isPlayPhase && mySeat?.opened) {
+          selectionMsg += mySeat.openMode === 'pairs'
+            ? ' · Masaya indirebilir veya işleyebilirsiniz'
+            : ' · Masadaki yeşil gruplara tıklayıp işleyebilirsiniz';
+        }
+      } else {
+        selectionMsg = `1 taş seçili (${formatTileLabel(selected[0])})`;
+        if (isPlayPhase && mySeat?.opened) {
+          selectionMsg += ' · Masadaki yeşil gruplara tıklayıp işleyebilirsiniz';
+        }
       }
     } else if (selected.length === 2) {
-      validPair = validatePair(selected, game.okeyTarget);
+      validPair = validatePair(selected, game.okeyTarget, game.gosterge);
       selectionMsg = validPair.valid
         ? `Geçerli çift (${validPair.points} sayı)`
         : `${selected.length} taş seçili`;
@@ -1651,7 +1664,7 @@ els.btnSortPairs.addEventListener('click', () => {
   const game = currentRoom?.game;
   const hand = game?.seats[game.viewerSeatIndex]?.hand;
   if (!hand) return;
-  const arranged = autoArrangePairs(hand, game.okeyTarget);
+  const arranged = autoArrangePairs(hand, game.okeyTarget, game.gosterge);
   scene3d.arrangeHandOrder(arranged);
   soundFX.playTileClack(1.1);
   updateGameControls();
@@ -1681,7 +1694,8 @@ els.btnOpenPairs?.addEventListener('click', () => {
 
   let pairsToOpen = [...liveAutoAnalysis.pairGroups];
   const mustId = game.pickedDiscardTileId || null;
-  if (pairsToOpen.length * 2 >= mySeat.hand.length && pairsToOpen.length > 1) {
+  const countUsedPairTiles = (list) => list.reduce((n, g) => n + g.tiles.length, 0);
+  if (countUsedPairTiles(pairsToOpen) >= mySeat.hand.length && pairsToOpen.length > 1) {
     const dropIdx = pairsToOpen.findIndex((g) => !mustId || !g.tiles.some((t) => t.id === mustId));
     if (dropIdx !== -1) {
       pairsToOpen.splice(dropIdx, 1);
@@ -1710,8 +1724,8 @@ els.btnStageGroup.addEventListener('click', () => {
     return;
   }
 
-  if (selected.length === 2) {
-    const pair = validatePair(selected, game.okeyTarget);
+  if (selected.length === 1 || selected.length === 2) {
+    const pair = validatePair(selected, game.okeyTarget, game.gosterge);
     if (pair.valid) {
       if (stagedGroups.some((g) => g.mode !== 'pairs')) {
         stagedGroups = [];
@@ -1769,8 +1783,11 @@ els.btnCommitOpen.addEventListener('click', () => {
 });
 
 els.btnLayMeld.addEventListener('click', () => {
+  const game = currentRoom?.game;
+  const mySeat = game?.seats[game.viewerSeatIndex];
   const selected = scene3d.getSelectedTiles();
-  if (selected.length < 2) return;
+  const minLen = mySeat?.openMode === 'pairs' ? 1 : 2;
+  if (selected.length < minLen) return;
   sendGameAction('game:layMeld', { tileIds: selected.map((t) => t.id) }, (res) => {
     if (!res?.ok) {
       showNotice(res?.error || 'Grup indirilemedi.');

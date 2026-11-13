@@ -62,6 +62,11 @@ export function isOkeyTile(tile, okeyTarget) {
   return tile.color === okeyTarget.color && tile.number === okeyTarget.number;
 }
 
+export function isGostergeTile(tile, gosterge) {
+  if (!tile || !gosterge || tile.isFakeOkey || gosterge.isFakeOkey) return false;
+  return tile.color === gosterge.color && tile.number === gosterge.number;
+}
+
 export function effectiveTileProps(tile, okeyTarget) {
   if (!tile) return null;
   if (tile.isFakeOkey) {

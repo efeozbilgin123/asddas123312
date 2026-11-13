@@ -456,4 +456,154 @@ test('computeBotTurnActions does not emit invalid sim-* layoffTile ids', async (
   assert.equal(actions.some((a) => a.type === 'discardTile'), true);
 });
 
+test('isGostergeTile and validatePair treat matching gosterge twin as a 1-tile pair without wildcards', async () => {
+  const { isGostergeTile } = await import('../shared/tiles.js');
+  const gosterge = t('g-center', 'blue', 7);
+  const okeyTarget = { color: 'blue', number: 8 };
+  const twin = t('g-twin', 'blue', 7);
+  const fake = t('fake-1', 'blue', 7, true);
+  const other = t('other-1', 'red', 7);
+
+  assert.equal(isGostergeTile(twin, gosterge), true);
+  assert.equal(isGostergeTile(fake, gosterge), false);
+  assert.equal(isGostergeTile(other, gosterge), false);
+  assert.equal(isGostergeTile(twin, null), false);
+
+  const validSingle = validatePair([twin], okeyTarget, gosterge);
+  assert.equal(validSingle.valid, true);
+  assert.equal(validSingle.type, 'pair');
+  assert.equal(validSingle.isGostergePair, true);
+  assert.equal(validSingle.points, 14);
+  assert.equal(validSingle.slots.length, 1);
+
+  assert.equal(validatePair([twin], okeyTarget, null).valid, false);
+  assert.equal(validatePair([fake], okeyTarget, gosterge).valid, false);
+  assert.equal(validatePair([other], okeyTarget, gosterge).valid, false);
+});
+
+test('findPairsInHand and analyzeHandLive count 1-tile gosterge pair without wasting an Okey', async () => {
+  const { findPairsInHand } = await import('../shared/melds.js');
+  const gosterge = t('g-center', 'red', 4);
+  const okeyTarget = { color: 'red', number: 5 };
+  const hand = [
+    t('p1a', 'blue', 2), t('p1b', 'blue', 2),
+    t('p2a', 'black', 6), t('p2b', 'black', 6),
+    t('p3a', 'yellow', 9), t('p3b', 'yellow', 9),
+    t('p4a', 'red', 11), t('p4b', 'red', 11),
+    t('gtwin', 'red', 4),
+    t('okey', 'red', 5),
+    t('spare', 'black', 12)
+  ];
+
+  const pairs = findPairsInHand(hand, okeyTarget, null, gosterge);
+  // 4 normal pairs + 1 gosterge 1-tile pair + [spare, okey] = 6 pairs total (no wild wasted on gtwin)
+  assert.equal(pairs.length, 6);
+  const gPair = pairs.find((p) => p.some((x) => x.id === 'gtwin'));
+  assert.ok(gPair);
+  assert.equal(gPair.length, 1);
+
+  // Place isolated gtwin on rack slot 0 and remaining pairs spaced with gaps
+  const rackSlots = new Array(28).fill(null);
+  rackSlots[0] = hand[8]; // gtwin alone
+  rackSlots[2] = hand[0]; rackSlots[3] = hand[1];
+  rackSlots[5] = hand[2]; rackSlots[6] = hand[3];
+  rackSlots[8] = hand[4]; rackSlots[9] = hand[5];
+  rackSlots[11] = hand[6]; rackSlots[12] = hand[7];
+
+  const live = analyzeHandLive(rackSlots, hand.slice(0, 9), okeyTarget, 14, null, gosterge);
+  assert.equal(live.pairCount, 5);
+  assert.equal(live.pairGroups.some((g) => g.tiles.length === 1 && g.tiles[0].id === 'gtwin'), true);
+});
+
+test('botAI opens and lays 1-tile gosterge pair while preserving discard tile', async () => {
+  const { chooseBotDrawSource, computeBotTurnActions } = await import('../shared/botAI.js');
+  const gosterge = t('g-center', 'yellow', 10);
+  const okeyTarget = { color: 'yellow', number: 11 };
+
+  // 9 tiles in hand = 4 pairs (8 tiles) + 1 spare; drawing gtwin makes 10 tiles = 5 pairs (9 tiles) + 1 discard!
+  const drawSrc = chooseBotDrawSource({
+    seat: {
+      seatIndex: 1,
+      opened: false,
+      hand: [
+        t('p1a', 'red', 2), t('p1b', 'red', 2),
+        t('p2a', 'blue', 4), t('p2b', 'blue', 4),
+        t('p3a', 'black', 6), t('p3b', 'black', 6),
+        t('p4a', 'red', 8), t('p4b', 'red', 8),
+        t('disc', 'blue', 13)
+      ]
+    },
+    leftDiscardTop: t('gtwin', 'yellow', 10),
+    state: {
+      gosterge,
+      okeyTarget,
+      openThreshold: 101,
+      pairThreshold: 5,
+      tableMelds: [],
+      seats: [
+        { seatIndex: 0, opened: true, openMode: 'pairs' },
+        { seatIndex: 1, opened: false, openMode: null }
+      ],
+      options: { katlamali: true }
+    }
+  });
+  assert.equal(drawSrc, 'discard');
+
+  // 10 tiles in hand: 4 normal pairs + 1 single gtwin + 1 discard
+  const openHand = [
+    t('p1a', 'red', 2), t('p1b', 'red', 2),
+    t('p2a', 'blue', 4), t('p2b', 'blue', 4),
+    t('p3a', 'black', 6), t('p3b', 'black', 6),
+    t('p4a', 'red', 8), t('p4b', 'red', 8),
+    t('gtwin', 'yellow', 10),
+    t('disc', 'blue', 13)
+  ];
+  const openActions = computeBotTurnActions({
+    seat: { seatIndex: 0, opened: false, openMode: null, hand: openHand },
+    state: {
+      gosterge,
+      okeyTarget,
+      openThreshold: 101,
+      pairThreshold: 5,
+      tableMelds: [],
+      seats: [{ seatIndex: 0, opened: false, openMode: null }],
+      pickedDiscardTileId: null,
+      pickedDiscardFromSeat: null,
+      options: { katlamali: false }
+    }
+  });
+  const openAct = openActions.find((a) => a.type === 'openHand');
+  assert.ok(openAct);
+  assert.equal(openAct.mode, 'pairs');
+  assert.equal(openAct.groups.length, 5);
+  assert.equal(openAct.groups.some((g) => g.length === 1 && g[0] === 'gtwin'), true);
+  assert.equal(openActions.some((a) => a.type === 'discardTile'), true);
+
+  // Already opened in pairs: lays 1-tile gosterge pair and discards remaining tile
+  const layActions = computeBotTurnActions({
+    seat: {
+      seatIndex: 0,
+      opened: true,
+      openMode: 'pairs',
+      hand: [t('gtwin', 'yellow', 10), t('disc', 'blue', 13)]
+    },
+    state: {
+      gosterge,
+      okeyTarget,
+      openThreshold: 101,
+      pairThreshold: 5,
+      tableMelds: [],
+      seats: [{ seatIndex: 0, opened: true, openMode: 'pairs' }],
+      pickedDiscardTileId: null,
+      pickedDiscardFromSeat: null,
+      options: { katlamali: false }
+    }
+  });
+  const layAct = layActions.find((a) => a.type === 'layMeld');
+  assert.ok(layAct);
+  assert.deepEqual(layAct.tileIds, ['gtwin']);
+  assert.equal(layActions.find((a) => a.type === 'discardTile')?.tileId, 'disc');
+});
+
+
 

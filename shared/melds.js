@@ -1,8 +1,23 @@
-import { COLORS, effectiveTileProps, isOkeyTile } from './tiles.js';
+import { COLORS, effectiveTileProps, isGostergeTile, isOkeyTile } from './tiles.js';
 
-export function validatePair(tiles, okeyTarget) {
-  if (!Array.isArray(tiles) || tiles.length !== 2) {
-    return { valid: false, reason: 'Çift tam olarak 2 taştan oluşmalıdır.' };
+export function validatePair(tiles, okeyTarget, gosterge = null) {
+  if (!Array.isArray(tiles)) {
+    return { valid: false, reason: 'Çift için geçerli taş seçin.' };
+  }
+  if (tiles.length === 1 && gosterge && isGostergeTile(tiles[0], gosterge)) {
+    const g = tiles[0];
+    return {
+      valid: true,
+      type: 'pair',
+      isGostergePair: true,
+      points: g.number * 2,
+      slots: [
+        { tile: g, representsColor: g.color, representsNumber: g.number }
+      ]
+    };
+  }
+  if (tiles.length !== 2) {
+    return { valid: false, reason: 'Çift tam olarak 2 taştan (veya tek gösterge taşından) oluşmalıdır.' };
   }
   const [a, b] = tiles;
   const pa = effectiveTileProps(a, okeyTarget);
@@ -426,7 +441,7 @@ export function findBestOpening(handTiles, okeyTarget, minPoints = 101, required
   };
 }
 
-export function findPairsInHand(handTiles, okeyTarget, requiredTileId = null) {
+export function findPairsInHand(handTiles, okeyTarget, requiredTileId = null, gosterge = null) {
   const orderedHand = requiredTileId
     ? [...handTiles].sort((a, b) => (a.id === requiredTileId ? -1 : b.id === requiredTileId ? 1 : 0))
     : handTiles;
@@ -447,6 +462,8 @@ export function findPairsInHand(handTiles, okeyTarget, requiredTileId = null) {
   for (const list of buckets.values()) {
     if (list.length >= 2) {
       pairs.push([list[0], list[1]]);
+    } else if (gosterge && isGostergeTile(list[0], gosterge)) {
+      pairs.push([list[0]]);
     } else {
       singles.push(list[0]);
     }
@@ -574,8 +591,8 @@ export function autoArrangeRuns(handTiles, okeyTarget) {
   return layoutGroupsOnRack(groupTilesList, rest);
 }
 
-export function autoArrangePairs(handTiles, okeyTarget) {
-  const pairs = findPairsInHand(handTiles, okeyTarget);
+export function autoArrangePairs(handTiles, okeyTarget, gosterge = null) {
+  const pairs = findPairsInHand(handTiles, okeyTarget, null, gosterge);
   const usedIds = new Set();
   const pairTilesList = [];
 
@@ -608,7 +625,7 @@ export function autoArrangePairs(handTiles, okeyTarget) {
  * Automatically evaluates both valid Seri/Per (Tek) points and valid Çift (Pair) count
  * from the current rack slot layout (respecting manual gaps) as well as optimal full-hand combinations.
  */
-export function analyzeHandLive(rackSlots, handTiles, okeyTarget, cols = 14, requiredTileId = null) {
+export function analyzeHandLive(rackSlots, handTiles, okeyTarget, cols = 14, requiredTileId = null, gosterge = null) {
   const safeHand = Array.isArray(handTiles) ? handTiles : [];
   const rackSeriesGroups = [];
   const rackPairGroups = [];
@@ -651,8 +668,11 @@ export function analyzeHandLive(rackSlots, handTiles, okeyTarget, cols = 14, req
           });
         }
       }
-      if (seg.length === 2 && !seg.some((t) => usedPairIds.has(t.id))) {
-        const pRes = validatePair(seg, okeyTarget);
+      if (
+        (seg.length === 2 || (seg.length === 1 && gosterge && isGostergeTile(seg[0], gosterge))) &&
+        !seg.some((t) => usedPairIds.has(t.id))
+      ) {
+        const pRes = validatePair(seg, okeyTarget, gosterge);
         if (pRes.valid) {
           seg.forEach((t) => usedPairIds.add(t.id));
           rackPairGroups.push({
@@ -702,7 +722,7 @@ export function analyzeHandLive(rackSlots, handTiles, okeyTarget, cols = 14, req
     !requiredTileId ||
     seriesGroups.some((g) => g.tiles.some((t) => t.id === requiredTileId));
 
-  const autoPairs = findPairsInHand(safeHand, okeyTarget, requiredTileId);
+  const autoPairs = findPairsInHand(safeHand, okeyTarget, requiredTileId, gosterge);
   const rackPairsUsesReq =
     !requiredTileId ||
     rackPairGroups.some((g) => g.tiles.some((t) => t.id === requiredTileId));
@@ -724,7 +744,7 @@ export function analyzeHandLive(rackSlots, handTiles, okeyTarget, cols = 14, req
   const pairGroups = useRackPairs
     ? rackPairGroups
     : autoPairs.map((pair) => ({
-        points: validatePair(pair, okeyTarget).points,
+        points: validatePair(pair, okeyTarget, gosterge).points,
         tiles: pair
       }));
   const pairsUsesRequired =

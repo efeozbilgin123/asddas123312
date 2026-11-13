@@ -107,7 +107,7 @@ export const KAHVE_CATS = Object.freeze([
   {
     index: 0,
     id: 'cat-1',
-    name: 'Pamuk',
+    name: 'Yumak',
     breed: 'Krem İran Kedisi',
     spot: 'Sol köşe minderi',
     photo: '/assets/cat-1.jpg',
@@ -119,7 +119,7 @@ export const KAHVE_CATS = Object.freeze([
   {
     index: 1,
     id: 'cat-2',
-    name: 'Fındık',
+    name: 'Fırtına',
     breed: 'Tekir Yavru',
     spot: 'Sağ köşe minderi',
     photo: '/assets/cat-2.jpg',
@@ -277,7 +277,7 @@ export function computeKahveAwards({ seats = [], socialStats = [], teamMode = 's
     billItems.push({ label: 'Taze Demlenen Bardak Yudumu', qty: `${totalSips} yudum`, amount: totalSips * 5 });
   }
   if (totalCats > 0) {
-    billItems.push({ label: 'Pamuk, Fındık & Kömür Ödül Maması', qty: `${totalCats} sevgi`, amount: 0 });
+    billItems.push({ label: 'Yumak, Fırtına & Kömür Ödül Maması', qty: `${totalCats} sevgi`, amount: 0 });
   }
 
   const billTotal = billItems.reduce((sum, item) => sum + item.amount, 0);

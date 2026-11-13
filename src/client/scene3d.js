@@ -946,7 +946,7 @@ export class OkeyTable3D {
     this.buildSideKahveTable(-17.4, 10.2, -0.15, true);
     this.buildSideKahveTable(17.4, 10.2, 0.2, false);
 
-    // 3 Real Kahvehane Cats (Pamuk, Fındık, Kömür) on Cozy Cushions with Real-Photo Portraits
+    // 3 Real Kahvehane Cats (Yumak, Fırtına, Kömür) on Cozy Cushions with Real-Photo Portraits
     this.buildKahvehaneCats(wainscotMat, trimBrassMat);
 
     // Potted Kahvehane Ficus Plants in Room Corners
@@ -1004,7 +1004,7 @@ export class OkeyTable3D {
       const catGroup = new THREE.Group();
       catGroup.position.y = 0.2;
 
-      const scale = idx === 1 ? 0.84 : 1.0; // Fındık is a cute kitten
+      const scale = idx === 1 ? 0.84 : 1.0; // Fırtına is a cute kitten
       catGroup.scale.setScalar(scale);
 
       const body = new THREE.Mesh(new THREE.SphereGeometry(0.46, 14, 12), furMat);

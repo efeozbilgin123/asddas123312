@@ -1883,6 +1883,6 @@ test('LocalSingleplayerClient handles live cozy options, TV set/stop, drink sip/
   let petRes = null;
   client.action('room:catPet', { catIndex: 0 }, (r) => { petRes = r; });
   assert.equal(petRes.ok, true);
-  assert.equal(petRes.payload.cat.name, 'Pamuk');
+  assert.equal(petRes.payload.cat.name, 'Yumak');
   assert.equal(states[states.length - 1].socialStats[0].catsPetted, 1);
 });

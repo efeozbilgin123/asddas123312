@@ -173,3 +173,48 @@ export function parseMusicUrl(rawUrl, customTitle = '') {
   };
 }
 
+const MUSIC_SOURCE_LABELS = {
+  youtube: 'YouTube',
+  spotify: 'Spotify',
+  soundcloud: 'SoundCloud',
+  audio: 'Ses Akışı',
+  web: 'Web'
+};
+
+export function formatMusicPlayerDisplay(music, isPaused = false) {
+  if (!music) {
+    return {
+      titleText: 'Oda Müziği',
+      djName: 'Serhat Canikli',
+      statusText: 'Serhat Canikli bekliyor'
+    };
+  }
+
+  const queueTag = music.queueTotal > 1
+    ? ` [${(music.queueIndex || 0) + 1}/${music.queueTotal}]`
+    : '';
+  const titleText = `${music.title || 'Oda Müziği'}${queueTag}`;
+
+  const sourceKey = music.sourceProvider || music.provider;
+  const sourceLabel = MUSIC_SOURCE_LABELS[sourceKey] || '';
+  const isAutoplay = music.sourceProvider === 'autoplay' || music.updatedBy === 'Serhat Canikli';
+  const requester = music.updatedBy && music.updatedBy !== 'Serhat Canikli'
+    ? music.updatedBy
+    : '';
+
+  const verb = isPaused
+    ? 'duraklatıldı'
+    : (isAutoplay ? 'otomatik çalıyor' : 'müziği çalıyor');
+
+  const parts = [verb];
+  if (sourceLabel) parts.push(sourceLabel);
+  if (requester) parts.push(`İsteyen: ${requester}`);
+
+  return {
+    titleText,
+    djName: 'Serhat Canikli',
+    statusText: parts.join(' · ')
+  };
+}
+
+

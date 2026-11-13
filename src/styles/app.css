@@ -1009,12 +1009,116 @@ body {
   align-items: center;
   gap: var(--space-xs);
   min-width: 0;
+  flex: 1 1 200px;
+}
+
+.music-wave {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2.5px;
+  height: 22px;
+  padding: 2px 6px;
+  border-radius: var(--radius-input);
+  background: var(--color-card);
+  border: 1px solid var(--color-rule);
+  flex-shrink: 0;
+}
+
+.music-wave i {
+  display: block;
+  width: 2.5px;
+  height: 13px;
+  border-radius: 99px;
+  background: var(--color-mint);
+  transform-origin: center;
+  animation: music-wave-pulse 0.72s ease-in-out infinite;
+}
+
+.music-wave i:nth-child(1) {
+  animation-duration: 0.72s;
+  animation-delay: -0.1s;
+}
+
+.music-wave i:nth-child(2) {
+  animation-duration: 0.54s;
+  animation-delay: -0.35s;
+}
+
+.music-wave i:nth-child(3) {
+  animation-duration: 0.86s;
+  animation-delay: -0.2s;
+}
+
+.music-wave i:nth-child(4) {
+  animation-duration: 0.62s;
+  animation-delay: -0.45s;
+}
+
+.music-wave i:nth-child(5) {
+  animation-duration: 0.78s;
+  animation-delay: -0.15s;
+}
+
+@keyframes music-wave-pulse {
+  0%, 100% {
+    transform: scaleY(0.28);
+    opacity: 0.65;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+.music-dock.is-paused .music-wave i {
+  animation: none;
+  transform: scaleY(0.24);
+  background: var(--color-muted);
+  opacity: 0.55;
+}
+
+.music-dock__text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
   flex: 1;
 }
 
 .music-dock__title {
   font-size: var(--text-xs);
+  line-height: 1.25;
   color: var(--color-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.music-dock__sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.music-dock__dj {
+  min-height: 18px;
+  padding: 0 7px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.music-dock.is-paused .music-dock__dj {
+  background: var(--color-paper-2);
+  border-color: var(--color-rule);
+  color: var(--color-muted);
+}
+
+.music-dock__status {
+  font-size: 0.72rem;
+  color: var(--color-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1056,7 +1160,7 @@ body {
 
 .music-dock.is-minimized {
   width: auto;
-  max-width: min(520px, calc(100% - var(--space-lg)));
+  max-width: min(580px, calc(100% - var(--space-lg)));
 }
 
 .music-dock.is-minimized .music-dock__body {
@@ -1183,5 +1287,9 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .skeleton-row {
     animation: none;
+  }
+  .music-wave i {
+    animation: none;
+    transform: scaleY(0.6);
   }
 }

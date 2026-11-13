@@ -7,7 +7,7 @@ import {
   validatePair
 } from '../shared/melds.js';
 import { KAHVE_MENU } from '../shared/menu.js';
-import { parseMusicUrl } from '../shared/music.js';
+import { formatMusicPlayerDisplay, parseMusicUrl } from '../shared/music.js';
 import { isPresetAvatar } from '../shared/presets.js';
 import { COLOR_LABELS, formatTileLabel, isOkeyTile } from '../shared/tiles.js';
 import { LocalSingleplayerClient } from './client/localSession.js';
@@ -133,6 +133,7 @@ const els = {
 
   musicDock: document.getElementById('music-dock'),
   musicProviderBadge: document.getElementById('music-provider-badge'),
+  musicDjStatus: document.getElementById('music-dj-status'),
   musicTrackTitle: document.getElementById('music-track-title'),
   musicDockPlayPause: document.getElementById('music-dock-playpause'),
   musicDockNext: document.getElementById('music-dock-next'),
@@ -536,22 +537,33 @@ function refreshRooms() {
   });
 }
 
-const PROVIDER_LABELS = {
-  youtube: 'YouTube',
-  spotify: 'Serhat Canikli · Spotify',
-  search: 'Serhat Canikli',
-  autoplay: 'Serhat Canikli · Oto',
-  soundcloud: 'SoundCloud',
-  audio: 'Ses Akışı',
-  web: 'Web Player'
-};
-
 let activeMusicKey = null;
 let activeMusicData = null;
 let activeAudioEl = null;
 let activeIframeEl = null;
 let isMusicPaused = false;
 let musicAdvancePendingKey = null;
+
+function syncMusicPlayerLabels(music = activeMusicData) {
+  const display = formatMusicPlayerDisplay(music, isMusicPaused);
+  if (els.musicProviderBadge) {
+    els.musicProviderBadge.textContent = display.djName;
+  }
+  if (els.musicTrackTitle) {
+    els.musicTrackTitle.textContent = display.titleText;
+    els.musicTrackTitle.title = display.titleText;
+  }
+  if (els.musicDjStatus) {
+    els.musicDjStatus.textContent = display.statusText;
+    els.musicDjStatus.title = `${display.djName} ${display.statusText}`;
+  }
+  if (els.musicDock) {
+    els.musicDock.classList.toggle('is-paused', Boolean(isMusicPaused));
+    if (music) {
+      els.musicDock.setAttribute('aria-label', `${display.djName}: ${display.titleText} · ${display.statusText}`);
+    }
+  }
+}
 
 function postYouTubeCommand(func, args = []) {
   if (!activeIframeEl || activeMusicData?.provider !== 'youtube') return;
@@ -588,8 +600,10 @@ function applyMusicVolume(volPct) {
 }
 
 function updateMusicPlayPauseLabel() {
-  if (!els.musicDockPlayPause) return;
-  els.musicDockPlayPause.textContent = isMusicPaused ? 'Çal' : 'Duraklat';
+  if (els.musicDockPlayPause) {
+    els.musicDockPlayPause.textContent = isMusicPaused ? 'Çal' : 'Duraklat';
+  }
+  syncMusicPlayerLabels();
 }
 
 async function resolveNextOfflineTrackIfNeeded(item) {
@@ -694,7 +708,9 @@ function applyRoomMusic(music) {
     if (els.musicDock) {
       els.musicDock.hidden = true;
       els.musicDock.classList.add('is-minimized');
+      els.musicDock.classList.remove('is-paused');
     }
+    syncMusicPlayerLabels(null);
     if (els.musicDockPlayPause) els.musicDockPlayPause.hidden = true;
     if (els.musicDockNext) els.musicDockNext.hidden = true;
     if (els.musicDockAutoplay) els.musicDockAutoplay.hidden = true;
@@ -719,15 +735,6 @@ function applyRoomMusic(music) {
   const autoplayOn = music.autoplayEnabled !== false;
 
   if (els.musicDock) els.musicDock.hidden = false;
-  if (els.musicProviderBadge) {
-    const labelKey = music.sourceProvider || music.provider;
-    els.musicProviderBadge.textContent = PROVIDER_LABELS[labelKey] || 'Müzik';
-  }
-  if (els.musicTrackTitle) {
-    const queueTag = music.queueTotal > 1 ? ` [${(music.queueIndex || 0) + 1}/${music.queueTotal}]` : '';
-    const byTag = music.updatedBy ? ` (${music.updatedBy})` : '';
-    els.musicTrackTitle.textContent = `${music.title || 'Oda Müziği'}${queueTag}${byTag}`;
-  }
   if (els.musicDockNext) {
     const canNext = Boolean(music.hasNext || (autoplayOn && music.provider === 'youtube'));
     els.musicDockNext.hidden = !canNext;
@@ -751,6 +758,7 @@ function applyRoomMusic(music) {
 
   if (key === activeMusicKey) {
     activeMusicData = music;
+    syncMusicPlayerLabels(music);
     return;
   }
 

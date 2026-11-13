@@ -382,11 +382,19 @@
     </section>
 
     <!-- Persistent Shared Room Music Player Dock (Discord Serhat Canikli Style) -->
-    <aside id="music-dock" class="music-dock is-minimized" hidden aria-label="Ortak oda müziği oynatıcısı">
+    <aside id="music-dock" class="music-dock is-minimized" hidden aria-label="Serhat Canikli ortak oda müziği oynatıcısı">
       <div class="music-dock__bar">
         <div class="music-dock__meta">
-          <span id="music-provider-badge" class="pill pill--ok">Serhat Canikli</span>
-          <strong id="music-track-title" class="music-dock__title">Oda Müziği</strong>
+          <span id="music-wave" class="music-wave" aria-hidden="true">
+            <i></i><i></i><i></i><i></i><i></i>
+          </span>
+          <div class="music-dock__text">
+            <strong id="music-track-title" class="music-dock__title">Oda Müziği</strong>
+            <div class="music-dock__sub">
+              <span id="music-provider-badge" class="pill pill--ok music-dock__dj">Serhat Canikli</span>
+              <span id="music-dj-status" class="music-dock__status" role="status" aria-live="polite">müziği çalıyor</span>
+            </div>
+          </div>
         </div>
         <div class="music-dock__controls">
           <button type="button" id="music-dock-playpause" class="btn btn--quiet btn--sm" hidden>Duraklat</button>
@@ -405,11 +413,11 @@
   <!-- Shared Music Dialog -->
   <dialog id="dialog-music" class="dialog">
     <div class="dialog__head">
-      <h2>Ortak Oda Müziği · Serhat Canikli</h2>
+      <h2>Ortak Oda Müziği · DJ Serhat Canikli</h2>
       <button type="button" class="btn btn--quiet btn--sm" data-close-dialog="dialog-music">Kapat</button>
     </div>
     <div class="dialog__body">
-      <p class="lead">Spotify şarkı veya çalma listesi linki, YouTube/SoundCloud linki ya da doğrudan şarkı adı yazın. Serhat Canikli arka planda tam şarkı çalar ve parça bitince otomatik devam eder.</p>
+      <p class="lead">Spotify şarkı veya çalma listesi linki, YouTube/SoundCloud linki ya da doğrudan şarkı adı yazın. Oda müzik botu <strong>Serhat Canikli</strong> arka planda müziği tüm masa için çalar ve parça bitince otomatik devam eder.</p>
       <form id="music-form" class="lobby-form" novalidate>
         <div class="field">
           <label for="music-url-input">Şarkı adı veya bağlantı</label>

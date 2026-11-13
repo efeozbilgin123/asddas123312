@@ -1584,4 +1584,45 @@ test('GameSession allows opening and laying 1-tile gosterge pair in pairs mode w
   session.destroy();
 });
 
+test('formatMusicPlayerDisplay separates track title from explicit Serhat Canikli DJ status', async () => {
+  const { formatMusicPlayerDisplay } = await import('../shared/music.js');
+
+  const spotifyDisplay = formatMusicPlayerDisplay({
+    title: 'Tarkan - Kuzu Kuzu (Remix)',
+    provider: 'youtube',
+    sourceProvider: 'spotify',
+    updatedBy: 'Efe',
+    queueIndex: 0,
+    queueTotal: 3
+  });
+  assert.equal(spotifyDisplay.titleText, 'Tarkan - Kuzu Kuzu (Remix) [1/3]');
+  assert.equal(spotifyDisplay.djName, 'Serhat Canikli');
+  assert.equal(spotifyDisplay.statusText, 'müziği çalıyor · Spotify · İsteyen: Efe');
+  assert.equal(spotifyDisplay.titleText.includes('Serhat Canikli'), false);
+
+  const autoDisplay = formatMusicPlayerDisplay({
+    title: 'Sezen Aksu - Gülümse',
+    provider: 'youtube',
+    sourceProvider: 'autoplay',
+    updatedBy: 'Serhat Canikli',
+    queueIndex: 1,
+    queueTotal: 2
+  });
+  assert.equal(autoDisplay.titleText, 'Sezen Aksu - Gülümse [2/2]');
+  assert.equal(autoDisplay.djName, 'Serhat Canikli');
+  assert.equal(autoDisplay.statusText, 'otomatik çalıyor');
+  assert.equal(autoDisplay.titleText.includes('Serhat Canikli'), false);
+
+  const pausedDisplay = formatMusicPlayerDisplay({
+    title: 'Ceza - Holocaust',
+    provider: 'youtube',
+    sourceProvider: 'search',
+    updatedBy: 'Arhan'
+  }, true);
+  assert.equal(pausedDisplay.titleText, 'Ceza - Holocaust');
+  assert.equal(pausedDisplay.djName, 'Serhat Canikli');
+  assert.equal(pausedDisplay.statusText, 'duraklatıldı · İsteyen: Arhan');
+});
+
+
 

@@ -148,60 +148,73 @@ function parseDurationSeconds(label) {
   return null;
 }
 
+function pushYouTubeRenderer(vr, sourceType, out, seenIds) {
+  if (!vr || typeof vr !== 'object') return;
+  const videoId = typeof vr.videoId === 'string' ? vr.videoId : '';
+  if (!/^[A-Za-z0-9_-]{6,}$/.test(videoId) || seenIds.has(videoId)) return;
+  seenIds.add(videoId);
+
+  const titleRuns = vr.title?.runs?.map((r) => r.text).join('') || vr.title?.simpleText || '';
+  const channelRuns =
+    vr.ownerText?.runs?.map((r) => r.text).join('') ||
+    vr.longBylineText?.runs?.map((r) => r.text).join('') ||
+    vr.shortBylineText?.runs?.map((r) => r.text).join('') ||
+    '';
+  const durationLabel = vr.lengthText?.simpleText || vr.lengthText?.runs?.map((r) => r.text).join('') || '';
+  out.push({
+    videoId,
+    sourceType,
+    title: titleRuns.trim(),
+    channel: channelRuns.trim(),
+    durationLabel,
+    durationSeconds: parseDurationSeconds(durationLabel)
+  });
+}
+
 function collectYouTubeVideoRenderers(node, out = [], seenIds = new Set()) {
-  if (!node || typeof node !== 'object' || out.length >= 25) return out;
+  if (!node || typeof node !== 'object' || out.length >= 30) return out;
   if (Array.isArray(node)) {
     for (const item of node) {
       collectYouTubeVideoRenderers(item, out, seenIds);
-      if (out.length >= 25) break;
+      if (out.length >= 30) break;
     }
     return out;
   }
 
-  if (node.videoRenderer && typeof node.videoRenderer === 'object') {
-    const vr = node.videoRenderer;
-    const videoId = typeof vr.videoId === 'string' ? vr.videoId : '';
-    if (/^[A-Za-z0-9_-]{6,}$/.test(videoId) && !seenIds.has(videoId)) {
-      seenIds.add(videoId);
-      const titleRuns = vr.title?.runs?.map((r) => r.text).join('') || vr.title?.simpleText || '';
-      const channelRuns =
-        vr.ownerText?.runs?.map((r) => r.text).join('') ||
-        vr.longBylineText?.runs?.map((r) => r.text).join('') ||
-        '';
-      const durationLabel = vr.lengthText?.simpleText || '';
-      out.push({
-        videoId,
-        title: titleRuns.trim(),
-        channel: channelRuns.trim(),
-        durationLabel,
-        durationSeconds: parseDurationSeconds(durationLabel)
-      });
-    }
+  if (node.videoRenderer) {
+    pushYouTubeRenderer(node.videoRenderer, 'search', out, seenIds);
+  }
+  if (node.playlistPanelVideoRenderer) {
+    pushYouTubeRenderer(node.playlistPanelVideoRenderer, 'mix', out, seenIds);
+  }
+  if (node.compactVideoRenderer) {
+    pushYouTubeRenderer(node.compactVideoRenderer, 'related', out, seenIds);
   }
 
   for (const key of Object.keys(node)) {
     collectYouTubeVideoRenderers(node[key], out, seenIds);
-    if (out.length >= 25) break;
+    if (out.length >= 30) break;
   }
   return out;
+}
+
+function parseYtInitialDataFromHtml(html) {
+  const markerMatch = html.match(/(?:var\s+)?ytInitialData\s*=\s*\{/);
+  if (!markerMatch) return null;
+  const braceStart = markerMatch.index + markerMatch[0].length - 1;
+  const rawJson = extractBalancedJson(html, braceStart);
+  if (!rawJson) return null;
+  try {
+    return JSON.parse(rawJson);
+  } catch {
+    return null;
+  }
 }
 
 export function extractYouTubeCandidatesFromHtml(html, query = '') {
   if (!html || typeof html !== 'string') return [];
 
-  let data = null;
-  const markerMatch = html.match(/(?:var\s+)?ytInitialData\s*=\s*\{/);
-  if (markerMatch) {
-    const braceStart = markerMatch.index + markerMatch[0].length - 1;
-    const rawJson = extractBalancedJson(html, braceStart);
-    if (rawJson) {
-      try {
-        data = JSON.parse(rawJson);
-      } catch {
-        data = null;
-      }
-    }
-  }
+  const data = parseYtInitialDataFromHtml(html);
 
   if (!data) {
     // Minimal regex fallback if ytInitialData formatting changes
@@ -250,6 +263,31 @@ export function extractYouTubeCandidatesFromHtml(html, query = '') {
         if (!wantsLongMix && c.durationSeconds > 900) score -= 35;
       }
 
+      return { ...c, score };
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
+export function extractYouTubeRelatedFromHtml(html, excludeVideoIds = []) {
+  if (!html || typeof html !== 'string') return [];
+  const excluded = new Set(excludeVideoIds.filter(Boolean));
+  const data = parseYtInitialDataFromHtml(html);
+  if (!data) return [];
+
+  const all = collectYouTubeVideoRenderers(data).filter((c) => !excluded.has(c.videoId));
+  return all
+    .map((c, idx) => {
+      const tLower = c.title.toLowerCase();
+      const chLower = c.channel.toLowerCase();
+      let score = c.sourceType === 'mix' ? 30 : 14;
+      score += Math.max(0, 12 - idx);
+      if (chLower.endsWith('- topic') || chLower.includes('topic')) score += 35;
+      if (/\b(official audio|audio|lyrics|sözleri)\b/i.test(tLower)) score += 15;
+      if (/\b(reaction|tepki|karaoke|parodi|interview|röportaj)\b/i.test(tLower)) score -= 45;
+      if (c.durationSeconds != null) {
+        if (c.durationSeconds < 45) score -= 45;
+        if (c.durationSeconds > 900) score -= 40;
+      }
       return { ...c, score };
     })
     .sort((a, b) => b.score - a.score);
@@ -458,7 +496,7 @@ export async function resolveMusicInput(rawInput, customTitle = '', { fetchImpl 
     };
   }
 
-  // Direct text song search (LunaBot style)
+  // Direct text song search (Serhat Canikli bot mode)
   const yt = await searchYouTubeAudio(parsed.query, { fetchImpl });
   if (!yt || yt.videoIds.length === 0) {
     return {
@@ -491,3 +529,61 @@ export async function resolveMusicInput(rawInput, customTitle = '', { fetchImpl 
     queue: [track]
   };
 }
+
+export async function findAutoplayTrack(seedTrack, { excludeVideoIds = [], fetchImpl = globalThis.fetch } = {}) {
+  if (!seedTrack || typeof fetchImpl !== 'function') return null;
+  const excluded = new Set([...(excludeVideoIds || []), seedTrack.videoId].filter(Boolean));
+  let candidates = [];
+
+  // 1. Prefer YouTube Mix / Radio playlist (list=RD<videoId>) & related tracks from the current video
+  if (seedTrack.videoId && /^[A-Za-z0-9_-]{6,}$/.test(seedTrack.videoId)) {
+    try {
+      const watchUrl = `https://www.youtube.com/watch?v=${seedTrack.videoId}&list=RD${seedTrack.videoId}&hl=en`;
+      const html = await fetchTextWithTimeout(watchUrl, fetchImpl);
+      candidates = extractYouTubeRelatedFromHtml(html, [...excluded]);
+    } catch {
+      candidates = [];
+    }
+  }
+
+  // 2. Fallback to YouTube search based on artist or track title
+  if (candidates.length === 0) {
+    const querySeed = seedTrack.artist
+      ? `${seedTrack.artist} mix`
+      : (seedTrack.trackTitle || seedTrack.title || '');
+    if (querySeed) {
+      try {
+        const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(querySeed)}&hl=en`;
+        const html = await fetchTextWithTimeout(searchUrl, fetchImpl);
+        candidates = extractYouTubeCandidatesFromHtml(html, querySeed).filter(
+          (c) => !excluded.has(c.videoId)
+        );
+      } catch {
+        candidates = [];
+      }
+    }
+  }
+
+  if (candidates.length === 0) return null;
+
+  const chosen = candidates[0];
+  const fallbackIds = candidates.slice(1, 4).map((c) => c.videoId);
+  const cleanChannel = String(chosen.channel || '').replace(/\s*-\s*Topic$/i, '').trim();
+
+  return {
+    ok: true,
+    provider: 'youtube',
+    sourceProvider: 'autoplay',
+    kind: 'bot',
+    autoplay: true,
+    title: chosen.title || seedTrack.title || 'Otomatik Çalma',
+    trackTitle: chosen.title || seedTrack.title || 'Otomatik Çalma',
+    artist: cleanChannel,
+    originalUrl: `https://www.youtube.com/watch?v=${chosen.videoId}`,
+    videoId: chosen.videoId,
+    fallbackVideoIds: fallbackIds,
+    embedUrl: buildYouTubeEmbedUrl(chosen.videoId),
+    resolved: true
+  };
+}
+

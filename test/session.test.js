@@ -1134,7 +1134,12 @@ test('RoomManager resolves Spotify playlists, advances queue without duplicates,
   assert.equal(advRes.music.queueIndex, 1);
   assert.equal(advRes.music.hasNext, false);
 
-  // Advancing past end stops playback
+  // Advancing past end stops playback when autoplay is disabled
+  const toggleOffRes = rm.setMusicAutoplay({ roomCode: code, playerId: 'h1', enabled: false });
+  assert.equal(toggleOffRes.ok, true);
+  assert.equal(toggleOffRes.autoplayEnabled, false);
+  assert.equal(created.room.music.autoplayEnabled, false);
+
   const endKey = `${created.room.music.embedUrl}|${created.room.music.updatedAt}`;
   const endRes = await rm.advanceRoomMusic({ roomCode: code, playerId: 'h1', currentKey: endKey, fetchImpl: fakeFetch });
   assert.equal(endRes.ok, true);
@@ -1142,7 +1147,190 @@ test('RoomManager resolves Spotify playlists, advances queue without duplicates,
   assert.equal(created.room.music, null);
 });
 
-test('LocalSingleplayerClient supports LunaBot resolved music queue, next, and fallback', (ctx) => {
+test('extractYouTubeRelatedFromHtml and findAutoplayTrack pick Mix tracks, filter noise, and fall back to search', async () => {
+  const { extractYouTubeRelatedFromHtml, findAutoplayTrack } = await import('../server/musicResolver.js');
+
+  const mixHtml = `<script>var ytInitialData = ${JSON.stringify({
+    contents: {
+      twoColumnWatchNextResults: {
+        playlist: {
+          playlist: {
+            contents: [
+              {
+                playlistPanelVideoRenderer: {
+                  videoId: 'playedSeed01',
+                  title: { simpleText: 'Seed Track' },
+                  longBylineText: { runs: [{ text: 'Artist - Topic' }] },
+                  lengthText: { simpleText: '3:10' }
+                }
+              },
+              {
+                playlistPanelVideoRenderer: {
+                  videoId: 'reactShort99',
+                  title: { simpleText: 'Seed Reaction' },
+                  longBylineText: { runs: [{ text: 'Reactor' }] },
+                  lengthText: { simpleText: '0:30' }
+                }
+              },
+              {
+                playlistPanelVideoRenderer: {
+                  videoId: 'nextMixGood1',
+                  title: { simpleText: 'Tarkan - Dudu' },
+                  longBylineText: { runs: [{ text: 'Tarkan - Topic' }] },
+                  lengthText: { simpleText: '4:05' }
+                }
+              },
+              {
+                playlistPanelVideoRenderer: {
+                  videoId: 'nextMixAlt02',
+                  title: { simpleText: 'Tarkan - Kuzu Kuzu Official Audio' },
+                  longBylineText: { runs: [{ text: 'Tarkan' }] },
+                  lengthText: { simpleText: '3:52' }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  })};</script>`;
+
+  const related = extractYouTubeRelatedFromHtml(mixHtml, ['playedSeed01']);
+  assert.equal(related[0].videoId, 'nextMixGood1');
+  assert.equal(related.some((c) => c.videoId === 'playedSeed01'), false);
+
+  const mixTrack = await findAutoplayTrack(
+    { videoId: 'playedSeed01', title: 'Seed Track', artist: 'Tarkan' },
+    {
+      excludeVideoIds: ['playedSeed01'],
+      fetchImpl: async (url) => {
+        assert.match(String(url), /watch\?v=playedSeed01&list=RDplayedSeed01/);
+        return { ok: true, status: 200, text: async () => mixHtml };
+      }
+    }
+  );
+  assert.equal(mixTrack.ok, true);
+  assert.equal(mixTrack.sourceProvider, 'autoplay');
+  assert.equal(mixTrack.videoId, 'nextMixGood1');
+  assert.deepEqual(mixTrack.fallbackVideoIds, ['nextMixAlt02', 'reactShort99']);
+
+  // Fallback to search when Mix watch page fails
+  const searchHtml = `<script>var ytInitialData = ${JSON.stringify({
+    contents: {
+      section: {
+        items: [
+          {
+            videoRenderer: {
+              videoId: 'playedSeed01',
+              title: { simpleText: 'Seed Track' },
+              ownerText: { runs: [{ text: 'Tarkan - Topic' }] },
+              lengthText: { simpleText: '3:10' }
+            }
+          },
+          {
+            videoRenderer: {
+              videoId: 'fallbackYt03',
+              title: { simpleText: 'Sezen Aksu - Gulumse' },
+              ownerText: { runs: [{ text: 'Sezen Aksu - Topic' }] },
+              lengthText: { simpleText: '4:40' }
+            }
+          }
+        ]
+      }
+    }
+  })};</script>`;
+
+  const fallbackTrack = await findAutoplayTrack(
+    { videoId: 'playedSeed01', title: 'Seed Track', artist: 'Sezen Aksu' },
+    {
+      excludeVideoIds: ['playedSeed01'],
+      fetchImpl: async (url) => {
+        const u = String(url);
+        if (u.includes('/watch?')) {
+          return { ok: false, status: 503, text: async () => '' };
+        }
+        assert.match(u, /results\?search_query=Sezen%20Aksu%20mix/);
+        return { ok: true, status: 200, text: async () => searchHtml };
+      }
+    }
+  );
+  assert.equal(fallbackTrack.videoId, 'fallbackYt03');
+  assert.equal(fallbackTrack.sourceProvider, 'autoplay');
+  assert.equal(fallbackTrack.artist, 'Sezen Aksu');
+});
+
+test('RoomManager automatically continues with Serhat Canikli autoplay after queue ends', async () => {
+  const { RoomManager } = await import('../server/roomManager.js');
+  const emitted = [];
+  const fakeIo = {
+    to: () => ({ emit: (ev, data) => emitted.push({ ev, data }) }),
+    emit: () => {}
+  };
+  const rm = new RoomManager(fakeIo);
+  const created = rm.createRoom({ playerId: 'h1', playerName: 'Efe' });
+  const code = created.room.code;
+
+  assert.equal(created.room.musicAutoplay, true);
+
+  const searchHtml = `<script>var ytInitialData = ${JSON.stringify({
+    contents: {
+      section: {
+        items: [
+          { videoRenderer: { videoId: 'seedTrack001', title: { simpleText: 'Baris Manco - Daglar Daglar' }, ownerText: { runs: [{ text: 'Baris Manco - Topic' }] }, lengthText: { simpleText: '3:45' } } }
+        ]
+      }
+    }
+  })};</script>`;
+
+  const watchHtml = `<script>var ytInitialData = ${JSON.stringify({
+    contents: {
+      twoColumnWatchNextResults: {
+        playlist: {
+          playlist: {
+            contents: [
+              { playlistPanelVideoRenderer: { videoId: 'seedTrack001', title: { simpleText: 'Baris Manco - Daglar Daglar' }, longBylineText: { runs: [{ text: 'Baris Manco - Topic' }] }, lengthText: { simpleText: '3:45' } } },
+              { playlistPanelVideoRenderer: { videoId: 'autoTrack002', title: { simpleText: 'Baris Manco - Sari Cizmeli Mehmet Aga' }, longBylineText: { runs: [{ text: 'Baris Manco - Topic' }] }, lengthText: { simpleText: '3:50' } } }
+            ]
+          }
+        }
+      }
+    }
+  })};</script>`;
+
+  const fakeFetch = async (url) => {
+    const u = String(url);
+    if (u.includes('/watch?')) {
+      return { ok: true, status: 200, text: async () => watchHtml };
+    }
+    return { ok: true, status: 200, text: async () => searchHtml };
+  };
+
+  const setRes = await rm.resolveAndSetRoomMusic({
+    roomCode: code,
+    playerId: 'h1',
+    url: 'Baris Manco Daglar Daglar',
+    fetchImpl: fakeFetch
+  });
+  assert.equal(setRes.ok, true);
+  assert.equal(setRes.music.videoId, 'seedTrack001');
+  assert.equal(setRes.music.autoplayEnabled, true);
+
+  const firstKey = `${created.room.music.embedUrl}|${created.room.music.updatedAt}`;
+  const autoRes = await rm.advanceRoomMusic({
+    roomCode: code,
+    playerId: 'h1',
+    currentKey: firstKey,
+    fetchImpl: fakeFetch
+  });
+  assert.equal(autoRes.ok, true);
+  assert.equal(autoRes.music.videoId, 'autoTrack002');
+  assert.equal(autoRes.music.sourceProvider, 'autoplay');
+  assert.equal(autoRes.music.updatedBy, 'Serhat Canikli');
+  assert.equal(autoRes.music.autoplayEnabled, true);
+  assert.deepEqual(created.room.musicHistory, ['seedTrack001', 'autoTrack002']);
+});
+
+test('LocalSingleplayerClient supports Serhat Canikli queue, fallback, and autoplay flow', (ctx) => {
   const client = new LocalSingleplayerClient({
     playerName: 'Efe',
     options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
@@ -1191,6 +1379,7 @@ test('LocalSingleplayerClient supports LunaBot resolved music queue, next, and f
   assert.equal(setRes.ok, true);
   assert.equal(setRes.music.videoId, 'vidOne11111');
   assert.equal(setRes.music.hasNext, true);
+  assert.equal(setRes.music.autoplayEnabled, true);
 
   let fbRes = null;
   client.action('room:musicFallback', {}, (r) => { fbRes = r; });
@@ -1202,6 +1391,44 @@ test('LocalSingleplayerClient supports LunaBot resolved music queue, next, and f
   assert.equal(nextRes.ok, true);
   assert.equal(nextRes.music.videoId, 'vidTwo22222');
   assert.equal(nextRes.music.hasNext, false);
+
+  // Queue finished with autoplay enabled -> requests autoplayTrack with played history
+  let needAutoRes = null;
+  client.action('room:musicNext', {}, (r) => { needAutoRes = r; });
+  assert.equal(needAutoRes.ok, false);
+  assert.equal(needAutoRes.needsAutoplayTrack.videoId, 'vidTwo22222');
+  assert.ok(needAutoRes.excludeVideoIds.includes('vidOne11111'));
+  assert.ok(needAutoRes.excludeVideoIds.includes('vidTwo22222'));
+
+  // Providing resolved autoplayTrack continues playback
+  let autoRes = null;
+  client.action('room:musicNext', {
+    autoplayTrack: {
+      ok: true,
+      provider: 'youtube',
+      sourceProvider: 'autoplay',
+      kind: 'bot',
+      title: 'Auto Next Song',
+      videoId: 'vidAuto3333',
+      fallbackVideoIds: [],
+      embedUrl: 'https://www.youtube.com/embed/vidAuto3333?autoplay=1&enablejsapi=1'
+    }
+  }, (r) => { autoRes = r; });
+  assert.equal(autoRes.ok, true);
+  assert.equal(autoRes.music.videoId, 'vidAuto3333');
+  assert.equal(autoRes.music.updatedBy, 'Serhat Canikli');
+
+  // Disabling autoplay stops playback when advancing past end
+  let toggleRes = null;
+  client.action('room:musicAutoplay', { enabled: false }, (r) => { toggleRes = r; });
+  assert.equal(toggleRes.ok, true);
+  assert.equal(toggleRes.autoplayEnabled, false);
+  assert.equal(toggleRes.music.autoplayEnabled, false);
+
+  let stopRes = null;
+  client.action('room:musicNext', {}, (r) => { stopRes = r; });
+  assert.equal(stopRes.ok, true);
+  assert.equal(stopRes.music, null);
 });
 
 

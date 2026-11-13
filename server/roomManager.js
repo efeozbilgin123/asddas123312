@@ -1,6 +1,6 @@
 import { createEmptyOrders, KAHVE_MENU_MAP } from '../shared/menu.js';
 import { buildYouTubeEmbedUrl, parseMusicUrl } from '../shared/music.js';
-import { resolveMusicInput, resolveQueuedTrack } from './musicResolver.js';
+import { findAutoplayTrack, resolveMusicInput, resolveQueuedTrack } from './musicResolver.js';
 import { GameSession } from './gameSession.js';
 
 const BOT_NAMES = ['Selim (Bot)', 'Zeynep (Bot)', 'Kerem (Bot)', 'Defne (Bot)'];
@@ -79,6 +79,8 @@ export class RoomManager {
       music: null,
       musicQueue: [],
       musicQueueIndex: 0,
+      musicAutoplay: true,
+      musicHistory: [],
       orders: createEmptyOrders(),
       lastOrder: null,
       orderSeq: 0,
@@ -519,7 +521,8 @@ export class RoomManager {
         ...room.music,
         queueIndex: room.musicQueueIndex,
         queueTotal: room.musicQueue.length,
-        hasNext: room.musicQueueIndex + 1 < room.musicQueue.length
+        hasNext: room.musicQueueIndex + 1 < room.musicQueue.length,
+        autoplayEnabled: Boolean(room.musicAutoplay)
       };
       this.broadcastRoomMusic(room);
       return { ok: true, music: room.music, queuedCount: toAdd.length };
@@ -532,17 +535,30 @@ export class RoomManager {
     room.musicQueueIndex = 0;
 
     const first = room.musicQueue[0];
+    this.recordMusicHistory(room, first);
     room.music = {
       ...first,
       updatedBy: actorName,
       updatedAt: Date.now(),
       queueIndex: 0,
       queueTotal: room.musicQueue.length,
-      hasNext: room.musicQueue.length > 1
+      hasNext: room.musicQueue.length > 1,
+      autoplayEnabled: Boolean(room.musicAutoplay)
     };
 
     this.broadcastRoomMusic(room);
     return { ok: true, music: room.music };
+  }
+
+  recordMusicHistory(room, track) {
+    if (!track?.videoId) return;
+    if (!Array.isArray(room.musicHistory)) room.musicHistory = [];
+    if (!room.musicHistory.includes(track.videoId)) {
+      room.musicHistory.push(track.videoId);
+      if (room.musicHistory.length > 40) {
+        room.musicHistory.shift();
+      }
+    }
   }
 
   setRoomMusic({ roomCode, playerId, url, title, mode = 'replace', resolvedPayload = null }) {
@@ -576,6 +592,23 @@ export class RoomManager {
     return this.applyResolvedMusic(room, seat, resolved, mode);
   }
 
+  setMusicAutoplay({ roomCode, playerId, enabled }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
+    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+
+    room.musicAutoplay = enabled === undefined ? !room.musicAutoplay : Boolean(enabled);
+    if (room.music) {
+      room.music = {
+        ...room.music,
+        autoplayEnabled: room.musicAutoplay
+      };
+      this.broadcastRoomMusic(room);
+    }
+    return { ok: true, autoplayEnabled: room.musicAutoplay, music: room.music };
+  }
+
   async advanceRoomMusic({ roomCode, playerId, currentKey = '', fetchImpl }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
@@ -598,18 +631,49 @@ export class RoomManager {
       if (resolvedTrack) {
         queue[nextIdx] = resolvedTrack;
         room.musicQueueIndex = nextIdx;
+        this.recordMusicHistory(room, resolvedTrack);
         room.music = {
           ...resolvedTrack,
           updatedBy: candidate.updatedBy || seat.name || 'Oyuncu',
           updatedAt: Date.now(),
           queueIndex: nextIdx,
           queueTotal: queue.length,
-          hasNext: nextIdx + 1 < queue.length
+          hasNext: nextIdx + 1 < queue.length,
+          autoplayEnabled: Boolean(room.musicAutoplay)
         };
         this.broadcastRoomMusic(room);
         return { ok: true, music: room.music };
       }
       nextIdx += 1;
+    }
+
+    if (room.musicAutoplay) {
+      this.recordMusicHistory(room, room.music);
+      const autoTrack = await findAutoplayTrack(room.music, {
+        excludeVideoIds: room.musicHistory || [],
+        fetchImpl
+      });
+      if (autoTrack) {
+        this.recordMusicHistory(room, autoTrack);
+        if (queue.length >= 30) {
+          queue.shift();
+          nextIdx = Math.max(0, queue.length);
+        }
+        queue.push({ ...autoTrack, updatedBy: 'Serhat Canikli' });
+        room.musicQueue = queue;
+        room.musicQueueIndex = queue.length - 1;
+        room.music = {
+          ...autoTrack,
+          updatedBy: 'Serhat Canikli',
+          updatedAt: Date.now(),
+          queueIndex: room.musicQueueIndex,
+          queueTotal: queue.length,
+          hasNext: false,
+          autoplayEnabled: true
+        };
+        this.broadcastRoomMusic(room);
+        return { ok: true, music: room.music };
+      }
     }
 
     room.music = null;
@@ -644,6 +708,7 @@ export class RoomManager {
       embedUrl: buildYouTubeEmbedUrl(nextVideoId),
       updatedAt: Date.now()
     };
+    this.recordMusicHistory(room, room.music);
     this.broadcastRoomMusic(room);
     return { ok: true, music: room.music };
   }
@@ -657,6 +722,7 @@ export class RoomManager {
     room.music = null;
     room.musicQueue = [];
     room.musicQueueIndex = 0;
+    room.musicHistory = [];
     this.broadcastRoomMusic(room);
     return { ok: true };
   }

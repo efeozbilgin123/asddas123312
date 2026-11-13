@@ -4,7 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Server } from 'socket.io';
-import { resolveMusicInput } from './musicResolver.js';
+import { findAutoplayTrack, resolveMusicInput } from './musicResolver.js';
 import { RoomManager } from './roomManager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -39,6 +39,26 @@ app.post('/api/music/resolve', async (req, res) => {
   } catch (err) {
     console.error('[/api/music/resolve] error:', err);
     res.status(500).json({ ok: false, error: 'Parça çözümlenirken sunucu hatası oluştu.' });
+  }
+});
+
+app.post('/api/music/autoplay', async (req, res) => {
+  try {
+    const seedTrack = req.body?.track;
+    const excludeVideoIds = Array.isArray(req.body?.excludeVideoIds) ? req.body.excludeVideoIds : [];
+    if (!seedTrack || typeof seedTrack !== 'object') {
+      res.status(400).json({ ok: false, error: 'Geçersiz parça bilgisi.' });
+      return;
+    }
+    const track = await findAutoplayTrack(seedTrack, { excludeVideoIds });
+    if (!track) {
+      res.json({ ok: false });
+      return;
+    }
+    res.json({ ok: true, track });
+  } catch (err) {
+    console.error('[/api/music/autoplay] error:', err);
+    res.status(500).json({ ok: false, error: 'Otomatik oynatma parçası bulunamadı.' });
   }
 });
 
@@ -224,6 +244,16 @@ io.on('connection', (socket) => {
     const res = roomManager.stopRoomMusic({
       roomCode: code,
       playerId
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:musicAutoplay', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.setMusicAutoplay({
+      roomCode: code,
+      playerId,
+      enabled: data?.enabled
     });
     if (typeof ack === 'function') ack(res);
   });

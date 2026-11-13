@@ -342,7 +342,7 @@
       </div>
     </section>
 
-    <!-- Persistent Shared Room Music Player Dock (Discord LunaBot Style) -->
+    <!-- Persistent Shared Room Music Player Dock (Discord Serhat Canikli Style) -->
     <aside id="music-dock" class="music-dock is-minimized" hidden aria-label="Ortak oda müziği oynatıcısı">
       <div class="music-dock__bar">
         <div class="music-dock__meta">
@@ -352,6 +352,7 @@
         <div class="music-dock__controls">
           <button type="button" id="music-dock-playpause" class="btn btn--quiet btn--sm" hidden>Duraklat</button>
           <button type="button" id="music-dock-next" class="btn btn--quiet btn--sm" hidden>Sonraki</button>
+          <button type="button" id="music-dock-autoplay" class="btn btn--quiet btn--sm" hidden aria-pressed="true">Oto: Açık</button>
           <input id="music-volume" class="music-volume" type="range" min="0" max="100" value="55" aria-label="Müzik ses seviyesi">
           <a id="music-external-link" class="btn btn--quiet btn--sm" href="#" target="_blank" rel="noopener noreferrer" hidden>Aç</a>
           <button type="button" id="music-dock-toggle" class="btn btn--quiet btn--sm" aria-expanded="false" hidden>Göster</button>
@@ -369,7 +370,7 @@
       <button type="button" class="btn btn--quiet btn--sm" data-close-dialog="dialog-music">Kapat</button>
     </div>
     <div class="dialog__body">
-      <p class="lead">Spotify şarkı veya çalma listesi linki, YouTube/SoundCloud linki ya da doğrudan şarkı adı yazın. Spotify player açmadan Discord botu gibi arka planda tam şarkı çalar.</p>
+      <p class="lead">Spotify şarkı veya çalma listesi linki, YouTube/SoundCloud linki ya da doğrudan şarkı adı yazın. Serhat Canikli arka planda tam şarkı çalar ve parça bitince otomatik devam eder.</p>
       <form id="music-form" class="lobby-form" novalidate>
         <div class="field">
           <label for="music-url-input">Şarkı adı veya bağlantı</label>

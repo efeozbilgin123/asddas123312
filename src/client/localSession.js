@@ -8,6 +8,8 @@ export class LocalSingleplayerClient {
     this.music = null;
     this.musicQueue = [];
     this.musicQueueIndex = 0;
+    this.musicAutoplay = true;
+    this.musicHistory = [];
     this.orders = createEmptyOrders();
     this.lastOrder = null;
     this.orderSeq = 0;
@@ -26,6 +28,16 @@ export class LocalSingleplayerClient {
       }
     });
     this.session.startRound();
+  }
+
+  recordMusicHistory(track) {
+    if (!track?.videoId) return;
+    if (!this.musicHistory.includes(track.videoId)) {
+      this.musicHistory.push(track.videoId);
+      if (this.musicHistory.length > 40) {
+        this.musicHistory.shift();
+      }
+    }
   }
 
   emitRoomState() {
@@ -104,18 +116,21 @@ export class LocalSingleplayerClient {
               ...this.music,
               queueIndex: this.musicQueueIndex,
               queueTotal: this.musicQueue.length,
-              hasNext: this.musicQueueIndex + 1 < this.musicQueue.length
+              hasNext: this.musicQueueIndex + 1 < this.musicQueue.length,
+              autoplayEnabled: Boolean(this.musicAutoplay)
             };
           } else {
             this.musicQueue = incoming.slice(0, 30);
             this.musicQueueIndex = 0;
+            this.recordMusicHistory(this.musicQueue[0]);
             this.music = {
               ...this.musicQueue[0],
               updatedBy: this.playerName,
               updatedAt: Date.now(),
               queueIndex: 0,
               queueTotal: this.musicQueue.length,
-              hasNext: this.musicQueue.length > 1
+              hasNext: this.musicQueue.length > 1,
+              autoplayEnabled: Boolean(this.musicAutoplay)
             };
           }
           this.emitRoomState();
@@ -131,22 +146,73 @@ export class LocalSingleplayerClient {
         } else {
           this.musicQueue = [parsed];
           this.musicQueueIndex = 0;
+          this.recordMusicHistory(parsed);
           this.music = {
             ...parsed,
             updatedBy: this.playerName,
             updatedAt: Date.now(),
             queueIndex: 0,
             queueTotal: 1,
-            hasNext: false
+            hasNext: false,
+            autoplayEnabled: Boolean(this.musicAutoplay)
           };
           this.emitRoomState();
           res = { ok: true, music: this.music };
         }
         break;
       }
+      case 'room:musicAutoplay': {
+        this.musicAutoplay = data?.enabled === undefined ? !this.musicAutoplay : Boolean(data.enabled);
+        if (this.music) {
+          this.music = {
+            ...this.music,
+            autoplayEnabled: this.musicAutoplay
+          };
+          this.emitRoomState();
+        }
+        res = { ok: true, autoplayEnabled: this.musicAutoplay, music: this.music };
+        break;
+      }
       case 'room:musicNext': {
+        if (!this.music) {
+          res = { ok: true, music: null };
+          break;
+        }
+        const activeKey = `${this.music.embedUrl}|${this.music.updatedAt || 0}`;
+        if (data?.currentKey && data.currentKey !== activeKey) {
+          res = { ok: true, music: this.music, skippedDuplicate: true };
+          break;
+        }
+
         const nextIdx = this.musicQueueIndex + 1;
         if (nextIdx >= this.musicQueue.length) {
+          if (this.musicAutoplay && !data?.stopIfEmpty) {
+            if (data?.autoplayTrack?.embedUrl) {
+              this.recordMusicHistory(this.music);
+              this.recordMusicHistory(data.autoplayTrack);
+              if (this.musicQueue.length >= 30) {
+                this.musicQueue.shift();
+              }
+              this.musicQueue.push({ ...data.autoplayTrack, updatedBy: 'Serhat Canikli' });
+              this.musicQueueIndex = this.musicQueue.length - 1;
+              this.music = {
+                ...data.autoplayTrack,
+                updatedBy: 'Serhat Canikli',
+                updatedAt: Date.now(),
+                queueIndex: this.musicQueueIndex,
+                queueTotal: this.musicQueue.length,
+                hasNext: false,
+                autoplayEnabled: true
+              };
+              this.emitRoomState();
+              res = { ok: true, music: this.music };
+              break;
+            }
+            this.recordMusicHistory(this.music);
+            res = { ok: false, needsAutoplayTrack: this.music, excludeVideoIds: [...this.musicHistory] };
+            break;
+          }
+
           this.music = null;
           this.musicQueue = [];
           this.musicQueueIndex = 0;
@@ -161,13 +227,15 @@ export class LocalSingleplayerClient {
         }
         this.musicQueue[nextIdx] = nextTrack;
         this.musicQueueIndex = nextIdx;
+        this.recordMusicHistory(nextTrack);
         this.music = {
           ...nextTrack,
-          updatedBy: this.playerName,
+          updatedBy: nextTrack.updatedBy || this.playerName,
           updatedAt: Date.now(),
           queueIndex: nextIdx,
           queueTotal: this.musicQueue.length,
-          hasNext: nextIdx + 1 < this.musicQueue.length
+          hasNext: nextIdx + 1 < this.musicQueue.length,
+          autoplayEnabled: Boolean(this.musicAutoplay)
         };
         this.emitRoomState();
         res = { ok: true, music: this.music };
@@ -186,6 +254,7 @@ export class LocalSingleplayerClient {
             embedUrl: buildYouTubeEmbedUrl(nextId),
             updatedAt: Date.now()
           };
+          this.recordMusicHistory(this.music);
           this.emitRoomState();
           res = { ok: true, music: this.music };
         }
@@ -195,6 +264,7 @@ export class LocalSingleplayerClient {
         this.music = null;
         this.musicQueue = [];
         this.musicQueueIndex = 0;
+        this.musicHistory = [];
         this.emitRoomState();
         res = { ok: true };
         break;

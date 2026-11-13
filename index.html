@@ -24,6 +24,16 @@
         <button type="button" class="seg__btn" data-cam="top">Üstten</button>
         <button type="button" class="seg__btn" data-cam="rack">Istaka</button>
       </div>
+      <button type="button" id="btn-orders" class="btn btn--quiet btn--sm" hidden title="Kahvehane çay ve ikram siparişi">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M17 8h1a4 4 0 1 1 0 8h-1"/>
+          <path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/>
+          <line x1="6" y1="2" x2="6" y2="4"/>
+          <line x1="10" y1="2" x2="10" y2="4"/>
+          <line x1="14" y1="2" x2="14" y2="4"/>
+        </svg>
+        <span>Çay &amp; İkram</span>
+      </button>
       <button type="button" id="btn-music" class="btn btn--quiet btn--sm" hidden title="Ortak oda müziği">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M9 18V5l12-2v13"/>
@@ -209,6 +219,7 @@
           </div>
           <div class="code-share">
             <span id="wait-room-code" class="code-badge num"></span>
+            <button type="button" id="btn-wait-orders" class="btn btn--quiet btn--sm">Çay &amp; İkram</button>
             <button type="button" id="btn-wait-music" class="btn btn--quiet btn--sm">Ortak Müzik</button>
             <button type="button" id="btn-copy-code" class="btn btn--quiet btn--sm">Davet Linki Kopyala</button>
           </div>
@@ -366,6 +377,26 @@
     </div>
   </dialog>
 
+  <!-- Kahvehane Orders Dialog -->
+  <dialog id="dialog-orders" class="dialog">
+    <div class="dialog__head">
+      <h2>Ocakbaşı · Çay &amp; İkram</h2>
+      <button type="button" class="btn btn--quiet btn--sm" data-close-dialog="dialog-orders">Kapat</button>
+    </div>
+    <div class="dialog__body">
+      <p class="lead">Kendinize, masadaki bir arkadaşınıza veya tüm masaya sıcak içecek ve atıştırmalık söyleyin. Siparişler anında 3D masaya servis edilir.</p>
+      <div class="order-toolbar">
+        <div class="field">
+          <label for="order-target">Kime söylensin?</label>
+          <select id="order-target"></select>
+        </div>
+        <button type="button" id="btn-order-clear" class="btn btn--quiet btn--sm">Servisimi Topla</button>
+      </div>
+      <p id="order-status-msg" class="field__help" aria-live="polite"></p>
+      <div id="order-menu-grid"></div>
+    </div>
+  </dialog>
+
   <!-- Rules Dialog -->
   <dialog id="dialog-rules" class="dialog">
     <div class="dialog__head">
@@ -380,7 +411,7 @@
         <li><strong>Yandan Taş Alma:</strong> Solunuzdaki taş alanı ıstakanızın hemen solundadır. Yandan taş alırsanız o tur içinde açtığınız perlerde kullanmalısınız (katlamalıda çift açandan alınan taşla yalnızca çifte açılır). Yere atılan Okey taşı yandan alınamaz.</li>
         <li><strong>Cezalar:</strong> El ortasında yere Okey atma (+101), eli bitiremeyip elde Okey bırakma (+101), işlek taş atma (+101) ve hiç el açamama (+202) ceza puanı yazar. Çift açan oyuncuların elinde kalan taşların cezası 2x sayılır.</li>
         <li><strong>Bitiş Çarpanları:</strong> Okey atarak, çiftten veya elden (aynı turda açıp tek taş atarak) bitişte puanlar 2x; bu durumlar birleştiğinde (ör. elden veya çiftten Okey atarak) 4x olur.</li>
-        <li><strong>3D Sürükle-Bırak:</strong> Taşı tutup kaldırarak ıstakanın diğer yuvalarına, sağdaki atma alanına veya masadaki yeşil perlerin üzerine bırakabilirsiniz.</li>
+        <li><strong>3D Sürükle &amp; Çift Tıkla:</strong> Taşları tutup ıstakada kaydırarak yer değiştirebilir, masadaki yeşil perlere veya sağdaki atma alanına bırakabilirsiniz. Istakadaki bir taşa çift tıklayarak taşı ters çevirebilirsiniz.</li>
       </ul>
     </div>
   </dialog>

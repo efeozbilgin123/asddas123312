@@ -7,8 +7,13 @@ import {
   getAvatarTexture,
   getFeltTexture,
   getKahveBackdropTexture,
+  getMenuBoardTexture,
+  getParquetTexture,
   getTileBackTexture,
   getTileFaceTexture,
+  getWallArtTexture,
+  getWallClockTexture,
+  getWindowNightTexture,
   getWoodTexture
 } from './textures.js';
 
@@ -156,14 +161,14 @@ export class OkeyTable3D {
     this.callbacks = callbacks;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#130D0A');
-    this.scene.fog = new THREE.FogExp2('#130D0A', 0.011);
+    this.scene.background = new THREE.Color('#160E09');
+    this.scene.fog = new THREE.FogExp2('#160E09', 0.0065);
 
     const rect = canvas.getBoundingClientRect();
     const width = rect.width || window.innerWidth;
     const height = rect.height || window.innerHeight;
 
-    this.camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 120);
+    this.camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 130);
     this.camTarget = CAMERA_PRESETS.table.target.clone();
     this.camSpherical = new THREE.Spherical().setFromVector3(
       CAMERA_PRESETS.table.pos.clone().sub(this.camTarget)
@@ -181,7 +186,7 @@ export class OkeyTable3D {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.08;
+    this.renderer.toneMappingExposure = 1.14;
 
     this.demoMode = true;
     this.reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false;
@@ -192,9 +197,15 @@ export class OkeyTable3D {
     this.rackSlotMeshes = [];
     this.handSlotData = new Array(RACK_COLS * RACK_ROWS).fill(null);
     this.selectedTileIds = new Set();
+    this.flippedTileIds = new Set();
+    this.lastTileTap = null;
     this.currentState = null;
 
     this.dragState = null;
+    this.dragTargetPos = null;
+    this.dragTargetQuat = null;
+    this.dragTargetScale = null;
+    this.rackDragPlane = null;
     this.orbitDrag = null;
     this.tileAnimations = [];
     this.trackedMeshes = new Map();
@@ -218,6 +229,12 @@ export class OkeyTable3D {
 
     this.dynamicGroup = new THREE.Group();
     this.scene.add(this.dynamicGroup);
+
+    this.orderGroup = new THREE.Group();
+    this.scene.add(this.orderGroup);
+    this.steamParticles = [];
+    this.currentOrders = null;
+    this.currentViewerIdx = 0;
 
     this.buildEnvironment();
     this.buildTable();
@@ -249,18 +266,18 @@ export class OkeyTable3D {
     group.add(chain);
 
     const cap = new THREE.Mesh(
-      new THREE.ConeGeometry(0.45 * scale, 0.38 * scale, 16),
+      new THREE.ConeGeometry(0.48 * scale, 0.4 * scale, 16),
       brassMat
     );
     cap.position.y = 0.24 * scale;
     group.add(cap);
 
     const globe = new THREE.Mesh(
-      new THREE.SphereGeometry(0.42 * scale, 20, 16),
+      new THREE.SphereGeometry(0.45 * scale, 20, 16),
       new THREE.MeshStandardMaterial({
-        color: '#FFE099',
-        emissive: '#FF9E3D',
-        emissiveIntensity: 1.6,
+        color: '#FFE6A8',
+        emissive: '#FF9F38',
+        emissiveIntensity: 1.75,
         roughness: 0.2
       })
     );
@@ -272,11 +289,11 @@ export class OkeyTable3D {
       brassMat
     );
     finial.rotation.x = Math.PI;
-    finial.position.y = -0.68 * scale;
+    finial.position.y = -0.7 * scale;
     group.add(finial);
 
     if (addLight) {
-      const pt = new THREE.PointLight('#FFBD6B', 22, 26, 1.5);
+      const pt = new THREE.PointLight('#FFC06E', 24, 28, 1.4);
       pt.position.y = -0.35 * scale;
       group.add(pt);
     }
@@ -284,22 +301,216 @@ export class OkeyTable3D {
     this.scene.add(group);
   }
 
+  buildWoodenChair(woodMat, leatherMat) {
+    const chair = new THREE.Group();
+
+    // 4 tapered walnut legs (floor is y = -2.35, seat at y = -0.58)
+    const legOffsets = [
+      [-0.72, -1.48, -0.68],
+      [0.72, -1.48, -0.68],
+      [-0.72, -1.48, 0.68],
+      [0.72, -1.48, 0.68]
+    ];
+    for (const [lx, ly, lz] of legOffsets) {
+      const leg = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.075, 0.055, 1.74, 10),
+        woodMat
+      );
+      leg.position.set(lx, ly, lz);
+      leg.castShadow = true;
+      chair.add(leg);
+    }
+
+    // Wooden seat frame + padded dark leather cushion
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(1.66, 0.14, 1.56), woodMat);
+    frame.position.set(0, -0.58, 0);
+    chair.add(frame);
+
+    const cushion = new THREE.Mesh(new THREE.BoxGeometry(1.52, 0.14, 1.44), leatherMat);
+    cushion.position.set(0, -0.46, 0.02);
+    cushion.receiveShadow = true;
+    chair.add(cushion);
+
+    // Upright back posts
+    for (const sx of [-0.74, 0.74]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.075, 2.28, 10), woodMat);
+      post.position.set(sx, 0.56, -0.72);
+      post.rotation.x = -0.06;
+      post.castShadow = true;
+      chair.add(post);
+    }
+
+    // Slatted backrest + arched crest rail
+    for (const sx of [-0.46, 0, 0.46]) {
+      const slat = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.42, 0.07), woodMat);
+      slat.position.set(sx, 0.72, -0.73);
+      slat.rotation.x = -0.06;
+      chair.add(slat);
+    }
+
+    const crestRail = new THREE.Mesh(new THREE.BoxGeometry(1.68, 0.26, 0.14), woodMat);
+    crestRail.position.set(0, 1.58, -0.78);
+    crestRail.rotation.x = -0.06;
+    crestRail.castShadow = true;
+    chair.add(crestRail);
+
+    return chair;
+  }
+
+  buildSideKahveTable(x, z, rotY, hasTavla = false) {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+    group.rotation.y = rotY;
+
+    const woodMat = new THREE.MeshStandardMaterial({
+      map: getWoodTexture(),
+      color: '#75492B',
+      roughness: 0.55
+    });
+    const darkWoodMat = new THREE.MeshStandardMaterial({
+      map: getWoodTexture(),
+      color: '#52311D',
+      roughness: 0.65
+    });
+    const leatherMat = new THREE.MeshStandardMaterial({
+      color: '#2B1B14',
+      roughness: 0.65
+    });
+
+    // Side café table (square cozy wooden top + pedestal base)
+    const top = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.24, 4.4), woodMat);
+    top.position.y = -0.14;
+    top.castShadow = true;
+    top.receiveShadow = true;
+    group.add(top);
+
+    const feltCenter = new THREE.Mesh(
+      new THREE.BoxGeometry(3.6, 0.04, 3.6),
+      new THREE.MeshStandardMaterial({
+        map: getFeltTexture(),
+        color: '#2B6E4F',
+        roughness: 0.9
+      })
+    );
+    feltCenter.position.y = -0.01;
+    group.add(feltCenter);
+
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.55, 2.2, 16), darkWoodMat);
+    col.position.y = -1.25;
+    group.add(col);
+
+    const baseFoot = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.35, 0.16, 16), darkWoodMat);
+    baseFoot.position.y = -2.27;
+    group.add(baseFoot);
+
+    if (hasTavla) {
+      // Half-open Backgammon board + tea glasses
+      const tavla = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.12, 1.15), darkWoodMat);
+      tavla.position.set(0, 0.06, 0);
+      tavla.rotation.y = 0.25;
+      group.add(tavla);
+    } else {
+      // Empty wooden okey racks ready on table
+      [
+        [0, 0.08, 1.5, 0],
+        [0, 0.08, -1.5, Math.PI]
+      ].forEach(([rx, ry, rz, rRot]) => {
+        const rack = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.28, 0.22), woodMat);
+        rack.position.set(rx, ry, rz);
+        rack.rotation.y = rRot;
+        group.add(rack);
+      });
+    }
+
+    // Small tea glasses on corner of the side table
+    for (const [gx, gz] of [
+      [-1.4, -1.3],
+      [1.45, 1.35]
+    ]) {
+      const saucer = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.24, 0.18, 0.03, 14),
+        new THREE.MeshStandardMaterial({ color: '#F0EAE0', roughness: 0.25 })
+      );
+      saucer.position.set(gx, 0.03, gz);
+      group.add(saucer);
+
+      const tea = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.11, 0.08, 0.26, 12),
+        new THREE.MeshStandardMaterial({ color: '#8E250B', roughness: 0.15 })
+      );
+      tea.position.set(gx, 0.17, gz);
+      group.add(tea);
+    }
+
+    // 4 chairs tucked around the side table
+    const chairConfigs = [
+      [0, 0, 2.75, Math.PI],
+      [0, 0, -2.75, 0],
+      [2.75, 0, 0, -Math.PI / 2],
+      [-2.75, 0, 0, Math.PI / 2]
+    ];
+    for (const [cx, cy, cz, cRot] of chairConfigs) {
+      const ch = this.buildWoodenChair(darkWoodMat, leatherMat);
+      ch.position.set(cx, cy, cz);
+      ch.rotation.y = cRot;
+      group.add(ch);
+    }
+
+    this.scene.add(group);
+  }
+
+  buildPottedPlant(x, z, scale = 1) {
+    const group = new THREE.Group();
+    group.position.set(x, -2.35, z);
+    group.scale.setScalar(scale);
+
+    const pot = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.68, 0.46, 1.15, 16),
+      new THREE.MeshStandardMaterial({ color: '#7D3B22', roughness: 0.78 })
+    );
+    pot.position.y = 0.58;
+    group.add(pot);
+
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.12, 1.9, 8),
+      new THREE.MeshStandardMaterial({ color: '#4A3122', roughness: 0.9 })
+    );
+    trunk.position.y = 1.65;
+    group.add(trunk);
+
+    const leafMat = new THREE.MeshStandardMaterial({ color: '#295732', roughness: 0.72 });
+    const leafClusters = [
+      [0, 2.75, 0, 0.65],
+      [-0.45, 2.35, 0.3, 0.5],
+      [0.48, 2.42, -0.25, 0.52],
+      [0.18, 2.55, 0.46, 0.48],
+      [-0.25, 2.48, -0.45, 0.46]
+    ];
+    for (const [lx, ly, lz, lr] of leafClusters) {
+      const crown = new THREE.Mesh(new THREE.DodecahedronGeometry(lr, 1), leafMat);
+      crown.position.set(lx, ly, lz);
+      group.add(crown);
+    }
+
+    this.scene.add(group);
+  }
+
   buildEnvironment() {
-    const hemi = new THREE.HemisphereLight('#FFEBD2', '#261A12', 0.92);
+    const hemi = new THREE.HemisphereLight('#FFEBD2', '#2B1C13', 1.02);
     this.scene.add(hemi);
 
-    // Warm kahvehane overhead key light
-    const pendantLight = new THREE.PointLight('#FFCF86', 54, 42, 1.35);
+    // Warm kahvehane overhead key light + ambient fill
+    const pendantLight = new THREE.PointLight('#FFD18C', 58, 52, 1.3);
     pendantLight.position.set(0, 9.6, 0.5);
     this.scene.add(pendantLight);
 
-    const keyLight = new THREE.DirectionalLight('#FFF0D4', 1.3);
+    const keyLight = new THREE.DirectionalLight('#FFF0D4', 1.25);
     keyLight.position.set(6, 16, 9);
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.set(2048, 2048);
     keyLight.shadow.camera.near = 2;
-    keyLight.shadow.camera.far = 42;
-    const d = 14;
+    keyLight.shadow.camera.far = 44;
+    const d = 15;
     keyLight.shadow.camera.left = -d;
     keyLight.shadow.camera.right = d;
     keyLight.shadow.camera.top = d;
@@ -307,32 +518,44 @@ export class OkeyTable3D {
     keyLight.shadow.bias = -0.0004;
     this.scene.add(keyLight);
 
-    const rimLight = new THREE.DirectionalLight('#CBD8FF', 0.36);
-    rimLight.position.set(-9, 9, -10);
+    const rimLight = new THREE.DirectionalLight('#CBD8FF', 0.34);
+    rimLight.position.set(-10, 9, -12);
     this.scene.add(rimLight);
 
-    // Dark oak café floor + Turkish kilim rug under table
+    // Herringbone/plank walnut parquet floor + ornate central rug
     const floorMat = new THREE.MeshStandardMaterial({
-      map: getWoodTexture(),
-      color: '#4F3424',
-      roughness: 0.85
+      map: getParquetTexture(),
+      roughness: 0.72
     });
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(54, 54), floorMat);
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(58, 58), floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -2.35;
     floor.receiveShadow = true;
     this.scene.add(floor);
 
-    const rugMat = new THREE.MeshStandardMaterial({
-      color: '#5C221C',
-      roughness: 0.95
-    });
-    const rug = new THREE.Mesh(new THREE.BoxGeometry(24, 0.04, 24), rugMat);
-    rug.position.y = -2.32;
-    rug.receiveShadow = true;
-    this.scene.add(rug);
+    const rugOuter = new THREE.Mesh(
+      new THREE.BoxGeometry(21.5, 0.04, 21.5),
+      new THREE.MeshStandardMaterial({ color: '#612119', roughness: 0.94 })
+    );
+    rugOuter.position.y = -2.33;
+    rugOuter.receiveShadow = true;
+    this.scene.add(rugOuter);
 
-    // Pedestal table leg under center
+    const rugBorder = new THREE.Mesh(
+      new THREE.BoxGeometry(18.8, 0.045, 18.8),
+      new THREE.MeshStandardMaterial({ color: '#8F642B', roughness: 0.9 })
+    );
+    rugBorder.position.y = -2.326;
+    this.scene.add(rugBorder);
+
+    const rugInner = new THREE.Mesh(
+      new THREE.BoxGeometry(17.6, 0.05, 17.6),
+      new THREE.MeshStandardMaterial({ color: '#4E1A15', roughness: 0.95 })
+    );
+    rugInner.position.y = -2.322;
+    this.scene.add(rugInner);
+
+    // Pedestal table leg under main center okey table
     const legMat = new THREE.MeshStandardMaterial({
       map: getWoodTexture(),
       color: '#633D26',
@@ -342,27 +565,29 @@ export class OkeyTable3D {
     pedestal.position.y = -1.35;
     this.scene.add(pedestal);
 
-    // 3D Kahvehane Interior Room (Walls, Wainscoting, Windows, Ceiling Beams, Samovar Bar)
+    // 3D Kahvehane Interior Room (Warm Plaster, Walnut Wainscoting, Windows, Pilasters)
     const wallPlasterMat = new THREE.MeshStandardMaterial({
-      color: '#322017',
-      roughness: 0.92
+      color: '#3B251A',
+      roughness: 0.9
     });
     const wainscotMat = new THREE.MeshStandardMaterial({
       map: getWoodTexture(),
-      color: '#53321F',
-      roughness: 0.72
+      color: '#5C3722',
+      roughness: 0.68
     });
     const trimBrassMat = new THREE.MeshStandardMaterial({
-      color: '#B58B3B',
-      roughness: 0.36,
-      metalness: 0.65
+      color: '#C79B42',
+      roughness: 0.34,
+      metalness: 0.68
     });
-    const paintingMat = new THREE.MeshStandardMaterial({
-      map: getKahveBackdropTexture(),
-      roughness: 0.65
-    });
+    const artMat0 = new THREE.MeshStandardMaterial({ map: getWallArtTexture(0), roughness: 0.6 });
+    const artMat1 = new THREE.MeshStandardMaterial({ map: getWallArtTexture(1), roughness: 0.72 });
+    const menuMat = new THREE.MeshStandardMaterial({ map: getMenuBoardTexture(), roughness: 0.75 });
+    const clockMat = new THREE.MeshBasicMaterial({ map: getWallClockTexture() });
+    const windowMat = new THREE.MeshBasicMaterial({ map: getWindowNightTexture() });
+    const photoMat = new THREE.MeshStandardMaterial({ map: getKahveBackdropTexture(), roughness: 0.65 });
 
-    const roomHalf = 22.5;
+    const roomHalf = 25.5;
     const wallSpecs = [
       { pos: [0, 5.4, -roomHalf], rotY: 0 },
       { pos: [0, 5.4, roomHalf], rotY: Math.PI },
@@ -375,183 +600,201 @@ export class OkeyTable3D {
       wallGroup.position.set(...ws.pos);
       wallGroup.rotation.y = ws.rotY;
 
-      const upper = new THREE.Mesh(new THREE.PlaneGeometry(45, 16), wallPlasterMat);
+      const upper = new THREE.Mesh(new THREE.PlaneGeometry(52, 16), wallPlasterMat);
       wallGroup.add(upper);
 
-      const lowerWood = new THREE.Mesh(new THREE.BoxGeometry(45, 5.2, 0.28), wainscotMat);
-      lowerWood.position.set(0, -5.2, 0.14);
+      const lowerWood = new THREE.Mesh(new THREE.BoxGeometry(52, 5.4, 0.28), wainscotMat);
+      lowerWood.position.set(0, -5.1, 0.14);
       wallGroup.add(lowerWood);
 
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(45, 0.24, 0.42), trimBrassMat);
-      rail.position.set(0, -2.55, 0.2);
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(52, 0.26, 0.42), trimBrassMat);
+      rail.position.set(0, -2.35, 0.2);
       wallGroup.add(rail);
 
-      // Framed paintings & warm sconces on each wall
-      [-11.5, 0, 11.5].forEach((px, pIdx) => {
-        if (wallIdx === 0 && px === 0) return; // Keep center back wall open for Ocakbaşı counter
-        const frame = new THREE.Mesh(new THREE.BoxGeometry(4.8, 3.2, 0.18), wainscotMat);
-        frame.position.set(px, 0.8, 0.12);
+      // Vertical wooden pilasters dividing the wall bays
+      for (const px of [-20, -10, 10, 20]) {
+        const pilaster = new THREE.Mesh(new THREE.BoxGeometry(0.65, 15.6, 0.38), wainscotMat);
+        pilaster.position.set(px, 0, 0.18);
+        wallGroup.add(pilaster);
+      }
+
+      // Artwork & Blackboard menu placement
+      [-15, 0, 15].forEach((px, pIdx) => {
+        if (wallIdx === 0 && px === 0) return; // Keep back center open for Ocakbaşı
+        if (wallIdx === 0 && px === 15) {
+          // Wall Menu Chalkboard next to Ocakbaşı!
+          const mFrame = new THREE.Mesh(new THREE.BoxGeometry(4.6, 5.6, 0.2), wainscotMat);
+          mFrame.position.set(px, 1.45, 0.12);
+          wallGroup.add(mFrame);
+          const mFace = new THREE.Mesh(new THREE.PlaneGeometry(4.1, 5.1), menuMat);
+          mFace.position.set(px, 1.45, 0.25);
+          wallGroup.add(mFace);
+          return;
+        }
+        const frame = new THREE.Mesh(new THREE.BoxGeometry(5.2, 3.4, 0.18), wainscotMat);
+        frame.position.set(px, 1.35, 0.12);
         wallGroup.add(frame);
 
-        const art = new THREE.Mesh(
-          new THREE.PlaneGeometry(4.2, 2.65),
-          (wallIdx + pIdx) % 2 === 0
-            ? paintingMat
-            : new THREE.MeshStandardMaterial({
-                color: '#734224',
-                emissive: '#3D1E0C',
-                emissiveIntensity: 0.45,
-                roughness: 0.7
-              })
-        );
-        art.position.set(px, 0.8, 0.23);
+        const chosenMat = pIdx === 1 ? photoMat : (wallIdx + pIdx) % 2 === 0 ? artMat0 : artMat1;
+        const art = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 2.85), chosenMat);
+        art.position.set(px, 1.35, 0.24);
         wallGroup.add(art);
       });
 
-      // Warm wall sconces between frames
-      [-6.0, 6.0].forEach((sx) => {
+      // Warm wall brass sconces between bays
+      [-10, 10].forEach((sx) => {
         const sconce = new THREE.Mesh(
-          new THREE.SphereGeometry(0.28, 12, 10),
+          new THREE.SphereGeometry(0.32, 12, 10),
           new THREE.MeshStandardMaterial({
-            color: '#FFE099',
+            color: '#FFE4A3',
             emissive: '#FF9E3D',
-            emissiveIntensity: 1.4
+            emissiveIntensity: 1.55
           })
         );
-        sconce.position.set(sx, 1.3, 0.35);
+        sconce.position.set(sx, 2.2, 0.45);
         wallGroup.add(sconce);
       });
 
       this.scene.add(wallGroup);
     });
 
-    // Arched Evening Windows on East & West walls
+    // Classic Round Wall Clock on North back wall (left of Ocakbaşı)
+    const clockGroup = new THREE.Group();
+    clockGroup.position.set(-7.6, 7.6, -roomHalf + 0.24);
+    const clockCase = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.38, 1.48, 0.28, 32),
+      wainscotMat
+    );
+    clockCase.rotation.x = Math.PI / 2;
+    clockGroup.add(clockCase);
+    const clockFace = new THREE.Mesh(new THREE.CircleGeometry(1.18, 32), clockMat);
+    clockFace.position.z = 0.16;
+    clockGroup.add(clockFace);
+    this.scene.add(clockGroup);
+
+    // Rain-kissed Evening Windows on East & West walls with velvet drapes
     [-1, 1].forEach((side) => {
-      const winGroup = new THREE.Group();
-      winGroup.position.set(side * (roomHalf - 0.16), 1.4, -5.5);
-      winGroup.rotation.y = side === -1 ? Math.PI / 2 : -Math.PI / 2;
+      [-5.5, 5.5].forEach((wz) => {
+        const winGroup = new THREE.Group();
+        winGroup.position.set(side * (roomHalf - 0.18), 2.1, wz);
+        winGroup.rotation.y = side === -1 ? Math.PI / 2 : -Math.PI / 2;
 
-      const glowPane = new THREE.Mesh(
-        new THREE.PlaneGeometry(4.2, 5.4),
-        new THREE.MeshBasicMaterial({ color: '#4B3221' })
-      );
-      winGroup.add(glowPane);
+        const pane = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 5.6), windowMat);
+        winGroup.add(pane);
 
-      const frameOuter = new THREE.Mesh(new THREE.BoxGeometry(4.6, 5.8, 0.24), wainscotMat);
-      frameOuter.position.z = -0.14;
-      winGroup.add(frameOuter);
+        const frameOuter = new THREE.Mesh(new THREE.BoxGeometry(4.9, 6.1, 0.24), wainscotMat);
+        frameOuter.position.z = -0.14;
+        winGroup.add(frameOuter);
 
-      for (const mx of [-0.7, 0.7]) {
-        const bar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 5.4, 0.16), wainscotMat);
-        bar.position.set(mx, 0, 0.08);
-        winGroup.add(bar);
-      }
-      for (const my of [-0.9, 0.9]) {
-        const bar = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.12, 0.16), wainscotMat);
-        bar.position.set(0, my, 0.08);
-        winGroup.add(bar);
-      }
-      this.scene.add(winGroup);
+        for (const mx of [-0.75, 0.75]) {
+          const bar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 5.6, 0.16), wainscotMat);
+          bar.position.set(mx, 0, 0.08);
+          winGroup.add(bar);
+        }
+        for (const my of [-0.95, 0.95]) {
+          const bar = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.12, 0.16), wainscotMat);
+          bar.position.set(0, my, 0.08);
+          winGroup.add(bar);
+        }
+
+        // Burgundy velvet curtains flanking each window
+        const curtainMat = new THREE.MeshStandardMaterial({ color: '#53191B', roughness: 0.88 });
+        for (const cx of [-2.45, 2.45]) {
+          const drape = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.4, 6.4, 12), curtainMat);
+          drape.position.set(cx, 0, 0.16);
+          winGroup.add(drape);
+        }
+
+        this.scene.add(winGroup);
+      });
     });
 
     // Ceiling & Exposed Timber Beams
     const ceiling = new THREE.Mesh(
-      new THREE.PlaneGeometry(46, 46),
-      new THREE.MeshStandardMaterial({ color: '#1E130D', roughness: 0.95 })
+      new THREE.PlaneGeometry(54, 54),
+      new THREE.MeshStandardMaterial({ color: '#1F130D', roughness: 0.95 })
     );
     ceiling.rotation.x = Math.PI / 2;
     ceiling.position.y = 13.4;
     this.scene.add(ceiling);
 
-    [-14, -7, 0, 7, 14].forEach((bz) => {
-      const beam = new THREE.Mesh(new THREE.BoxGeometry(45, 0.55, 0.7), wainscotMat);
+    [-18, -9, 0, 9, 18].forEach((bz) => {
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(52, 0.58, 0.72), wainscotMat);
       beam.position.set(0, 13.1, bz);
       this.scene.add(beam);
     });
 
-    // Kahvehane Ocakbaşı (Tea Counter + Brass Samovar) against back wall
+    // Kahvehane Ocakbaşı (Tea Counter + Copper/Brass Çay Kazanı & Demlik + Tea Glass Shelves)
     const barGroup = new THREE.Group();
-    barGroup.position.set(0, -2.35, -19.8);
-    const counter = new THREE.Mesh(new THREE.BoxGeometry(10.5, 2.7, 2.2), wainscotMat);
-    counter.position.y = 1.35;
+    barGroup.position.set(0, -2.35, -22.6);
+    const counter = new THREE.Mesh(new THREE.BoxGeometry(12.2, 2.75, 2.4), wainscotMat);
+    counter.position.y = 1.38;
     barGroup.add(counter);
 
     const counterTop = new THREE.Mesh(
-      new THREE.BoxGeometry(10.8, 0.18, 2.45),
-      new THREE.MeshStandardMaterial({ color: '#8A5630', roughness: 0.38 })
+      new THREE.BoxGeometry(12.6, 0.2, 2.65),
+      new THREE.MeshStandardMaterial({ color: '#945F37', roughness: 0.35 })
     );
-    counterTop.position.y = 2.78;
+    counterTop.position.y = 2.84;
     barGroup.add(counterTop);
 
-    // Brass Samovar (Semaver)
-    const samovarBody = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.45, 0.58, 1.35, 18),
-      trimBrassMat
-    );
-    samovarBody.position.set(-2.2, 3.55, 0);
-    barGroup.add(samovarBody);
+    // Ornate Copper & Brass Çay Kazanı (Tea Boiler)
+    const copperMat = new THREE.MeshStandardMaterial({
+      color: '#B86535',
+      roughness: 0.26,
+      metalness: 0.78
+    });
+    const kazanBody = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.7, 1.35), copperMat);
+    kazanBody.position.set(-2.4, 3.78, 0);
+    barGroup.add(kazanBody);
 
-    const samovarDome = new THREE.Mesh(
-      new THREE.SphereGeometry(0.42, 16, 12),
-      trimBrassMat
-    );
-    samovarDome.position.set(-2.2, 4.25, 0);
-    barGroup.add(samovarDome);
+    const kazanRim = new THREE.Mesh(new THREE.BoxGeometry(2.74, 0.14, 1.46), trimBrassMat);
+    kazanRim.position.set(-2.4, 4.65, 0);
+    barGroup.add(kazanRim);
 
-    const backShelf = new THREE.Mesh(new THREE.BoxGeometry(8.8, 0.18, 0.9), wainscotMat);
-    backShelf.position.set(0, 5.2, -1.5);
-    barGroup.add(backShelf);
+    const demlik = new THREE.Mesh(new THREE.SphereGeometry(0.46, 18, 14), trimBrassMat);
+    demlik.scale.set(1.05, 0.88, 1.05);
+    demlik.position.set(-2.4, 5.1, 0);
+    barGroup.add(demlik);
 
-    const barLight = new THREE.PointLight('#FFB75E', 18, 16, 1.4);
-    barLight.position.set(0, 5.6, 0.5);
+    // Back shelves stocked with tea & coffee cups
+    for (const sy of [4.8, 6.3]) {
+      const shelf = new THREE.Mesh(new THREE.BoxGeometry(9.6, 0.16, 0.95), wainscotMat);
+      shelf.position.set(1.0, sy, -1.7);
+      barGroup.add(shelf);
+    }
+    for (let i = 0; i < 8; i += 1) {
+      const glass = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.14, 0.11, 0.34, 12),
+        new THREE.MeshStandardMaterial({ color: '#DCE8EB', transparent: true, opacity: 0.6, roughness: 0.1 })
+      );
+      glass.position.set(-1.6 + i * 0.72, 5.05, -1.7);
+      barGroup.add(glass);
+    }
+
+    const barLight = new THREE.PointLight('#FFB75E', 24, 22, 1.3);
+    barLight.position.set(0, 6.2, 0.6);
     barGroup.add(barLight);
     this.scene.add(barGroup);
 
-    // 5 Hanging Turkish Brass Mosaic Pendant Lamps (positioned high above player heads!)
+    // 4 Cozy Ambient Side Kahvehane Tables around the room (some with racks, some with tavla)
+    this.buildSideKahveTable(-16.2, -15.2, 0.18, false);
+    this.buildSideKahveTable(16.2, -15.2, -0.22, true);
+    this.buildSideKahveTable(-17.4, 10.2, -0.15, true);
+    this.buildSideKahveTable(17.4, 10.2, 0.2, false);
+
+    // Potted Kahvehane Ficus Plants in Room Corners
+    this.buildPottedPlant(-23.2, -23.2, 1.15);
+    this.buildPottedPlant(23.2, -23.2, 1.1);
+    this.buildPottedPlant(-23.2, 22.8, 1.05);
+    this.buildPottedPlant(23.2, 22.8, 1.1);
+
+    // Hanging Brass Mosaic Pendant Lamps over center & corner tables
     this.buildPendantLamp(0, 10.4, 0, 1.25, false);
-    this.buildPendantLamp(-9.5, 8.6, -9.5, 1.0, true);
-    this.buildPendantLamp(9.5, 8.6, -9.5, 1.0, true);
-    this.buildPendantLamp(-9.5, 8.6, 9.5, 1.0, false);
-    this.buildPendantLamp(9.5, 8.6, 9.5, 1.0, false);
-  }
-
-  buildTeaGlass(x, z) {
-    const glassGroup = new THREE.Group();
-    glassGroup.position.set(x, 0.03, z);
-
-    const saucer = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.42, 0.32, 0.04, 24),
-      new THREE.MeshStandardMaterial({ color: '#F3EFE6', roughness: 0.2 })
-    );
-    saucer.position.y = 0.02;
-    glassGroup.add(saucer);
-
-    const tea = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.18, 0.14, 0.36, 20),
-      new THREE.MeshStandardMaterial({
-        color: '#8E250B',
-        roughness: 0.12,
-        transparent: true,
-        opacity: 0.92
-      })
-    );
-    tea.position.y = 0.24;
-    glassGroup.add(tea);
-
-    const rim = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.21, 0.19, 0.14, 20, 1, true),
-      new THREE.MeshStandardMaterial({
-        color: '#FFFDF8',
-        roughness: 0.08,
-        transparent: true,
-        opacity: 0.45,
-        side: THREE.DoubleSide
-      })
-    );
-    rim.position.y = 0.44;
-    glassGroup.add(rim);
-
-    this.scene.add(glassGroup);
+    this.buildPendantLamp(-16.2, 7.2, -15.2, 1.05, true);
+    this.buildPendantLamp(16.2, 7.2, -15.2, 1.05, true);
+    this.buildPendantLamp(-17.4, 7.2, 10.2, 1.0, false);
+    this.buildPendantLamp(17.4, 7.2, 10.2, 1.0, false);
   }
 
   buildTable() {
@@ -598,11 +841,7 @@ export class OkeyTable3D {
       this.scene.add(cap);
     }
 
-    // Two ince belli Turkish tea glasses on far table rim corners
-    this.buildTeaGlass(-7.95, -7.65);
-    this.buildTeaGlass(7.95, -7.65);
-
-    // Tilted drag plane over rack + flat table drag plane
+    // Flat table drag plane
     this.tableDragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.95);
 
     // Four discard pad coordinates: each seat discards to their RIGHT,
@@ -696,6 +935,14 @@ export class OkeyTable3D {
 
       this.scene.add(group);
     }
+
+    if (this.southRackGroup) {
+      this.southRackGroup.updateMatrixWorld(true);
+      const p0 = new THREE.Vector3(0, 1.1, 0.28).applyMatrix4(this.southRackGroup.matrixWorld);
+      const p1 = new THREE.Vector3(1, 1.1, 0.28).applyMatrix4(this.southRackGroup.matrixWorld);
+      const p2 = new THREE.Vector3(0, 2.1, 0.28).applyMatrix4(this.southRackGroup.matrixWorld);
+      this.rackDragPlane = new THREE.Plane().setFromCoplanarPoints(p0, p1, p2);
+    }
   }
 
   buildSouthSlotMarkers(rackTilt) {
@@ -748,14 +995,137 @@ export class OkeyTable3D {
     return mesh;
   }
 
+  buildPlayerCharacterModel({ vestColor, shirtColor, skinTone, teamColor, isActive }) {
+    const char = new THREE.Group();
+
+    const chairWoodMat = new THREE.MeshStandardMaterial({
+      map: getWoodTexture(),
+      color: '#6E4226',
+      roughness: 0.58
+    });
+    const leatherMat = new THREE.MeshStandardMaterial({
+      color: '#261710',
+      roughness: 0.66
+    });
+    const chair = this.buildWoodenChair(chairWoodMat, leatherMat);
+    chair.scale.set(1.06, 1.06, 1.06);
+    chair.position.set(0, 0.14, -0.35);
+    char.add(chair);
+
+    const vestMat = new THREE.MeshStandardMaterial({ color: vestColor, roughness: 0.72 });
+    const shirtMat = new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.65 });
+    const pantsMat = new THREE.MeshStandardMaterial({ color: '#1F242D', roughness: 0.85 });
+    const skinMat = new THREE.MeshStandardMaterial({ color: skinTone, roughness: 0.62 });
+
+    // Seated lower body & knees resting under table edge
+    const pelvis = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.36, 0.74), pantsMat);
+    pelvis.position.set(0, -0.22, -0.18);
+    char.add(pelvis);
+
+    for (const sx of [-0.3, 0.3]) {
+      const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.17, 0.78, 12), pantsMat);
+      thigh.rotation.x = Math.PI / 2 - 0.1;
+      thigh.position.set(sx, -0.26, 0.24);
+      char.add(thigh);
+    }
+
+    // Tailored vest torso
+    const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.68, 0.62, 1.56, 24), vestMat);
+    torso.scale.set(1.12, 1.0, 0.64);
+    torso.position.set(0, 0.68, -0.12);
+    torso.castShadow = true;
+    char.add(torso);
+
+    // Crisp collared shirt V-neck inset
+    const shirtFront = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.18, 0.92, 16), shirtMat);
+    shirtFront.scale.set(1.0, 1.0, 0.42);
+    shirtFront.position.set(0, 0.98, 0.21);
+    char.add(shirtFront);
+
+    // Subtle brass buttons on vest
+    const buttonMat = new THREE.MeshStandardMaterial({ color: '#D4A84B', roughness: 0.3, metalness: 0.75 });
+    for (const by of [0.3, 0.54, 0.78]) {
+      const btn = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 8), buttonMat);
+      btn.position.set(0, by, 0.31);
+      char.add(btn);
+    }
+
+    // Broad sculpted shoulders + rounded shoulder caps
+    const shoulders = new THREE.Mesh(new THREE.SphereGeometry(0.78, 24, 16), vestMat);
+    shoulders.scale.set(1.38, 0.56, 0.62);
+    shoulders.position.set(0, 1.38, -0.1);
+    shoulders.castShadow = true;
+    char.add(shoulders);
+
+    // Upper arms, bent forearms & hands reaching toward the rack edge
+    for (const side of [-1, 1]) {
+      const armGroup = new THREE.Group();
+      armGroup.position.set(side * 0.88, 1.32, -0.05);
+
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(0.22, 14, 12), vestMat);
+      armGroup.add(cap);
+
+      const upperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.15, 0.85, 14), shirtMat);
+      upperArm.position.set(side * 0.08, -0.36, 0.16);
+      upperArm.rotation.x = 0.44;
+      upperArm.rotation.z = side * 0.14;
+      upperArm.castShadow = true;
+      armGroup.add(upperArm);
+
+      const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 10), shirtMat);
+      elbow.position.set(side * 0.14, -0.72, 0.34);
+      armGroup.add(elbow);
+
+      const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.11, 0.78, 14), shirtMat);
+      forearm.position.set(side * 0.04, -0.78, 0.72);
+      forearm.rotation.x = Math.PI / 2 - 0.18;
+      forearm.rotation.z = -side * 0.22;
+      forearm.castShadow = true;
+      armGroup.add(forearm);
+
+      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.125, 12, 10), skinMat);
+      hand.scale.set(0.95, 0.7, 1.2);
+      hand.position.set(-side * 0.06, -0.84, 1.08);
+      armGroup.add(hand);
+
+      char.add(armGroup);
+    }
+
+    // Neck + dark collar trim
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.3, 0.42, 20), skinMat);
+    neck.position.set(0, 1.72, -0.06);
+    char.add(neck);
+
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.29, 0.065, 10, 20), shirtMat);
+    collar.rotation.x = Math.PI / 2 + 0.12;
+    collar.position.set(0, 1.56, -0.05);
+    char.add(collar);
+
+    // Team/Turn base badge disc at chest
+    if (isActive) {
+      const chestGlow = new THREE.Mesh(
+        new THREE.RingGeometry(0.84, 0.96, 28),
+        new THREE.MeshBasicMaterial({ color: teamColor, transparent: true, opacity: 0.4, side: THREE.DoubleSide })
+      );
+      chestGlow.rotation.x = -Math.PI / 2;
+      chestGlow.position.set(0, -0.34, 0.12);
+      char.add(chestGlow);
+    }
+
+    return char;
+  }
+
   renderPlayerHeads(state, viewerIdx) {
     const teamMode = state.options?.teamMode || 'solo';
+    // Omit rel === 0 so own PFP is hidden on viewer's screen; enlarge opponent PFPs!
     const seatPositions = [
-      { rel: 0, pos: [-5.95, 0.0, 8.15], headY: 1.05, medRadius: 0.48, compact: true },
-      { rel: 1, pos: [8.9, 0.0, 0], headY: 2.55, medRadius: 0.68, compact: false },
-      { rel: 2, pos: [0, 0.0, -8.9], headY: 2.75, medRadius: 0.72, compact: false },
-      { rel: 3, pos: [-8.9, 0.0, 0], headY: 2.55, medRadius: 0.68, compact: false }
+      { rel: 1, pos: [9.05, 0.0, 0], headY: 2.95, medRadius: 0.98 },
+      { rel: 2, pos: [0, 0.0, -9.05], headY: 3.15, medRadius: 1.06 },
+      { rel: 3, pos: [-9.05, 0.0, 0], headY: 2.95, medRadius: 0.98 }
     ];
+
+    const vestPalette = ['#6A4D1F', '#1F4B6A', '#4A2B26', '#2B4A38'];
+    const skinPalette = ['#E0B28F', '#D8A680', '#E6BC9B', '#CFA07A'];
 
     for (const cfg of seatPositions) {
       const seatIdx = (viewerIdx + cfg.rel) % 4;
@@ -767,105 +1137,92 @@ export class OkeyTable3D {
         ? seat.teamIndex === 0
           ? '#F4C44E'
           : '#56B4E9'
-        : '#B58D54';
+        : '#C59A4B';
 
       const holder = new THREE.Group();
       holder.position.set(...cfg.pos);
-      // Orient player seat & shoulders toward table center (local +Z -> table center)
       holder.lookAt(0, 0, 0);
 
-      const torsoColor = teamMode === 'paired'
-        ? (seat.teamIndex === 0 ? '#6A4D1F' : '#1F4B6A')
-        : '#3A2D26';
-      const torsoMat = new THREE.MeshStandardMaterial({
-        color: torsoColor,
-        roughness: 0.75
+      const vestColor = teamMode === 'paired'
+        ? (seat.teamIndex === 0 ? '#72501B' : '#1E4C6C')
+        : vestPalette[seatIdx % vestPalette.length];
+
+      const character = this.buildPlayerCharacterModel({
+        vestColor,
+        shirtColor: '#EDE7DC',
+        skinTone: skinPalette[seatIdx % skinPalette.length],
+        teamColor,
+        isActive
       });
-
-      if (!cfg.compact) {
-        // Wooden kahvehane chair back behind the seated player
-        const chairWood = new THREE.MeshStandardMaterial({
-          map: getWoodTexture(),
-          color: '#6C4227',
-          roughness: 0.62
-        });
-        const chairBack = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.95, 0.14), chairWood);
-        chairBack.position.set(0, 1.0, -0.66);
-        chairBack.castShadow = true;
-        holder.add(chairBack);
-
-        // Seated lower torso + curved shoulders bust right below circular PFP
-        const torso = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.62, 0.78, 1.35, 24),
-          torsoMat
-        );
-        torso.position.y = 0.85;
-        holder.add(torso);
-
-        const shoulders = new THREE.Mesh(
-          new THREE.SphereGeometry(0.76, 24, 16),
-          torsoMat
-        );
-        shoulders.scale.set(1.45, 0.68, 0.65);
-        shoulders.position.set(0, cfg.headY - cfg.medRadius - 0.36, 0);
-        holder.add(shoulders);
-
-        const neck = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.22, 0.28, 0.36, 20),
-          torsoMat
-        );
-        neck.position.set(0, cfg.headY - cfg.medRadius - 0.08, 0);
-        holder.add(neck);
-      } else {
-        // Compact South-West player shoulder silhouette right under circular PFP
-        const shoulders = new THREE.Mesh(
-          new THREE.SphereGeometry(0.45, 20, 12),
-          torsoMat
-        );
-        shoulders.scale.set(1.38, 0.62, 0.62);
-        shoulders.position.set(0, cfg.headY - cfg.medRadius - 0.18, 0);
-        holder.add(shoulders);
-      }
+      holder.add(character);
 
       this.dynamicGroup.add(holder);
       holder.updateMatrixWorld(true);
 
-      // Framed Circular PFP Medallion oriented strictly toward the center of the table
+      // Large Framed PFP Medallion strictly facing the center of the table;
+      // Back side has solid walnut/brass cap so PFP NEVER shows from rear!
       const headY = cfg.headY;
       const medRadius = cfg.medRadius;
       const headGroup = new THREE.Group();
-      headGroup.position.set(0, headY, 0);
+      headGroup.position.set(0, headY, -0.04);
       holder.add(headGroup);
       headGroup.updateMatrixWorld(true);
       headGroup.lookAt(0, headY, 0);
 
       const ringMat = new THREE.MeshStandardMaterial({
         color: isActive ? '#F4C44E' : teamColor,
-        emissive: isActive ? '#8C6812' : '#000000',
-        roughness: 0.32,
-        metalness: 0.65
+        emissive: isActive ? '#9A6F14' : '#000000',
+        roughness: 0.28,
+        metalness: 0.72
       });
 
       const bezel = new THREE.Mesh(
-        new THREE.CylinderGeometry(medRadius + 0.075, medRadius + 0.075, 0.16, 36),
+        new THREE.CylinderGeometry(medRadius + 0.09, medRadius + 0.09, 0.22, 40),
         ringMat
       );
       bezel.rotation.x = Math.PI / 2;
+      bezel.castShadow = true;
       headGroup.add(bezel);
 
+      // Front table-facing portrait disc ONLY
       const avatarMat = new THREE.MeshBasicMaterial({
         map: getAvatarTexture(seat.avatar)
       });
-      const frontDisc = new THREE.Mesh(new THREE.CircleGeometry(medRadius, 36), avatarMat);
-      frontDisc.position.z = 0.086;
+      const frontDisc = new THREE.Mesh(new THREE.CircleGeometry(medRadius, 40), avatarMat);
+      frontDisc.position.z = 0.115;
       headGroup.add(frontDisc);
 
-      const backDisc = new THREE.Mesh(new THREE.CircleGeometry(medRadius, 36), avatarMat);
-      backDisc.rotation.y = Math.PI;
-      backDisc.position.z = -0.086;
-      headGroup.add(backDisc);
+      // Solid opaque dark walnut & hair cap on rear (-Z) side so PFP is hidden behind player
+      const rearCapMat = new THREE.MeshStandardMaterial({
+        map: getWoodTexture(),
+        color: '#2B1B13',
+        roughness: 0.58,
+        metalness: 0.12
+      });
+      const rearDisc = new THREE.Mesh(new THREE.CircleGeometry(medRadius + 0.01, 36), rearCapMat);
+      rearDisc.rotation.y = Math.PI;
+      rearDisc.position.z = -0.114;
+      headGroup.add(rearDisc);
 
-      // Nameplate directly above head (ONLY player name, NO tile count!)
+      const backHeadDome = new THREE.Mesh(
+        new THREE.SphereGeometry(medRadius * 0.92, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.55),
+        new THREE.MeshStandardMaterial({ color: '#1F1612', roughness: 0.8 })
+      );
+      backHeadDome.rotation.x = -Math.PI / 2;
+      backHeadDome.scale.set(1.0, 1.0, 0.55);
+      backHeadDome.position.z = -0.06;
+      headGroup.add(backHeadDome);
+
+      if (isActive) {
+        const halo = new THREE.Mesh(
+          new THREE.RingGeometry(medRadius + 0.13, medRadius + 0.21, 40),
+          new THREE.MeshBasicMaterial({ color: '#FFE082', transparent: true, opacity: 0.85, side: THREE.DoubleSide })
+        );
+        halo.position.z = 0.04;
+        headGroup.add(halo);
+      }
+
+      // Nameplate directly above enlarged head (ONLY player name, NO tile count!)
       const spriteMat = new THREE.SpriteMaterial({
         map: createNameplateTexture(seat.name, {
           isActive,
@@ -877,10 +1234,287 @@ export class OkeyTable3D {
         depthTest: false
       });
       const nameplate = new THREE.Sprite(spriteMat);
-      nameplate.position.set(0, headY + medRadius + (cfg.compact ? 0.44 : 0.56), 0);
-      nameplate.scale.set(cfg.compact ? 2.15 : 2.75, cfg.compact ? 0.54 : 0.68, 1);
+      nameplate.position.set(0, headY + medRadius + 0.62, 0);
+      nameplate.scale.set(3.25, 0.8, 1);
       nameplate.renderOrder = 20;
       holder.add(nameplate);
+    }
+  }
+
+  setRoomOrders(orders, viewerIdx = 0) {
+    this.currentOrders = orders || null;
+    this.currentViewerIdx = Number.isFinite(viewerIdx) ? viewerIdx : 0;
+    this.renderTableOrders();
+  }
+
+  addSteamEffect(parentGroup, baseY = 0.48) {
+    const puffMat = new THREE.MeshBasicMaterial({
+      color: '#FFF8EC',
+      transparent: true,
+      opacity: 0.32,
+      depthWrite: false
+    });
+    for (let i = 0; i < 3; i += 1) {
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), puffMat.clone());
+      puff.position.set((i - 1) * 0.04, baseY + i * 0.16, 0);
+      parentGroup.add(puff);
+      this.steamParticles.push({
+        mesh: puff,
+        baseX: puff.position.x,
+        baseY,
+        phase: i * 0.33
+      });
+    }
+  }
+
+  buildOrderMesh(itemId) {
+    const g = new THREE.Group();
+    const porcelainMat = new THREE.MeshStandardMaterial({ color: '#F6F2EA', roughness: 0.18 });
+    const brassMat = new THREE.MeshStandardMaterial({ color: '#C79B42', roughness: 0.28, metalness: 0.78 });
+    const silverMat = new THREE.MeshStandardMaterial({ color: '#D4DCE2', roughness: 0.22, metalness: 0.85 });
+
+    if (itemId === 'cay' || itemId === 'oralet') {
+      const saucer = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.28, 0.04, 24), porcelainMat);
+      saucer.position.y = 0.02;
+      g.add(saucer);
+
+      const saucerAccent = new THREE.Mesh(
+        new THREE.RingGeometry(0.28, 0.35, 24),
+        new THREE.MeshBasicMaterial({ color: '#B32428', side: THREE.DoubleSide })
+      );
+      saucerAccent.rotation.x = -Math.PI / 2;
+      saucerAccent.position.y = 0.042;
+      g.add(saucerAccent);
+
+      // Ince belli lathe liquid + glass profile
+      const liquidColor = itemId === 'oralet' ? '#F27D16' : '#8F1E09';
+      const liquidPts = [
+        new THREE.Vector2(0.01, 0.05),
+        new THREE.Vector2(0.14, 0.05),
+        new THREE.Vector2(0.18, 0.16),
+        new THREE.Vector2(0.13, 0.28),
+        new THREE.Vector2(0.17, 0.38),
+        new THREE.Vector2(0.01, 0.38)
+      ];
+      const liquid = new THREE.Mesh(
+        new THREE.LatheGeometry(liquidPts, 20),
+        new THREE.MeshStandardMaterial({
+          color: liquidColor,
+          emissive: itemId === 'oralet' ? '#5A2400' : '#260500',
+          roughness: 0.12
+        })
+      );
+      g.add(liquid);
+
+      const glassPts = [
+        new THREE.Vector2(0.145, 0.045),
+        new THREE.Vector2(0.19, 0.16),
+        new THREE.Vector2(0.14, 0.28),
+        new THREE.Vector2(0.205, 0.45)
+      ];
+      const glass = new THREE.Mesh(
+        new THREE.LatheGeometry(glassPts, 20),
+        new THREE.MeshStandardMaterial({
+          color: '#FFFFFF',
+          transparent: true,
+          opacity: 0.38,
+          roughness: 0.08,
+          side: THREE.DoubleSide
+        })
+      );
+      g.add(glass);
+
+      const spoon = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.42, 0.015), silverMat);
+      spoon.position.set(0.09, 0.32, 0);
+      spoon.rotation.z = -0.26;
+      g.add(spoon);
+
+      const sugar = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, 0.08), porcelainMat);
+      sugar.position.set(-0.22, 0.07, 0.12);
+      g.add(sugar);
+
+      this.addSteamEffect(g, 0.5);
+    } else if (itemId === 'kahve') {
+      const saucer = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.3, 0.04, 24), brassMat);
+      saucer.position.y = 0.02;
+      g.add(saucer);
+
+      const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.14, 0.28, 20), porcelainMat);
+      cup.position.y = 0.18;
+      g.add(cup);
+
+      const foam = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.19, 0.19, 0.03, 18),
+        new THREE.MeshStandardMaterial({ color: '#4E2B17', roughness: 0.45 })
+      );
+      foam.position.y = 0.31;
+      g.add(foam);
+
+      const handle = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.024, 8, 16, Math.PI), porcelainMat);
+      handle.rotation.z = -Math.PI / 2;
+      handle.position.set(0.2, 0.19, 0);
+      g.add(handle);
+
+      const lokum = new THREE.Mesh(
+        new THREE.BoxGeometry(0.11, 0.09, 0.11),
+        new THREE.MeshStandardMaterial({ color: '#D85E7A', roughness: 0.5 })
+      );
+      lokum.position.set(-0.24, 0.085, 0.12);
+      g.add(lokum);
+
+      this.addSteamEffect(g, 0.38);
+    } else if (itemId === 'gazoz') {
+      const bottlePts = [
+        new THREE.Vector2(0.01, 0.0),
+        new THREE.Vector2(0.18, 0.0),
+        new THREE.Vector2(0.18, 0.42),
+        new THREE.Vector2(0.09, 0.62),
+        new THREE.Vector2(0.08, 0.78),
+        new THREE.Vector2(0.095, 0.81),
+        new THREE.Vector2(0.01, 0.81)
+      ];
+      const bottle = new THREE.Mesh(
+        new THREE.LatheGeometry(bottlePts, 20),
+        new THREE.MeshStandardMaterial({
+          color: '#88C8A8',
+          transparent: true,
+          opacity: 0.78,
+          roughness: 0.1
+        })
+      );
+      g.add(bottle);
+
+      const label = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.184, 0.184, 0.22, 20),
+        new THREE.MeshStandardMaterial({ color: '#E83D32', roughness: 0.45 })
+      );
+      label.position.y = 0.24;
+      g.add(label);
+
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.04, 16), brassMat);
+      cap.position.y = 0.83;
+      g.add(cap);
+    } else if (itemId === 'tost') {
+      const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.56, 0.42, 0.05, 24), porcelainMat);
+      plate.position.y = 0.025;
+      g.add(plate);
+
+      const breadMat = new THREE.MeshStandardMaterial({ color: '#C6843E', roughness: 0.75 });
+      const cheeseMat = new THREE.MeshStandardMaterial({ color: '#F5C43D', roughness: 0.45 });
+      for (const offset of [-0.14, 0.14]) {
+        const toast = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.14, 0.44), breadMat);
+        toast.position.set(offset, 0.13, offset * 0.4);
+        toast.rotation.y = offset * 1.4;
+        g.add(toast);
+
+        const cheese = new THREE.Mesh(new THREE.BoxGeometry(0.49, 0.04, 0.46), cheeseMat);
+        cheese.position.set(offset, 0.13, offset * 0.4);
+        cheese.rotation.y = offset * 1.4;
+        g.add(cheese);
+      }
+      this.addSteamEffect(g, 0.26);
+    } else if (itemId === 'simit') {
+      const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.56, 0.44, 0.04, 24), porcelainMat);
+      plate.position.y = 0.02;
+      g.add(plate);
+
+      const simit = new THREE.Mesh(
+        new THREE.TorusGeometry(0.28, 0.095, 12, 24),
+        new THREE.MeshStandardMaterial({ color: '#B8722B', roughness: 0.65 })
+      );
+      simit.rotation.x = Math.PI / 2;
+      simit.position.y = 0.13;
+      g.add(simit);
+
+      const cheese = new THREE.Mesh(
+        new THREE.BoxGeometry(0.2, 0.09, 0.16),
+        new THREE.MeshStandardMaterial({ color: '#FBF8F0', roughness: 0.4 })
+      );
+      cheese.position.set(0, 0.085, 0);
+      g.add(cheese);
+    } else if (itemId === 'baklava') {
+      const tray = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.42, 0.04, 8), brassMat);
+      tray.position.y = 0.02;
+      g.add(tray);
+
+      const phylloMat = new THREE.MeshStandardMaterial({ color: '#D49A3A', roughness: 0.42 });
+      const pistachioMat = new THREE.MeshStandardMaterial({ color: '#6AA33E', roughness: 0.7 });
+      for (const ox of [-0.14, 0.14]) {
+        const piece = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.13, 0.3), phylloMat);
+        piece.position.set(ox, 0.1, 0);
+        piece.rotation.y = 0.35;
+        g.add(piece);
+
+        const nut = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.03, 0.12), pistachioMat);
+        nut.position.set(ox, 0.175, 0);
+        g.add(nut);
+      }
+    } else {
+      // 'cerez' bowl
+      const bowlPts = [
+        new THREE.Vector2(0.01, 0.0),
+        new THREE.Vector2(0.24, 0.0),
+        new THREE.Vector2(0.42, 0.18),
+        new THREE.Vector2(0.44, 0.26),
+        new THREE.Vector2(0.39, 0.26),
+        new THREE.Vector2(0.22, 0.06),
+        new THREE.Vector2(0.01, 0.06)
+      ];
+      const bowl = new THREE.Mesh(
+        new THREE.LatheGeometry(bowlPts, 20),
+        new THREE.MeshStandardMaterial({ color: '#B86535', roughness: 0.3, metalness: 0.72 })
+      );
+      g.add(bowl);
+
+      const nutColors = ['#D2A663', '#8C5832', '#7BA049', '#E0B972'];
+      for (let i = 0; i < 14; i += 1) {
+        const ang = (i * 2.399) % (Math.PI * 2);
+        const rad = 0.08 + ((i * 19) % 100) / 420;
+        const nut = new THREE.Mesh(
+          new THREE.SphereGeometry(0.065, 8, 8),
+          new THREE.MeshStandardMaterial({ color: nutColors[i % nutColors.length], roughness: 0.65 })
+        );
+        nut.scale.set(1.2, 0.85, 0.95);
+        nut.position.set(Math.cos(ang) * rad, 0.14 + (i % 3) * 0.035, Math.sin(ang) * rad);
+        g.add(nut);
+      }
+    }
+
+    return g;
+  }
+
+  renderTableOrders() {
+    while (this.orderGroup.children.length > 0) {
+      const child = this.orderGroup.children.pop();
+      this.orderGroup.remove(child);
+    }
+    this.steamParticles = [];
+
+    if (!Array.isArray(this.currentOrders)) return;
+
+    const slotsByRel = [
+      { drink: [7.55, 0.01, 7.85], food: [6.4, 0.01, 8.1] },
+      { drink: [7.85, 0.01, -7.55], food: [8.1, 0.01, -6.4] },
+      { drink: [-7.55, 0.01, -7.85], food: [-6.4, 0.01, -8.1] },
+      { drink: [-7.85, 0.01, 7.55], food: [-8.1, 0.01, 6.4] }
+    ];
+
+    for (let rel = 0; rel < 4; rel += 1) {
+      const seatIdx = (this.currentViewerIdx + rel) % 4;
+      const seatOrders = this.currentOrders[seatIdx];
+      if (!seatOrders) continue;
+      const anchor = slotsByRel[rel];
+
+      if (seatOrders.drink?.itemId) {
+        const mesh = this.buildOrderMesh(seatOrders.drink.itemId);
+        mesh.position.set(...anchor.drink);
+        this.orderGroup.add(mesh);
+      }
+      if (seatOrders.food?.itemId) {
+        const mesh = this.buildOrderMesh(seatOrders.food.itemId);
+        mesh.position.set(...anchor.food);
+        this.orderGroup.add(mesh);
+      }
     }
   }
 
@@ -1092,6 +1726,11 @@ export class OkeyTable3D {
         this.selectedTileIds.delete(id);
       }
     }
+    for (const id of [...this.flippedTileIds]) {
+      if (!serverById.has(id)) {
+        this.flippedTileIds.delete(id);
+      }
+    }
   }
 
   arrangeHandOrder(orderedTiles) {
@@ -1136,6 +1775,11 @@ export class OkeyTable3D {
       ? this.captureTileSnapshot()
       : null;
 
+    if (!sameRound) {
+      this.flippedTileIds.clear();
+      this.lastTileTap = null;
+    }
+
     this.demoMode = false;
     this.currentState = state;
     this.clearDynamic();
@@ -1175,6 +1819,7 @@ export class OkeyTable3D {
       newHandIds.add(tile.id);
 
       const isSelected = this.selectedTileIds.has(tile.id);
+      const isFlipped = this.flippedTileIds.has(tile.id);
       const mustUse = state.pickedDiscardTileId === tile.id;
       const mesh = this.createTileMesh(tile, {
         faceUp: true,
@@ -1184,6 +1829,7 @@ export class OkeyTable3D {
       });
       const basePos = this.getLocalRackSlotPosition(slotIdx);
       mesh.position.set(basePos.x, basePos.y + (isSelected ? 0.14 : 0), basePos.z + (isSelected ? 0.05 : 0));
+      mesh.rotation.y = isFlipped ? Math.PI : 0;
       mesh.userData = {
         kind: 'handTile',
         tile,
@@ -1207,11 +1853,17 @@ export class OkeyTable3D {
         if (prev) {
           this.southRackGroup.updateMatrixWorld(true);
           const targetWorld = mesh.getWorldPosition(new THREE.Vector3());
+          const targetQuat = mesh.getWorldQuaternion(new THREE.Quaternion());
           const moveDist = prev.pos.distanceTo(targetWorld);
-          const isSelectLift = moveDist < 0.32;
+          const rotDiff = 1 - Math.abs(prev.quat.dot(targetQuat));
+          const wasDragged = Boolean(
+            this.lastDraggedTransform && this.lastDraggedTransform.tileId === tile.id
+          );
+          const isFlipAnim = rotDiff >= 0.05;
+          const isDropAnim = wasDragged || moveDist >= 0.32;
           this.enqueueAnimationFromWorld(mesh, prev.pos, prev.quat, prev.scale, {
-            duration: isSelectLift ? 0.14 : 0.34,
-            arcHeight: isSelectLift ? 0 : 0.24
+            duration: isFlipAnim ? 0.3 : isDropAnim ? 0.28 : 0.14,
+            arcHeight: isFlipAnim ? 0.26 : isDropAnim ? 0.18 : 0
           });
         } else {
           // Newly drawn or swapped into hand
@@ -1261,7 +1913,7 @@ export class OkeyTable3D {
       this.dynamicGroup.add(rackHolder);
     }
 
-    // 3. Render 3D Seated Player Heads & Nameplates above heads
+    // 3. Render 3D Seated Player Models, Enlarged Table-Facing PFPs & Nameplates
     this.renderPlayerHeads(state, viewerIdx);
 
     // 4. Render Center Draw Deck & Gösterge
@@ -1506,11 +2158,15 @@ export class OkeyTable3D {
     soundFX.playTilePickup();
     this.canvas.style.cursor = 'grabbing';
 
-    // Hide slot mesh and spawn a world-space floating 3D tile model to carry!
+    // Hide slot mesh and spawn floating 3D tile smoothly starting from exact slot transform
     drag.mesh.visible = false;
+    drag.mesh.updateMatrixWorld(true);
     const worldPos = new THREE.Vector3();
+    const worldQuat = new THREE.Quaternion();
     drag.mesh.getWorldPosition(worldPos);
+    drag.mesh.getWorldQuaternion(worldQuat);
 
+    const isFlipped = this.flippedTileIds.has(drag.tile.id);
     const floating = this.createTileMesh(drag.tile, {
       faceUp: true,
       okeyTarget: this.currentState?.okeyTarget,
@@ -1518,11 +2174,16 @@ export class OkeyTable3D {
       mustUse: this.currentState?.pickedDiscardTileId === drag.tile.id
     });
     floating.position.copy(worldPos);
-    floating.position.y += 0.28;
-    floating.rotation.x = -0.52;
-    floating.scale.setScalar(1.07);
+    floating.quaternion.copy(worldQuat);
     this.scene.add(floating);
     drag.floatingMesh = floating;
+
+    // Smooth targets interpolated inside animate(dt)
+    this.dragTargetPos = worldPos.clone().add(new THREE.Vector3(0, 0.18, 0.24));
+    this.dragTargetQuat = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(-0.36, isFlipped ? Math.PI : 0, 0, 'XYZ')
+    );
+    this.dragTargetScale = new THREE.Vector3(1.07, 1.07, 1.07);
   }
 
   bindEvents() {
@@ -1595,31 +2256,48 @@ export class OkeyTable3D {
           this.startPhysicalDrag(this.dragState);
         }
 
-        if (this.dragState.moved) {
+        if (this.dragState.moved && this.dragState.floatingMesh) {
           this.updatePointer(e.clientX, e.clientY);
           this.raycaster.setFromCamera(this.pointer, this.camera);
 
-          // Move the actual 3D tile model smoothly over rack & table
+          // Highlight hovered rack slot marker without snapping tile position to discrete center
           const slotHits = this.raycaster.intersectObjects(this.rackSlotMeshes, false);
           this.rackSlotMeshes.forEach((m) => {
             m.material.opacity = 0;
           });
+          if (slotHits.length > 0) {
+            slotHits[0].object.material.opacity = 0.45;
+          }
 
-          if (slotHits.length > 0 && this.dragState.floatingMesh) {
-            slotHits[0].object.material.opacity = 0.5;
-            const slotWorld = new THREE.Vector3();
-            slotHits[0].object.getWorldPosition(slotWorld);
-            this.dragState.floatingMesh.position.set(slotWorld.x, slotWorld.y + 0.22, slotWorld.z + 0.25);
-            this.dragState.floatingMesh.rotation.x = -0.32;
-          } else if (this.dragState.floatingMesh) {
+          const isFlipped = this.flippedTileIds.has(this.dragState.tile.id);
+          const rackPt = new THREE.Vector3();
+          const overRackPlane =
+            this.rackDragPlane &&
+            this.raycaster.ray.intersectPlane(this.rackDragPlane, rackPt) &&
+            (slotHits.length > 0 || (Math.abs(rackPt.x) <= 5.35 && rackPt.y >= 0.25 && rackPt.y <= 3.0));
+
+          if (overRackPlane) {
+            if (!this.dragTargetPos) this.dragTargetPos = new THREE.Vector3();
+            this.dragTargetPos.set(
+              THREE.MathUtils.clamp(rackPt.x, -5.2, 5.2),
+              THREE.MathUtils.clamp(rackPt.y, 0.45, 2.75),
+              rackPt.z + 0.08
+            );
+            this.dragTargetQuat = new THREE.Quaternion().setFromEuler(
+              new THREE.Euler(-0.36, isFlipped ? Math.PI : 0, 0, 'XYZ')
+            );
+          } else {
             const dragPt = new THREE.Vector3();
             if (this.raycaster.ray.intersectPlane(this.tableDragPlane, dragPt)) {
-              this.dragState.floatingMesh.position.set(
+              if (!this.dragTargetPos) this.dragTargetPos = new THREE.Vector3();
+              this.dragTargetPos.set(
                 THREE.MathUtils.clamp(dragPt.x, -8.2, 8.2),
                 Math.max(0.85, dragPt.y),
                 THREE.MathUtils.clamp(dragPt.z, -6.8, 8.2)
               );
-              this.dragState.floatingMesh.rotation.x = -0.82;
+              this.dragTargetQuat = new THREE.Quaternion().setFromEuler(
+                new THREE.Euler(-0.82, isFlipped ? Math.PI : 0, 0, 'XYZ')
+              );
             }
           }
         }
@@ -1642,6 +2320,9 @@ export class OkeyTable3D {
       if (!this.dragState) return;
       const drag = this.dragState;
       this.dragState = null;
+      this.dragTargetPos = null;
+      this.dragTargetQuat = null;
+      this.dragTargetScale = null;
       this.canvas.style.cursor = 'default';
       this.rackSlotMeshes.forEach((m) => {
         m.material.opacity = 0;
@@ -1668,7 +2349,36 @@ export class OkeyTable3D {
       }
 
       if (!drag.moved) {
-        if (this.selectedTileIds.has(drag.tile.id)) {
+        const now = performance.now();
+        if (
+          this.lastTileTap &&
+          this.lastTileTap.tileId === drag.tile.id &&
+          now - this.lastTileTap.time < 360
+        ) {
+          // Double-click/tap: restore pre-tap selection and smoothly flip tile 180 deg!
+          if (this.lastTileTap.wasSelectedBefore) {
+            this.selectedTileIds.add(drag.tile.id);
+          } else {
+            this.selectedTileIds.delete(drag.tile.id);
+          }
+          this.lastTileTap = null;
+
+          if (this.flippedTileIds.has(drag.tile.id)) {
+            this.flippedTileIds.delete(drag.tile.id);
+          } else {
+            this.flippedTileIds.add(drag.tile.id);
+          }
+          soundFX.playTileFlip();
+          if (this.currentState) {
+            this.renderGameState(this.currentState, { skipSlotSync: true });
+          }
+          this.callbacks.onSelectionChange?.(this.getSelectedTiles());
+          return;
+        }
+
+        const wasSelectedBefore = this.selectedTileIds.has(drag.tile.id);
+        this.lastTileTap = { tileId: drag.tile.id, time: now, wasSelectedBefore };
+        if (wasSelectedBefore) {
           this.selectedTileIds.delete(drag.tile.id);
         } else {
           this.selectedTileIds.add(drag.tile.id);
@@ -1768,6 +2478,30 @@ export class OkeyTable3D {
 
     if (this.demoMode && !this.reducedMotion) {
       this.targetSpherical.theta += dt * 0.08;
+    }
+
+    // Smooth carried-tile interpolation during physical drag
+    if (this.dragState?.floatingMesh && this.dragTargetPos) {
+      const dragDamp = this.reducedMotion ? 1 : Math.min(1, dt * 20);
+      this.dragState.floatingMesh.position.lerp(this.dragTargetPos, dragDamp);
+      if (this.dragTargetQuat) {
+        this.dragState.floatingMesh.quaternion.slerp(this.dragTargetQuat, dragDamp);
+      }
+      if (this.dragTargetScale) {
+        this.dragState.floatingMesh.scale.lerp(this.dragTargetScale, dragDamp);
+      }
+    }
+
+    // Gentle rising steam particles over hot Kahvehane drinks/food
+    if (!this.reducedMotion && this.steamParticles.length > 0) {
+      for (const sp of this.steamParticles) {
+        sp.phase = (sp.phase + dt * 0.42) % 1;
+        sp.mesh.position.y = sp.baseY + sp.phase * 0.68;
+        sp.mesh.position.x = sp.baseX + Math.sin(sp.phase * Math.PI * 2) * 0.05;
+        const sc = 0.7 + sp.phase * 0.9;
+        sp.mesh.scale.setScalar(sc);
+        sp.mesh.material.opacity = Math.sin(sp.phase * Math.PI) * 0.34;
+      }
     }
 
     for (let i = this.tileAnimations.length - 1; i >= 0; i -= 1) {

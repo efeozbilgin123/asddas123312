@@ -1,3 +1,4 @@
+import { createEmptyOrders, KAHVE_MENU_MAP } from '../shared/menu.js';
 import { parseMusicUrl } from '../shared/music.js';
 import { GameSession } from './gameSession.js';
 
@@ -73,6 +74,9 @@ export class RoomManager {
       status: 'waiting', // 'waiting' | 'playing'
       createdAt: Date.now(),
       music: null,
+      orders: createEmptyOrders(),
+      lastOrder: null,
+      orderSeq: 0,
       options: {
         katlamali: Boolean(options.katlamali),
         teamMode: options.teamMode === 'paired' ? 'paired' : 'solo',
@@ -388,6 +392,99 @@ export class RoomManager {
     }
   }
 
+  orderTreat({ roomCode, playerId, itemId, target = 'self' }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    const sender = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
+    if (!sender) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+
+    const item = KAHVE_MENU_MAP.get(String(itemId || ''));
+    if (!item) return { ok: false, error: 'Geçersiz kahvehane siparişi.' };
+
+    if (!Array.isArray(room.orders)) room.orders = createEmptyOrders();
+
+    const targetIndices = [];
+    if (target === 'all') {
+      room.seats.forEach((s) => {
+        if (s.type !== 'empty') targetIndices.push(s.seatIndex);
+      });
+    } else if (target === 'self') {
+      targetIndices.push(sender.seatIndex);
+    } else {
+      const idx = Number(target);
+      const tSeat = room.seats[idx];
+      if (!tSeat || tSeat.type === 'empty') {
+        return { ok: false, error: 'Seçilen koltukta kimse oturmuyor.' };
+      }
+      targetIndices.push(idx);
+    }
+
+    const servedAt = Date.now();
+    room.orderSeq = (room.orderSeq || 0) + 1;
+
+    for (const seatIdx of targetIndices) {
+      const slot = room.orders[seatIdx] || { drink: null, food: null };
+      slot[item.category] = {
+        id: `ord-${room.orderSeq}-${seatIdx}`,
+        itemId: item.id,
+        label: item.label,
+        shortLabel: item.shortLabel,
+        category: item.category,
+        fromSeat: sender.seatIndex,
+        fromName: sender.name || 'Oyuncu',
+        servedAt
+      };
+      room.orders[seatIdx] = slot;
+    }
+
+    const targetName =
+      target === 'all'
+        ? 'tüm masaya'
+        : targetIndices[0] === sender.seatIndex
+          ? 'kendine'
+          : room.seats[targetIndices[0]]?.name || 'arkadaşına';
+
+    room.lastOrder = {
+      id: room.orderSeq,
+      itemId: item.id,
+      label: item.label,
+      category: item.category,
+      fromSeat: sender.seatIndex,
+      fromName: sender.name || 'Oyuncu',
+      target,
+      targetName,
+      servedAt
+    };
+
+    this.broadcastRoomOrders(room);
+    return { ok: true, orders: room.orders, lastOrder: room.lastOrder };
+  }
+
+  clearSeatOrder({ roomCode, playerId, target = 'self' }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    const sender = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
+    if (!sender) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+
+    if (!Array.isArray(room.orders)) room.orders = createEmptyOrders();
+    if (target === 'all') {
+      room.orders = createEmptyOrders();
+    } else {
+      room.orders[sender.seatIndex] = { drink: null, food: null };
+    }
+    this.broadcastRoomOrders(room);
+    return { ok: true, orders: room.orders };
+  }
+
+  broadcastRoomOrders(room) {
+    const payload = { orders: room.orders, lastOrder: room.lastOrder };
+    for (const seat of room.seats) {
+      if (seat.type === 'human' && seat.playerId) {
+        this.io.to(`player:${seat.playerId}`).emit('room:orders', payload);
+      }
+    }
+  }
+
   getRoomPayloadForPlayer(room, playerId) {
     const mySeat = room.seats.find(
       (s) => s.type === 'human' && s.playerId === playerId
@@ -401,6 +498,8 @@ export class RoomManager {
       hostPlayerId: room.hostPlayerId,
       isHost: room.hostPlayerId === playerId,
       music: room.music || null,
+      orders: room.orders || createEmptyOrders(),
+      lastOrder: room.lastOrder || null,
       options: room.options,
       viewerSeatIndex,
       seats: room.seats.map((s) => ({

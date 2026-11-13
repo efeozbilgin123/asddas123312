@@ -7,6 +7,7 @@ import {
   validateGroup,
   validatePair
 } from '../shared/melds.js';
+import { KAHVE_MENU } from '../shared/menu.js';
 import { parseMusicUrl } from '../shared/music.js';
 import { COLOR_LABELS, formatTileLabel, isOkeyTile } from '../shared/tiles.js';
 import { LocalSingleplayerClient } from './client/localSession.js';
@@ -46,6 +47,7 @@ const els = {
   connBadge: document.getElementById('connection-badge'),
   roomPill: document.getElementById('room-pill'),
   cameraGroup: document.getElementById('camera-group'),
+  btnOrders: document.getElementById('btn-orders'),
   btnMusic: document.getElementById('btn-music'),
   btnSound: document.getElementById('btn-sound'),
   btnRules: document.getElementById('btn-rules'),
@@ -85,6 +87,7 @@ const els = {
 
   waitRoomTitle: document.getElementById('wait-room-title'),
   waitRoomCode: document.getElementById('wait-room-code'),
+  btnWaitOrders: document.getElementById('btn-wait-orders'),
   btnWaitMusic: document.getElementById('btn-wait-music'),
   btnCopyCode: document.getElementById('btn-copy-code'),
   waitSeatsGrid: document.getElementById('wait-seats-grid'),
@@ -137,6 +140,12 @@ const els = {
   musicUrlHelp: document.getElementById('music-url-help'),
   musicTitleInput: document.getElementById('music-title-input'),
   btnMusicStop: document.getElementById('btn-music-stop'),
+
+  dialogOrders: document.getElementById('dialog-orders'),
+  orderTarget: document.getElementById('order-target'),
+  btnOrderClear: document.getElementById('btn-order-clear'),
+  orderStatusMsg: document.getElementById('order-status-msg'),
+  orderMenuGrid: document.getElementById('order-menu-grid'),
 
   dialogRules: document.getElementById('dialog-rules'),
   dialogRound: document.getElementById('dialog-round'),
@@ -243,11 +252,23 @@ let localClient = null;
 let secretUnlocked = false;
 let stagedGroups = []; // [{ id, mode: 'series'|'pairs', tiles, points }]
 let lastEventIdSeen = 0;
+let lastOrderIdSeen = 0;
 let lastRoundModalNumber = 0;
 let lastTurnSeatSeen = null;
 let lastTurnRoundSeen = null;
 let bannerNotice = '';
 let noticeTimer = null;
+
+function applyRoomOrders(orders, lastOrder, viewerSeatIndex) {
+  const viewerIdx = viewerSeatIndex ?? currentRoom?.viewerSeatIndex ?? 0;
+  scene3d.setRoomOrders(orders || null, viewerIdx);
+  if (lastOrder && Number(lastOrder.id) > lastOrderIdSeen) {
+    lastOrderIdSeen = Number(lastOrder.id);
+    soundFX.playOrderServed(lastOrder.category || 'drink');
+    const msg = `${lastOrder.fromName}, ${lastOrder.targetName} ${lastOrder.label} söyledi.`;
+    showNotice(msg, 3600);
+  }
+}
 
 const socket = io({
   auth: { playerId }
@@ -557,6 +578,7 @@ function switchView(room) {
     els.viewWaiting.hidden = true;
     els.viewGame.hidden = true;
     els.btnLeave.hidden = true;
+    if (els.btnOrders) els.btnOrders.hidden = true;
     if (els.btnMusic) els.btnMusic.hidden = true;
     els.connBadge.hidden = false;
     els.roomPill.hidden = true;
@@ -565,19 +587,24 @@ function switchView(room) {
     lastRoundModalNumber = 0;
     lastTurnSeatSeen = null;
     lastTurnRoundSeen = null;
+    lastOrderIdSeen = 0;
     if (els.dialogRound.open) els.dialogRound.close();
     if (els.dialogSecret.open) els.dialogSecret.close();
     if (els.dialogMusic?.open) els.dialogMusic.close();
+    if (els.dialogOrders?.open) els.dialogOrders.close();
     applyRoomMusic(null);
+    scene3d.setRoomOrders(null, 0);
     scene3d.renderGameState(null);
     return;
   }
 
   els.btnLeave.hidden = false;
+  if (els.btnOrders) els.btnOrders.hidden = false;
   if (els.btnMusic) els.btnMusic.hidden = false;
   if (Object.prototype.hasOwnProperty.call(room, 'music')) {
     applyRoomMusic(room.music || null);
   }
+  applyRoomOrders(room.orders || null, room.lastOrder || null, room.viewerSeatIndex ?? 0);
 
   if (room.status === 'waiting') {
     els.viewLobby.hidden = true;
@@ -1350,6 +1377,147 @@ els.musicVolume?.addEventListener('input', (e) => {
   applyMusicVolume(e.target.value);
 });
 
+// Kahvehane Orders controls
+function renderOrdersTargetSelect() {
+  if (!els.orderTarget || !currentRoom) return;
+  const prev = els.orderTarget.value || 'self';
+  const mySeatIdx = currentRoom.viewerSeatIndex ?? 0;
+
+  els.orderTarget.innerHTML = '';
+
+  const optSelf = document.createElement('option');
+  optSelf.value = 'self';
+  optSelf.textContent = 'Kendime';
+  els.orderTarget.appendChild(optSelf);
+
+  const optAll = document.createElement('option');
+  optAll.value = 'all';
+  optAll.textContent = 'Tüm Masaya (İkram)';
+  els.orderTarget.appendChild(optAll);
+
+  (currentRoom.seats || []).forEach((seat) => {
+    if (seat.type !== 'empty' && seat.seatIndex !== mySeatIdx) {
+      const opt = document.createElement('option');
+      opt.value = String(seat.seatIndex);
+      opt.textContent = seat.name || `Koltuk ${seat.seatIndex + 1}`;
+      els.orderTarget.appendChild(opt);
+    }
+  });
+
+  const hasPrev = Array.from(els.orderTarget.options).some((o) => o.value === prev);
+  els.orderTarget.value = hasPrev ? prev : 'self';
+}
+
+function renderOrdersMenu() {
+  if (!els.orderMenuGrid) return;
+  els.orderMenuGrid.innerHTML = '';
+
+  const sections = [
+    { key: 'drink', title: 'Sıcak & Soğuk İçecekler', tag: 'İçecek' },
+    { key: 'food', title: 'Yiyecek & Çerez', tag: 'İkram' }
+  ];
+
+  sections.forEach((sec) => {
+    const items = KAHVE_MENU.filter((item) => item.category === sec.key);
+    if (items.length === 0) return;
+
+    const sectionEl = document.createElement('div');
+    sectionEl.className = 'order-section';
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'order-section__title';
+    titleEl.textContent = sec.title;
+    sectionEl.appendChild(titleEl);
+
+    const gridEl = document.createElement('div');
+    gridEl.className = 'order-menu-grid';
+
+    items.forEach((item) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'order-card';
+
+      const top = document.createElement('div');
+      top.className = 'order-card__top';
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'order-card__title';
+      nameSpan.textContent = item.label;
+
+      const tagSpan = document.createElement('span');
+      tagSpan.className = 'order-card__tag';
+      tagSpan.textContent = sec.tag;
+
+      top.appendChild(nameSpan);
+      top.appendChild(tagSpan);
+
+      const descEl = document.createElement('span');
+      descEl.className = 'order-card__desc';
+      descEl.textContent = item.desc;
+
+      btn.appendChild(top);
+      btn.appendChild(descEl);
+
+      btn.addEventListener('click', () => {
+        const target = els.orderTarget?.value || 'self';
+        sendGameAction('room:orderTreat', { itemId: item.id, target }, (res) => {
+          if (!res?.ok) {
+            if (els.orderStatusMsg) {
+              els.orderStatusMsg.textContent = res?.error || 'Sipariş verilemedi.';
+            }
+            return;
+          }
+          if (currentRoom) {
+            currentRoom.orders = res.orders;
+            currentRoom.lastOrder = res.lastOrder;
+          }
+          applyRoomOrders(res.orders, res.lastOrder, currentRoom?.viewerSeatIndex ?? 0);
+          if (els.orderStatusMsg) {
+            els.orderStatusMsg.textContent = `${item.label} masaya servis edildi.`;
+          }
+          if (els.dialogOrders?.open) {
+            els.dialogOrders.close();
+          }
+        });
+      });
+
+      gridEl.appendChild(btn);
+    });
+
+    sectionEl.appendChild(gridEl);
+    els.orderMenuGrid.appendChild(sectionEl);
+  });
+}
+
+function openOrdersDialog() {
+  if (!currentRoom) return;
+  if (els.orderStatusMsg) els.orderStatusMsg.textContent = '';
+  renderOrdersTargetSelect();
+  renderOrdersMenu();
+  els.dialogOrders?.showModal();
+}
+
+els.btnOrders?.addEventListener('click', openOrdersDialog);
+els.btnWaitOrders?.addEventListener('click', openOrdersDialog);
+
+els.btnOrderClear?.addEventListener('click', () => {
+  sendGameAction('room:orderClear', { target: 'self' }, (res) => {
+    if (!res?.ok) {
+      if (els.orderStatusMsg) {
+        els.orderStatusMsg.textContent = res?.error || 'Servis toplanamadı.';
+      }
+      return;
+    }
+    if (currentRoom) {
+      currentRoom.orders = res.orders;
+    }
+    applyRoomOrders(res.orders, null, currentRoom?.viewerSeatIndex ?? 0);
+    if (els.orderStatusMsg) {
+      els.orderStatusMsg.textContent = 'Önünüzdeki servis toplandı.';
+    }
+  });
+});
+
 // Dialog controls
 els.btnRules.addEventListener('click', () => {
   els.dialogRules.showModal();
@@ -1362,7 +1530,7 @@ document.querySelectorAll('[data-close-dialog]').forEach((btn) => {
   });
 });
 
-[els.dialogRules, els.dialogRound, els.dialogSecret, els.dialogMusic].forEach((dlg) => {
+[els.dialogRules, els.dialogRound, els.dialogSecret, els.dialogMusic, els.dialogOrders].forEach((dlg) => {
   dlg?.addEventListener('click', (e) => {
     if (e.target === dlg) dlg.close();
   });
@@ -1596,5 +1764,13 @@ socket.on('room:music', (music) => {
   if (!localClient && currentRoom) {
     currentRoom.music = music || null;
     applyRoomMusic(music || null);
+  }
+});
+
+socket.on('room:orders', (payload) => {
+  if (!localClient && currentRoom && payload) {
+    currentRoom.orders = payload.orders || null;
+    currentRoom.lastOrder = payload.lastOrder || null;
+    applyRoomOrders(payload.orders || null, payload.lastOrder || null, currentRoom.viewerSeatIndex ?? 0);
   }
 });

@@ -388,6 +388,45 @@ class SoundFX {
     osc.start(now);
     osc.stop(now + 0.26);
   }
+
+  playOrderServed(category = 'drink') {
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    if (category === 'drink') {
+      // Crisp ince belli glass & porcelain saucer clink
+      this.playCeramicSnap(1.48, 0.12);
+      [2280, 3420].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        const t = now + i * 0.045;
+        osc.frequency.setValueAtTime(freq, t);
+        osc.frequency.exponentialRampToValueAtTime(freq * 0.96, t + 0.22);
+        gain.gain.setValueAtTime(0.045 - i * 0.012, t);
+        gain.gain.exponentialRampToValueAtTime(0.0008, t + 0.24);
+        osc.connect(gain);
+        this.routeNode(gain, 0.48);
+        osc.start(t);
+        osc.stop(t + 0.25);
+      });
+    } else {
+      // Warm porcelain plate placement + wood table thud
+      this.playWoodKnock(185, 0.15, 0.065);
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(1320, now + 0.02);
+      osc.frequency.exponentialRampToValueAtTime(860, now + 0.14);
+      gain.gain.setValueAtTime(0.04, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      osc.connect(gain);
+      this.routeNode(gain, 0.35);
+      osc.start(now + 0.02);
+      osc.stop(now + 0.16);
+    }
+  }
 }
 
 export const soundFX = new SoundFX();

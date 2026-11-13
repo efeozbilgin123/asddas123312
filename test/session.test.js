@@ -628,3 +628,103 @@ test('RoomManager validates custom base64 avatars and broadcasts room music', as
   assert.equal(stopRes.ok, true);
   assert.equal(created.room.music, null);
 });
+
+test('RoomManager orderTreat & clearSeatOrder handle self, specific seat, all, and validation errors', async () => {
+  const { RoomManager } = await import('../server/roomManager.js');
+  const emitted = [];
+  const fakeIo = {
+    to: (room) => ({ emit: (ev, payload) => emitted.push({ room, ev, payload }) }),
+    emit: (ev, payload) => emitted.push({ ev, payload })
+  };
+  const rm = new RoomManager(fakeIo);
+
+  const created = rm.createRoom({
+    playerId: 'host-1',
+    playerName: 'Efe',
+    roomName: 'Çay Ocağı'
+  });
+  assert.equal(created.ok, true);
+  const code = created.room.code;
+
+  const joined = rm.joinRoom({
+    roomCode: code,
+    playerId: 'p-2',
+    playerName: 'Can',
+    playerAvatar: 'avatar-2'
+  });
+  assert.equal(joined.ok, true);
+
+  // Order tea for self (seat 0)
+  const teaRes = rm.orderTreat({ roomCode: code, playerId: 'host-1', itemId: 'cay', target: 'self' });
+  assert.equal(teaRes.ok, true);
+  assert.equal(teaRes.orders[0].drink.itemId, 'cay');
+  assert.equal(teaRes.orders[1].drink, null);
+  assert.equal(teaRes.lastOrder.targetName, 'kendine');
+  assert.equal(emitted.some((e) => e.ev === 'room:orders'), true);
+
+  // Order tost for specific seat 1
+  const tostRes = rm.orderTreat({ roomCode: code, playerId: 'host-1', itemId: 'tost', target: 1 });
+  assert.equal(tostRes.ok, true);
+  assert.equal(tostRes.orders[1].food.itemId, 'tost');
+  assert.equal(tostRes.lastOrder.targetName, 'Can');
+
+  // Order oralet for all non-empty seats
+  const allRes = rm.orderTreat({ roomCode: code, playerId: 'p-2', itemId: 'oralet', target: 'all' });
+  assert.equal(allRes.ok, true);
+  assert.equal(allRes.orders[0].drink.itemId, 'oralet');
+  assert.equal(allRes.orders[1].drink.itemId, 'oralet');
+  assert.equal(allRes.orders[2].drink, null); // seat 2 is empty
+  assert.equal(allRes.lastOrder.targetName, 'tüm masaya');
+
+  // Validation failures
+  const badItem = rm.orderTreat({ roomCode: code, playerId: 'host-1', itemId: 'nonexistent', target: 'self' });
+  assert.equal(badItem.ok, false);
+  const emptySeat = rm.orderTreat({ roomCode: code, playerId: 'host-1', itemId: 'kahve', target: 2 });
+  assert.equal(emptySeat.ok, false);
+
+  // Clear seat order
+  const clearSelf = rm.clearSeatOrder({ roomCode: code, playerId: 'host-1', target: 'self' });
+  assert.equal(clearSelf.ok, true);
+  assert.equal(clearSelf.orders[0].drink, null);
+  assert.equal(clearSelf.orders[0].food, null);
+  assert.equal(clearSelf.orders[1].drink.itemId, 'oralet');
+});
+
+test('LocalSingleplayerClient handles room:orderTreat and room:orderClear', () => {
+  const states = [];
+  const client = new LocalSingleplayerClient({
+    playerName: 'Efe',
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
+    onState: (room) => states.push(room)
+  });
+
+  let orderRes = null;
+  client.action('room:orderTreat', { itemId: 'oralet', target: 'all' }, (res) => {
+    orderRes = res;
+  });
+  assert.equal(orderRes.ok, true);
+  assert.equal(orderRes.orders[0].drink.itemId, 'oralet');
+  assert.equal(orderRes.orders[3].drink.itemId, 'oralet');
+  assert.equal(orderRes.lastOrder.label, 'Portakallı Oralet');
+
+  let foodRes = null;
+  client.action('room:orderTreat', { itemId: 'baklava', target: 2 }, (res) => {
+    foodRes = res;
+  });
+  assert.equal(foodRes.ok, true);
+  assert.equal(foodRes.orders[2].food.itemId, 'baklava');
+
+  let clearRes = null;
+  client.action('room:orderClear', { target: 'self' }, (res) => {
+    clearRes = res;
+  });
+  assert.equal(clearRes.ok, true);
+  assert.equal(clearRes.orders[0].drink, null);
+  assert.equal(clearRes.orders[2].food.itemId, 'baklava');
+
+  const latest = states[states.length - 1];
+  assert.equal(Array.isArray(latest.orders), true);
+  assert.equal(latest.lastOrder.itemId, 'baklava');
+
+  client.destroy();
+});

@@ -149,6 +149,27 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack(res);
   });
 
+  socket.on('room:orderTreat', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.orderTreat({
+      roomCode: code,
+      playerId,
+      itemId: data?.itemId,
+      target: data?.target || 'self'
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  socket.on('room:orderClear', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.clearSeatOrder({
+      roomCode: code,
+      playerId,
+      target: data?.target || 'self'
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
   function withSession(fn) {
     const code = roomManager.playerToRoom.get(playerId);
     const room = roomManager.getRoom(code);

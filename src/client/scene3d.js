@@ -936,8 +936,8 @@ export class OkeyTable3D {
       this.scene.add(group);
     }
 
-    if (this.southRackGroup) {
-      this.southRackGroup.updateMatrixWorld(true);
+    if (this.southRackWorldGroup && this.southRackGroup) {
+      this.southRackWorldGroup.updateMatrixWorld(true);
       const p0 = new THREE.Vector3(0, 1.1, 0.28).applyMatrix4(this.southRackGroup.matrixWorld);
       const p1 = new THREE.Vector3(1, 1.1, 0.28).applyMatrix4(this.southRackGroup.matrixWorld);
       const p2 = new THREE.Vector3(0, 2.1, 0.28).applyMatrix4(this.southRackGroup.matrixWorld);
@@ -995,121 +995,47 @@ export class OkeyTable3D {
     return mesh;
   }
 
-  buildPlayerCharacterModel({ vestColor, shirtColor, skinTone, teamColor, isActive }) {
+  buildPlayerCharacterModel({ vestColor, teamColor, isActive }) {
     const char = new THREE.Group();
 
-    const chairWoodMat = new THREE.MeshStandardMaterial({
-      map: getWoodTexture(),
-      color: '#6E4226',
-      roughness: 0.58
+    const bustMat = new THREE.MeshStandardMaterial({
+      color: vestColor,
+      roughness: 0.56,
+      metalness: 0.08
     });
-    const leatherMat = new THREE.MeshStandardMaterial({
-      color: '#261710',
-      roughness: 0.66
-    });
-    const chair = this.buildWoodenChair(chairWoodMat, leatherMat);
-    chair.scale.set(1.06, 1.06, 1.06);
-    chair.position.set(0, 0.14, -0.35);
-    char.add(chair);
 
-    const vestMat = new THREE.MeshStandardMaterial({ color: vestColor, roughness: 0.72 });
-    const shirtMat = new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.65 });
-    const pantsMat = new THREE.MeshStandardMaterial({ color: '#1F242D', roughness: 0.85 });
-    const skinMat = new THREE.MeshStandardMaterial({ color: skinTone, roughness: 0.62 });
+    // Clean single-piece sculpted shoulders + neck bust silhouette
+    const bustProfile = [
+      new THREE.Vector2(0.01, -0.35),
+      new THREE.Vector2(0.92, -0.35),
+      new THREE.Vector2(0.96, 0.38),
+      new THREE.Vector2(0.9, 0.92),
+      new THREE.Vector2(0.7, 1.24),
+      new THREE.Vector2(0.32, 1.44),
+      new THREE.Vector2(0.24, 1.64),
+      new THREE.Vector2(0.23, 1.94),
+      new THREE.Vector2(0.01, 1.94)
+    ];
+    const bustGeom = new THREE.LatheGeometry(bustProfile, 32);
+    const bust = new THREE.Mesh(bustGeom, bustMat);
+    bust.scale.set(1.26, 1.0, 0.58);
+    bust.castShadow = true;
+    bust.receiveShadow = true;
+    char.add(bust);
 
-    // Seated lower body & knees resting under table edge
-    const pelvis = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.36, 0.74), pantsMat);
-    pelvis.position.set(0, -0.22, -0.18);
-    char.add(pelvis);
-
-    for (const sx of [-0.3, 0.3]) {
-      const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.17, 0.78, 12), pantsMat);
-      thigh.rotation.x = Math.PI / 2 - 0.1;
-      thigh.position.set(sx, -0.26, 0.24);
-      char.add(thigh);
-    }
-
-    // Tailored vest torso
-    const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.68, 0.62, 1.56, 24), vestMat);
-    torso.scale.set(1.12, 1.0, 0.64);
-    torso.position.set(0, 0.68, -0.12);
-    torso.castShadow = true;
-    char.add(torso);
-
-    // Crisp collared shirt V-neck inset
-    const shirtFront = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.18, 0.92, 16), shirtMat);
-    shirtFront.scale.set(1.0, 1.0, 0.42);
-    shirtFront.position.set(0, 0.98, 0.21);
-    char.add(shirtFront);
-
-    // Subtle brass buttons on vest
-    const buttonMat = new THREE.MeshStandardMaterial({ color: '#D4A84B', roughness: 0.3, metalness: 0.75 });
-    for (const by of [0.3, 0.54, 0.78]) {
-      const btn = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 8), buttonMat);
-      btn.position.set(0, by, 0.31);
-      char.add(btn);
-    }
-
-    // Broad sculpted shoulders + rounded shoulder caps
-    const shoulders = new THREE.Mesh(new THREE.SphereGeometry(0.78, 24, 16), vestMat);
-    shoulders.scale.set(1.38, 0.56, 0.62);
-    shoulders.position.set(0, 1.38, -0.1);
-    shoulders.castShadow = true;
-    char.add(shoulders);
-
-    // Upper arms, bent forearms & hands reaching toward the rack edge
-    for (const side of [-1, 1]) {
-      const armGroup = new THREE.Group();
-      armGroup.position.set(side * 0.88, 1.32, -0.05);
-
-      const cap = new THREE.Mesh(new THREE.SphereGeometry(0.22, 14, 12), vestMat);
-      armGroup.add(cap);
-
-      const upperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.15, 0.85, 14), shirtMat);
-      upperArm.position.set(side * 0.08, -0.36, 0.16);
-      upperArm.rotation.x = 0.44;
-      upperArm.rotation.z = side * 0.14;
-      upperArm.castShadow = true;
-      armGroup.add(upperArm);
-
-      const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 10), shirtMat);
-      elbow.position.set(side * 0.14, -0.72, 0.34);
-      armGroup.add(elbow);
-
-      const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.11, 0.78, 14), shirtMat);
-      forearm.position.set(side * 0.04, -0.78, 0.72);
-      forearm.rotation.x = Math.PI / 2 - 0.18;
-      forearm.rotation.z = -side * 0.22;
-      forearm.castShadow = true;
-      armGroup.add(forearm);
-
-      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.125, 12, 10), skinMat);
-      hand.scale.set(0.95, 0.7, 1.2);
-      hand.position.set(-side * 0.06, -0.84, 1.08);
-      armGroup.add(hand);
-
-      char.add(armGroup);
-    }
-
-    // Neck + dark collar trim
-    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.3, 0.42, 20), skinMat);
-    neck.position.set(0, 1.72, -0.06);
-    char.add(neck);
-
-    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.29, 0.065, 10, 20), shirtMat);
-    collar.rotation.x = Math.PI / 2 + 0.12;
-    collar.position.set(0, 1.56, -0.05);
-    char.add(collar);
-
-    // Team/Turn base badge disc at chest
     if (isActive) {
-      const chestGlow = new THREE.Mesh(
-        new THREE.RingGeometry(0.84, 0.96, 28),
-        new THREE.MeshBasicMaterial({ color: teamColor, transparent: true, opacity: 0.4, side: THREE.DoubleSide })
+      const turnRing = new THREE.Mesh(
+        new THREE.RingGeometry(1.18, 1.32, 32),
+        new THREE.MeshBasicMaterial({
+          color: teamColor,
+          transparent: true,
+          opacity: 0.5,
+          side: THREE.DoubleSide
+        })
       );
-      chestGlow.rotation.x = -Math.PI / 2;
-      chestGlow.position.set(0, -0.34, 0.12);
-      char.add(chestGlow);
+      turnRing.rotation.x = -Math.PI / 2;
+      turnRing.position.set(0, -0.33, 0);
+      char.add(turnRing);
     }
 
     return char;
@@ -1119,13 +1045,12 @@ export class OkeyTable3D {
     const teamMode = state.options?.teamMode || 'solo';
     // Omit rel === 0 so own PFP is hidden on viewer's screen; enlarge opponent PFPs!
     const seatPositions = [
-      { rel: 1, pos: [9.05, 0.0, 0], headY: 2.95, medRadius: 0.98 },
-      { rel: 2, pos: [0, 0.0, -9.05], headY: 3.15, medRadius: 1.06 },
-      { rel: 3, pos: [-9.05, 0.0, 0], headY: 2.95, medRadius: 0.98 }
+      { rel: 1, pos: [8.85, 0.0, 0], headY: 2.78, medRadius: 0.98 },
+      { rel: 2, pos: [0, 0.0, -8.85], headY: 2.92, medRadius: 1.06 },
+      { rel: 3, pos: [-8.85, 0.0, 0], headY: 2.78, medRadius: 0.98 }
     ];
 
     const vestPalette = ['#6A4D1F', '#1F4B6A', '#4A2B26', '#2B4A38'];
-    const skinPalette = ['#E0B28F', '#D8A680', '#E6BC9B', '#CFA07A'];
 
     for (const cfg of seatPositions) {
       const seatIdx = (viewerIdx + cfg.rel) % 4;
@@ -1149,8 +1074,6 @@ export class OkeyTable3D {
 
       const character = this.buildPlayerCharacterModel({
         vestColor,
-        shirtColor: '#EDE7DC',
-        skinTone: skinPalette[seatIdx % skinPalette.length],
         teamColor,
         isActive
       });
@@ -1164,7 +1087,7 @@ export class OkeyTable3D {
       const headY = cfg.headY;
       const medRadius = cfg.medRadius;
       const headGroup = new THREE.Group();
-      headGroup.position.set(0, headY, -0.04);
+      headGroup.position.set(0, headY, 0);
       holder.add(headGroup);
       headGroup.updateMatrixWorld(true);
       headGroup.lookAt(0, headY, 0);
@@ -2271,29 +2194,43 @@ export class OkeyTable3D {
 
           const isFlipped = this.flippedTileIds.has(this.dragState.tile.id);
           const rackPt = new THREE.Vector3();
-          const overRackPlane =
+          const hasRackHit =
             this.rackDragPlane &&
-            this.raycaster.ray.intersectPlane(this.rackDragPlane, rackPt) &&
-            (slotHits.length > 0 || (Math.abs(rackPt.x) <= 5.35 && rackPt.y >= 0.25 && rackPt.y <= 3.0));
+            this.southRackGroup &&
+            this.raycaster.ray.intersectPlane(this.rackDragPlane, rackPt);
 
-          if (overRackPlane) {
-            if (!this.dragTargetPos) this.dragTargetPos = new THREE.Vector3();
-            this.dragTargetPos.set(
-              THREE.MathUtils.clamp(rackPt.x, -5.2, 5.2),
-              THREE.MathUtils.clamp(rackPt.y, 0.45, 2.75),
-              rackPt.z + 0.08
-            );
-            this.dragTargetQuat = new THREE.Quaternion().setFromEuler(
-              new THREE.Euler(-0.36, isFlipped ? Math.PI : 0, 0, 'XYZ')
-            );
-          } else {
+          let overRackPlane = false;
+          if (hasRackHit) {
+            const localPt = this.southRackGroup.worldToLocal(rackPt.clone());
+            if (
+              slotHits.length > 0 ||
+              (Math.abs(localPt.x) <= 5.3 && localPt.y >= -0.15 && localPt.y <= 2.65)
+            ) {
+              overRackPlane = true;
+              const frontWorld = new THREE.Vector3(
+                THREE.MathUtils.clamp(localPt.x, -5.05, 5.05),
+                THREE.MathUtils.clamp(localPt.y, 0.25, 2.35),
+                0.36
+              ).applyMatrix4(this.southRackGroup.matrixWorld);
+              if (!this.dragTargetPos) this.dragTargetPos = new THREE.Vector3();
+              this.dragTargetPos.copy(frontWorld);
+              this.dragTargetQuat = new THREE.Quaternion().setFromEuler(
+                new THREE.Euler(-0.32, isFlipped ? Math.PI : 0, 0, 'XYZ')
+              );
+            }
+          }
+
+          if (!overRackPlane) {
             const dragPt = new THREE.Vector3();
             if (this.raycaster.ray.intersectPlane(this.tableDragPlane, dragPt)) {
+              const clampedX = THREE.MathUtils.clamp(dragPt.x, -8.2, 8.2);
+              const clampedZ = THREE.MathUtils.clamp(dragPt.z, -6.8, 8.2);
+              const overRackFootprint = Math.abs(clampedX) <= 5.2 && clampedZ >= 5.65 && clampedZ <= 7.45;
               if (!this.dragTargetPos) this.dragTargetPos = new THREE.Vector3();
               this.dragTargetPos.set(
-                THREE.MathUtils.clamp(dragPt.x, -8.2, 8.2),
-                Math.max(0.85, dragPt.y),
-                THREE.MathUtils.clamp(dragPt.z, -6.8, 8.2)
+                clampedX,
+                overRackFootprint ? Math.max(2.6, dragPt.y) : Math.max(0.95, dragPt.y),
+                clampedZ
               );
               this.dragTargetQuat = new THREE.Quaternion().setFromEuler(
                 new THREE.Euler(-0.82, isFlipped ? Math.PI : 0, 0, 'XYZ')

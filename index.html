@@ -7,7 +7,7 @@
   <meta name="description" content="Tarayıcıda gerçek zamanlı, 3 boyutlu çok oyunculu 101 Okey masası.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@500&family=Plus+Jakarta+Sans:wght@500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./src/styles/app.css">
 </head>
 <body>
@@ -442,21 +442,21 @@
             <div class="rack-tools">
               <button type="button" id="btn-sort-runs" class="btn btn--quiet btn--sm">Seri Diz</button>
               <button type="button" id="btn-sort-pairs" class="btn btn--quiet btn--sm">Çift Diz</button>
-              <button type="button" id="btn-clear-sel" class="btn btn--quiet btn--sm" hidden>Seçimi Bırak</button>
+              <button type="button" id="btn-clear-sel" class="btn btn--quiet btn--sm" title="Seçimi bırak" hidden>Bırak</button>
             </div>
           </div>
 
           <div class="action-bar__right">
             <span id="selection-hint" class="selection-hint" aria-live="polite"></span>
 
-            <button type="button" id="btn-draw-deck" class="btn btn--primary btn--sm" hidden>Ortadan Çek</button>
-            <button type="button" id="btn-draw-discard" class="btn btn--sm" hidden>Yandan Al</button>
-            <button type="button" id="btn-return-discard" class="btn btn--quiet btn--sm" hidden>Yan Taşı Geri Koy</button>
+            <button type="button" id="btn-draw-deck" class="btn btn--primary btn--sm" title="Ortadaki desteden taş çek" hidden>Taş Çek</button>
+            <button type="button" id="btn-draw-discard" class="btn btn--sm" title="Yandaki atılan taşı al" hidden>Yandan Al</button>
+            <button type="button" id="btn-return-discard" class="btn btn--quiet btn--sm" title="Yandan alınan taşı geri koy" hidden>Geri Koy</button>
 
             <button type="button" id="btn-open-series" class="btn btn--primary btn--sm" hidden>Tek Aç</button>
             <button type="button" id="btn-open-pairs" class="btn btn--primary btn--sm" hidden>Çift Aç</button>
-            <button type="button" id="btn-stage-group" class="btn btn--sm" hidden>Gruba Ekle</button>
-            <button type="button" id="btn-lay-meld" class="btn btn--sm" hidden>Grubu İndir</button>
+            <button type="button" id="btn-stage-group" class="btn btn--sm" title="Seçili taşları açılış grubuna ekle" hidden>+ Grup</button>
+            <button type="button" id="btn-lay-meld" class="btn btn--sm" title="Grubu masaya indir" hidden>İndir</button>
             <button type="button" id="btn-discard-tile" class="btn btn--accent-3 btn--sm" hidden>Taş At</button>
             <button type="button" id="btn-show-round-summary" class="btn btn--quiet btn--sm" hidden>El Sonucu</button>
             <button type="button" id="btn-hud-next-round" class="btn btn--primary btn--sm" hidden>Sonraki El</button>

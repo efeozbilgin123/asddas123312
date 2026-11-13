@@ -3,10 +3,14 @@ import { isOkeyTile } from '../../shared/tiles.js';
 import { isPresetAvatar, TILE_THEMES } from '../../shared/presets.js';
 
 const TILE_INK = {
-  red: '#C8222B',
-  blue: '#1658B8',
-  black: '#191F28',
-  yellow: '#B87200'
+  red: '#D11124',
+  blue: '#1050B5',
+  black: '#141820',
+  yellow: '#F6CC00'
+};
+
+const TILE_OUTLINE = {
+  yellow: '#6A4C00'
 };
 
 const TILE_THEME_MAP = new Map(TILE_THEMES.map((t) => [t.id, t]));
@@ -141,13 +145,13 @@ export function createSpeechBubbleTexture(name, text) {
   ctx.stroke();
 
   ctx.fillStyle = '#8C5B12';
-  ctx.font = '700 24px "Plus Jakarta Sans", sans-serif';
+  ctx.font = '800 24px "Plus Jakarta Sans", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(cleanName, 320, 48);
 
   ctx.fillStyle = '#1E1A16';
-  ctx.font = '700 32px "Plus Jakarta Sans", sans-serif';
+  ctx.font = '800 32px "Plus Jakarta Sans", sans-serif';
   ctx.fillText(cleanText, 320, 98);
 
   const tex = new THREE.CanvasTexture(canvas);
@@ -220,8 +224,8 @@ export function getTileFaceTexture(tile, okeyTarget, options = {}) {
   const palette = TILE_THEME_MAP.get(options.tileTheme) || TILE_THEME_MAP.get('ivory');
   const themeKey = palette?.id || 'ivory';
   const key = tile.isFakeOkey
-    ? `fake-v3-${themeKey}-${selected}-${mustUse}`
-    : `v3-${themeKey}-${tile.color}-${tile.number}-${isOkey}-${selected}-${mustUse}`;
+    ? `fake-v4-${themeKey}-${selected}-${mustUse}`
+    : `v4-${themeKey}-${tile.color}-${tile.number}-${isOkey}-${selected}-${mustUse}`;
 
   if (faceCache.has(key)) return faceCache.get(key);
 
@@ -294,7 +298,7 @@ export function getTileFaceTexture(tile, okeyTarget, options = {}) {
     for (let i = 0; i < 8; i += 1) {
       ctx.save();
       ctx.rotate((i * Math.PI) / 4);
-      ctx.fillStyle = i % 2 === 0 ? '#C8222B' : '#1658B8';
+      ctx.fillStyle = i % 2 === 0 ? '#D11124' : '#1050B5';
       ctx.beginPath();
       ctx.moveTo(0, -14);
       ctx.quadraticCurveTo(16, -34, 0, -56);
@@ -304,7 +308,7 @@ export function getTileFaceTexture(tile, okeyTarget, options = {}) {
     }
 
     // Center gold jewel
-    ctx.fillStyle = '#EAB308';
+    ctx.fillStyle = '#F6CC00';
     ctx.beginPath();
     ctx.arc(0, 0, 18, 0, Math.PI * 2);
     ctx.fill();
@@ -323,15 +327,32 @@ export function getTileFaceTexture(tile, okeyTarget, options = {}) {
     ctx.fill();
     ctx.restore();
   } else {
-    const ink = TILE_INK[tile.color] || '#191F28';
-    ctx.fillStyle = ink;
-    ctx.font = '800 156px "Plus Jakarta Sans", sans-serif';
+    const ink = TILE_INK[tile.color] || '#141820';
+    const outline = TILE_OUTLINE[tile.color] || null;
+    ctx.font = '800 162px "Plus Jakarta Sans", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    if (outline) {
+      ctx.strokeStyle = outline;
+      ctx.lineWidth = 7;
+      ctx.strokeText(String(tile.number), 160, 162);
+    } else {
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = 2.5;
+      ctx.strokeText(String(tile.number), 160, 162);
+    }
+    ctx.fillStyle = ink;
     ctx.fillText(String(tile.number), 160, 162);
 
     // Crisp underline on 6 and 9
     if (tile.number === 6 || tile.number === 9) {
+      if (outline) {
+        ctx.strokeStyle = outline;
+        ctx.lineWidth = 4;
+        ctx.strokeRect(114, 238, 92, 9);
+      }
       ctx.fillRect(114, 238, 92, 9);
     }
 
@@ -340,6 +361,11 @@ export function getTileFaceTexture(tile, okeyTarget, options = {}) {
     ctx.beginPath();
     ctx.arc(160, 322, isOkey ? 15 : 13, 0, Math.PI * 2);
     ctx.fill();
+    if (!isOkey && outline) {
+      ctx.strokeStyle = outline;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
 
     if (isOkey) {
       ctx.fillStyle = '#146C43';
@@ -356,12 +382,12 @@ export function getTileFaceTexture(tile, okeyTarget, options = {}) {
   }
 
   if (mustUse) {
-    ctx.fillStyle = '#1658B8';
+    ctx.fillStyle = '#1050B5';
     ctx.beginPath();
     ctx.roundRect(184, 30, 104, 36, 10);
     ctx.fill();
     ctx.fillStyle = '#FCF8EE';
-    ctx.font = '700 19px "Plus Jakarta Sans", sans-serif';
+    ctx.font = '800 19px "Plus Jakarta Sans", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('KULLAN', 236, 48);
@@ -419,7 +445,7 @@ export function createNameplateTexture(name, { isActive = false, opened = false,
   }
 
   ctx.fillStyle = isActive ? '#FFEAA7' : '#F8F2E8';
-  ctx.font = '700 38px "Plus Jakarta Sans", sans-serif';
+  ctx.font = '800 40px "Plus Jakarta Sans", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(cleanName, 256, 65);

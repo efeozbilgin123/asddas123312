@@ -22,15 +22,15 @@
   --radius-card: 24px; --radius-stock: 16px; --radius-input: 14px; --radius-pill: 999px; --rule-hair: 1px;
   --shadow-card: 0 2px 6px oklch(5% 0.01 50 / 0.45), 0 18px 36px -14px oklch(5% 0.01 50 / 0.68);
   --shadow-paper: drop-shadow(0 0 0.6px oklch(5% 0.01 50 / 0.52)) drop-shadow(1.5px 2.5px 1.5px oklch(5% 0.01 50 / 0.3)) drop-shadow(6px 14px 16px oklch(5% 0.01 50 / 0.36));
-  --tracking-display: -0.025em; --display-weight: 700;
+  --tracking-display: -0.025em; --display-weight: 800;
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1); --ease-snap: cubic-bezier(0.22, 1, 0.36, 1);
   --color-backdrop: oklch(8% 0.012 48 / 0.72);
   --color-hud-surface: oklch(15.5% 0.016 52 / 0.88);
   --color-table-felt: oklch(20% 0.055 156);
-  --color-tile-red: oklch(67% 0.21 25);
-  --color-tile-blue: oklch(70% 0.17 248);
-  --color-tile-black: oklch(90% 0.01 88);
-  --color-tile-yellow: oklch(78% 0.16 78);
+  --color-tile-red: oklch(58% 0.25 18);
+  --color-tile-blue: oklch(72% 0.18 248);
+  --color-tile-black: oklch(93% 0.01 88);
+  --color-tile-yellow: oklch(91% 0.21 96);
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
   --fibre: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='turbulence' baseFrequency='0.03 0.38' numOctaves='1' seed='7'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23f)' opacity='0.025'/%3E%3C/svg%3E");
 }

@@ -1930,8 +1930,9 @@ function applyRoomTv(tv) {
   const key = `${tv.embedUrl}|${tv.updatedAt || 0}`;
   if (els.tvDock) els.tvDock.hidden = false;
   if (els.tvTitle) {
-    els.tvTitle.textContent = tv.title || 'Kahvehane TV';
-    els.tvTitle.title = tv.title || 'Kahvehane TV';
+    const baseTitle = tv.title || 'Kahvehane TV';
+    els.tvTitle.textContent = baseTitle;
+    els.tvTitle.title = tv.updatedBy ? `${baseTitle} · Açan: ${tv.updatedBy}` : baseTitle;
   }
   if (els.tvUpdatedBy) {
     els.tvUpdatedBy.textContent = tv.updatedBy ? `Açan: ${tv.updatedBy}` : 'Masayla senkronize';
@@ -2804,41 +2805,52 @@ function updateGameControls() {
   const selected = scene3d.getSelectedTiles();
   els.btnClearSel.hidden = selected.length === 0;
 
-  // Evaluate selected tiles
+  // Evaluate selected tiles (compact text in bar, detailed tooltip on hover)
   let selectionMsg = '';
+  let selectionTooltip = '';
   let validGroup = null;
   let validPair = null;
 
   if (selected.length > 0) {
     if (selected.length === 1) {
+      const tileLabel = formatTileLabel(selected[0]);
       const gPair = validatePair(selected, game.okeyTarget, game.gosterge);
       if (gPair.valid) {
         validPair = gPair;
-        selectionMsg = `Gösterge çifti (${formatTileLabel(selected[0])})`;
+        selectionMsg = `Gösterge (${tileLabel})`;
+        selectionTooltip = `Gösterge çifti (${tileLabel})`;
         if (isPlayPhase && mySeat?.opened) {
-          selectionMsg += mySeat.openMode === 'pairs'
+          selectionTooltip += mySeat.openMode === 'pairs'
             ? ' · Masaya indirebilir veya işleyebilirsiniz'
             : ' · Masadaki yeşil gruplara tıklayıp işleyebilirsiniz';
         }
       } else {
-        selectionMsg = `1 taş seçili (${formatTileLabel(selected[0])})`;
+        selectionMsg = tileLabel;
+        selectionTooltip = `1 taş seçili (${tileLabel})`;
         if (isPlayPhase && mySeat?.opened) {
-          selectionMsg += ' · Masadaki yeşil gruplara tıklayıp işleyebilirsiniz';
+          selectionTooltip += ' · Masadaki yeşil gruplara tıklayıp işleyebilirsiniz';
         }
       }
     } else if (selected.length === 2) {
       validPair = validatePair(selected, game.okeyTarget, game.gosterge);
       selectionMsg = validPair.valid
+        ? `Çift (${validPair.points})`
+        : `${selected.length} taş`;
+      selectionTooltip = validPair.valid
         ? `Geçerli çift (${validPair.points} sayı)`
         : `${selected.length} taş seçili`;
     } else {
       validGroup = validateGroup(selected, game.okeyTarget);
       selectionMsg = validGroup.valid
+        ? `${validGroup.type === 'run' ? 'Seri' : 'Per'} (${validGroup.points})`
+        : `${selected.length} taş`;
+      selectionTooltip = validGroup.valid
         ? `Geçerli ${validGroup.type === 'run' ? 'seri' : 'per'} (${validGroup.points} sayı)`
         : validGroup.reason;
     }
   }
   els.selectionHint.textContent = selectionMsg;
+  els.selectionHint.title = selectionTooltip;
 
   // Stage / Lay / Discard buttons
   const isPlaying = game.phase === 'playing';

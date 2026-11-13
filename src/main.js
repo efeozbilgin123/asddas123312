@@ -1761,7 +1761,7 @@ async function submitRoomMusic(mode = 'replace') {
   if (els.btnMusicQueue) els.btnMusicQueue.disabled = true;
   if (els.musicUrlHelp) {
     els.musicUrlHelp.textContent = preview.needsResolution
-      ? 'LunaBot parçayı hazırlıyor...'
+      ? 'Serhat Canikli parçayı hazırlıyor...'
       : '';
   }
 

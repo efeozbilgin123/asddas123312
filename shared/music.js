@@ -45,7 +45,11 @@ export function parseMusicUrl(rawUrl, customTitle = '') {
       const params = new URLSearchParams({
         autoplay: '1',
         enablejsapi: '1',
-        rel: '0'
+        rel: '0',
+        playsinline: '1',
+        iv_load_policy: '3',
+        modestbranding: '1',
+        vq: 'small'
       });
       if (listId && /^[A-Za-z0-9_-]+$/.test(listId)) {
         params.set('list', listId);
@@ -67,7 +71,7 @@ export function parseMusicUrl(rawUrl, customTitle = '') {
         kind: 'iframe',
         title: cleanTitle || 'YouTube Çalma Listesi',
         originalUrl: parsed.toString(),
-        embedUrl: `https://www.youtube.com/embed/videoseries?list=${encodeURIComponent(listId)}&autoplay=1&enablejsapi=1`
+        embedUrl: `https://www.youtube.com/embed/videoseries?list=${encodeURIComponent(listId)}&autoplay=1&enablejsapi=1&playsinline=1&iv_load_policy=3&vq=small`
       };
     }
   }

@@ -9,7 +9,8 @@ import {
   canLayoffTile,
   findBestOpening,
   autoArrangeRuns,
-  autoArrangePairs
+  autoArrangePairs,
+  analyzeHandLive
 } from '../shared/melds.js';
 import { isDiscardPlayableOnTable, computeRoundScores } from '../shared/rules.js';
 
@@ -52,14 +53,20 @@ test('validateSet checks unique colors and handles Okey wildcard', () => {
   assert.equal(dupColor.valid, false);
 });
 
-test('validateRun supports 12-13-1 wraparound and Sahte Okey', () => {
+test('validateRun rejects 12-13-1 wraparound in 101 Okey and supports Sahte Okey', () => {
   const okeyTarget = { color: 'yellow', number: 7 };
-  const wrap = validateRun(
+  const wrap12 = validateRun(
     [t('1', 'black', 12), t('2', 'black', 13), t('3', 'black', 1)],
     okeyTarget
   );
-  assert.equal(wrap.valid, true);
-  assert.equal(wrap.points, 26);
+  assert.equal(wrap12.valid, false);
+
+  const highRun = validateRun(
+    [t('1', 'black', 11), t('2', 'black', 12), t('3', 'black', 13)],
+    okeyTarget
+  );
+  assert.equal(highRun.valid, true);
+  assert.equal(highRun.points, 36);
 
   const withFake = validateRun(
     [t('1', 'yellow', 6), t('2', 'fake', 0, true), t('3', 'yellow', 8)],
@@ -272,3 +279,39 @@ test('autoArrangeRuns and autoArrangePairs insert gaps between melds/pairs and p
   assert.equal(pairSlots[16], null);
   assert.equal(pairSlots[19], null);
 });
+
+test('analyzeHandLive automatically counts Tek (Seri) points and Cift count without forming 12-13-1', () => {
+  const okeyTarget = { color: 'yellow', number: 1 };
+  const hand = [
+    t('s1', 'red', 12),
+    t('s2', 'red', 13),
+    t('s3', 'red', 1), // 12-13-1 must NOT count as a valid run!
+    t('p1a', 'blue', 10),
+    t('p1b', 'black', 10),
+    t('p1c', 'yellow', 10), // 30
+    { id: 'c1a', color: 'blue', number: 8, copy: 0, isFakeOkey: false },
+    { id: 'c1b', color: 'blue', number: 8, copy: 1, isFakeOkey: false },
+    { id: 'c2a', color: 'black', number: 9, copy: 0, isFakeOkey: false },
+    { id: 'c2b', color: 'black', number: 9, copy: 1, isFakeOkey: false }
+  ];
+
+  // Unarranged rackSlots (all null) still auto-counts optimal melds & pairs
+  const live = analyzeHandLive(new Array(28).fill(null), hand, okeyTarget);
+  assert.equal(live.seriesPoints, 30);
+  assert.equal(live.seriesGroups.length, 1);
+  assert.equal(live.pairCount, 2);
+
+  // Manual rack layout with gaps counts arranged groups too
+  const slots = new Array(28).fill(null);
+  slots[0] = hand[3];
+  slots[1] = hand[4];
+  slots[2] = hand[5];
+  slots[4] = hand[6];
+  slots[5] = hand[7];
+  slots[7] = hand[8];
+  slots[8] = hand[9];
+  const arrangedLive = analyzeHandLive(slots, hand, okeyTarget);
+  assert.equal(arrangedLive.seriesPoints, 30);
+  assert.equal(arrangedLive.pairCount, 2);
+});
+

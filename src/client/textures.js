@@ -26,7 +26,7 @@ export function getWoodTexture() {
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
+  tex.anisotropy = 4;
   cachedWoodTexture = tex;
   return tex;
 }
@@ -95,7 +95,7 @@ export function getFeltTexture() {
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
+  tex.anisotropy = 4;
   cachedFeltTexture = tex;
   return tex;
 }
@@ -309,12 +309,23 @@ export function getTileFaceTexture(tile, okeyTarget, options = {}) {
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
+  tex.anisotropy = 4;
   faceCache.set(key, tex);
   return tex;
 }
 
+const nameplateCache = new Map();
+
 export function createNameplateTexture(name, { isActive = false, opened = false, teamIndex = 0, teamMode = 'solo' } = {}) {
+  const cleanName = String(name || 'Oyuncu').slice(0, 18);
+  const cacheKey = `${cleanName}|${isActive}|${opened}|${teamIndex}|${teamMode}`;
+  if (nameplateCache.has(cacheKey)) return nameplateCache.get(cacheKey);
+  if (nameplateCache.size > 64) {
+    const oldest = nameplateCache.keys().next().value;
+    nameplateCache.get(oldest)?.dispose();
+    nameplateCache.delete(oldest);
+  }
+
   const canvas = document.createElement('canvas');
   canvas.width = 512;
   canvas.height = 128;
@@ -351,7 +362,6 @@ export function createNameplateTexture(name, { isActive = false, opened = false,
   ctx.font = '700 38px "Plus Jakarta Sans", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  const cleanName = String(name || 'Oyuncu').slice(0, 18);
   ctx.fillText(cleanName, 256, 65);
 
   if (opened) {
@@ -363,10 +373,58 @@ export function createNameplateTexture(name, { isActive = false, opened = false,
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
+  nameplateCache.set(cacheKey, tex);
   return tex;
 }
 
 const interiorCache = new Map();
+
+export function getDiscardPadTexture(active = false) {
+  const key = active ? 'discard-pad-active' : 'discard-pad-idle';
+  if (interiorCache.has(key)) return interiorCache.get(key);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 320;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = active ? '#1C4D37' : '#103525';
+  ctx.fillRect(0, 0, 256, 320);
+
+  ctx.strokeStyle = active ? '#F5C842' : 'rgba(245, 200, 66, 0.45)';
+  ctx.lineWidth = active ? 10 : 6;
+  ctx.setLineDash([16, 10]);
+  ctx.strokeRect(14, 14, 228, 292);
+  ctx.setLineDash([]);
+
+  // Clean downward drop arrow
+  ctx.strokeStyle = active ? '#FFE484' : 'rgba(245, 200, 66, 0.65)';
+  ctx.lineWidth = 10;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(128, 72);
+  ctx.lineTo(128, 164);
+  ctx.moveTo(92, 130);
+  ctx.lineTo(128, 168);
+  ctx.lineTo(164, 130);
+  ctx.stroke();
+
+  ctx.fillStyle = active ? '#FFF3C4' : 'rgba(248, 236, 200, 0.78)';
+  ctx.font = '800 30px "Plus Jakarta Sans", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('TAŞ AT', 128, 224);
+
+  ctx.fillStyle = active ? '#F5C842' : 'rgba(245, 200, 66, 0.55)';
+  ctx.font = '600 18px "Plus Jakarta Sans", sans-serif';
+  ctx.fillText('SÜRÜKLE BIRAK', 128, 260);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  interiorCache.set(key, tex);
+  return tex;
+}
 
 export function getParquetTexture() {
   if (interiorCache.has('parquet')) return interiorCache.get('parquet');

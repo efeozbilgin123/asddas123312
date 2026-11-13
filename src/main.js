@@ -1,9 +1,8 @@
 import { io } from 'socket.io-client';
 import {
+  analyzeHandLive,
   autoArrangePairs,
   autoArrangeRuns,
-  findBestOpening,
-  findPairsInHand,
   validateGroup,
   validatePair
 } from '../shared/melds.js';
@@ -102,7 +101,8 @@ const els = {
 
   hudRound: document.getElementById('hud-round'),
   hudOkey: document.getElementById('hud-okey'),
-  hudThreshold: document.getElementById('hud-threshold'),
+  hudSeriesCount: document.getElementById('hud-series-count'),
+  hudPairsCount: document.getElementById('hud-pairs-count'),
   hudTimer: document.getElementById('hud-timer'),
   hudTurnText: document.getElementById('hud-turn-text'),
 
@@ -114,13 +114,14 @@ const els = {
 
   btnSortRuns: document.getElementById('btn-sort-runs'),
   btnSortPairs: document.getElementById('btn-sort-pairs'),
-  btnAutoStage: document.getElementById('btn-auto-stage'),
   btnClearSel: document.getElementById('btn-clear-sel'),
   selectionHint: document.getElementById('selection-hint'),
 
   btnDrawDeck: document.getElementById('btn-draw-deck'),
   btnDrawDiscard: document.getElementById('btn-draw-discard'),
   btnReturnDiscard: document.getElementById('btn-return-discard'),
+  btnOpenSeries: document.getElementById('btn-open-series'),
+  btnOpenPairs: document.getElementById('btn-open-pairs'),
   btnStageGroup: document.getElementById('btn-stage-group'),
   btnLayMeld: document.getElementById('btn-lay-meld'),
   btnDiscardTile: document.getElementById('btn-discard-tile'),
@@ -251,6 +252,7 @@ let currentRoom = null;
 let localClient = null;
 let secretUnlocked = false;
 let stagedGroups = []; // [{ id, mode: 'series'|'pairs', tiles, points }]
+let liveAutoAnalysis = { seriesPoints: 0, seriesGroups: [], pairCount: 0, pairGroups: [] };
 let lastEventIdSeen = 0;
 let lastOrderIdSeen = 0;
 let lastRoundModalNumber = 0;
@@ -288,7 +290,10 @@ const scene3d = new OkeyTable3D(els.canvas, {
   onDiscardTile: (tileId) => handleDiscardTile(tileId),
   onLayoffTile: (tileId, meldId) => handleLayoffTile(tileId, meldId),
   onSelectionChange: () => updateGameControls(),
-  onRackReorder: () => soundFX.playTileClack(1.15)
+  onRackReorder: () => {
+    soundFX.playTileClack(1.15);
+    updateGameControls();
+  }
 });
 
 function showNotice(text, duration = 3500) {
@@ -519,11 +524,13 @@ function applyRoomMusic(music) {
     activeMusicData = null;
     activeAudioEl = null;
     activeIframeEl = null;
+    scene3d.setMusicPerformanceMode(false);
     if (els.musicDock) els.musicDock.hidden = true;
     if (els.musicPlayerHost) els.musicPlayerHost.innerHTML = '';
     return;
   }
 
+  scene3d.setMusicPerformanceMode(true);
   const key = `${music.embedUrl}|${music.updatedAt || 0}`;
   if (els.musicDock) els.musicDock.hidden = false;
   if (els.musicProviderBadge) {
@@ -750,9 +757,6 @@ function renderGameRoom(room) {
 
   els.hudRound.textContent =
     game.maxRounds > 0 ? `${game.roundNumber} / ${game.maxRounds}` : String(game.roundNumber);
-  const pairThr = game.pairThreshold || 5;
-  els.hudThreshold.textContent =
-    pairThr > 5 ? `${game.openThreshold} · ${pairThr}ç` : String(game.openThreshold);
 
   if (game.okeyTarget) {
     const colorName = COLOR_LABELS[game.okeyTarget.color] || game.okeyTarget.color;
@@ -802,7 +806,7 @@ function updateTurnBanner() {
     } else if (game.pickedDiscardTileId) {
       els.hudTurnText.textContent = 'Yandan aldığınız taşı açtığınız perlerde kullanın veya geri koyun.';
     } else {
-      els.hudTurnText.textContent = 'Sıra sizde: taş açın, işleyin veya sağ kenara 1 taş atın.';
+      els.hudTurnText.textContent = 'Sıra sizde: taş açın, işleyin veya sağdaki TAŞ AT alanına sürükleyin.';
     }
   } else {
     els.hudTurnText.textContent = `${activeSeat?.name || 'Oyuncu'} hamle yapıyor.`;
@@ -834,6 +838,71 @@ function updateGameControls() {
     game.pickedDiscardTileId &&
     !game.committedMeldThisTurn
   );
+
+  // Live automatic Tek (Seri) and Cift counting without needing a manual Per Bul button
+  liveAutoAnalysis = analyzeHandLive(
+    scene3d.getRackSlots(),
+    mySeat?.hand || [],
+    game.okeyTarget
+  );
+  const openReq = game.openThreshold || 101;
+  const pairReq = game.pairThreshold || 5;
+  const pickedFromSeat =
+    game.pickedDiscardFromSeat != null ? game.seats?.[game.pickedDiscardFromSeat] : null;
+  const katlamaliPairOnly = Boolean(
+    game.options?.katlamali && game.pickedDiscardTileId && pickedFromSeat?.openMode === 'pairs'
+  );
+
+  if (els.hudSeriesCount) {
+    if (mySeat?.opened) {
+      els.hudSeriesCount.textContent = `${liveAutoAnalysis.seriesPoints} p`;
+      els.hudSeriesCount.classList.remove('is-ready');
+    } else {
+      els.hudSeriesCount.textContent = `${liveAutoAnalysis.seriesPoints} / ${openReq}`;
+      els.hudSeriesCount.classList.toggle(
+        'is-ready',
+        !katlamaliPairOnly && liveAutoAnalysis.seriesPoints >= openReq
+      );
+    }
+  }
+
+  if (els.hudPairsCount) {
+    if (mySeat?.opened) {
+      els.hudPairsCount.textContent = `${liveAutoAnalysis.pairCount} ç`;
+      els.hudPairsCount.classList.remove('is-ready');
+    } else {
+      els.hudPairsCount.textContent = `${liveAutoAnalysis.pairCount} / ${pairReq}`;
+      els.hudPairsCount.classList.toggle('is-ready', liveAutoAnalysis.pairCount >= pairReq);
+    }
+  }
+
+  const canDirectSeriesOpen =
+    isPlayPhase &&
+    !mySeat?.opened &&
+    stagedGroups.length === 0 &&
+    !katlamaliPairOnly &&
+    liveAutoAnalysis.seriesPoints >= openReq &&
+    liveAutoAnalysis.seriesGroups.length > 0;
+
+  const canDirectPairsOpen =
+    isPlayPhase &&
+    !mySeat?.opened &&
+    stagedGroups.length === 0 &&
+    liveAutoAnalysis.pairCount >= pairReq &&
+    liveAutoAnalysis.pairGroups.length >= pairReq;
+
+  if (els.btnOpenSeries) {
+    els.btnOpenSeries.hidden = !canDirectSeriesOpen;
+    if (canDirectSeriesOpen) {
+      els.btnOpenSeries.textContent = `Tek Aç (${liveAutoAnalysis.seriesPoints})`;
+    }
+  }
+  if (els.btnOpenPairs) {
+    els.btnOpenPairs.hidden = !canDirectPairsOpen;
+    if (canDirectPairsOpen) {
+      els.btnOpenPairs.textContent = `Çift Aç (${liveAutoAnalysis.pairCount})`;
+    }
+  }
 
   const selected = scene3d.getSelectedTiles();
   els.btnClearSel.hidden = selected.length === 0;
@@ -947,7 +1016,7 @@ function openRoundSummaryDialog(room, summary) {
     if (summary.teamMode === 'paired' && Array.isArray(summary.teamScores)) {
       const [t0, t1] = summary.teamScores;
       if (t0 !== t1) {
-        const winnerLabel = t0 < t1 ? '1. Takım (Güney–Kuzey)' : '2. Takım (Doğu–Batı)';
+        const winnerLabel = t0 < t1 ? '1. Takım (Güney & Kuzey)' : '2. Takım (Doğu & Batı)';
         msg = `${msg ? `${msg} · ` : ''}${winnerLabel} önde tamamladı! İsterseniz ekstra el ile devam edebilirsiniz.`;
       }
     } else {
@@ -961,8 +1030,8 @@ function openRoundSummaryDialog(room, summary) {
     els.roundTeamScores.innerHTML = '';
     const [t0, t1] = summary.teamScores;
     const teams = [
-      { label: '1. Takım (Güney–Kuzey)', score: t0, leading: t0 <= t1 },
-      { label: '2. Takım (Doğu–Batı)', score: t1, leading: t1 <= t0 }
+      { label: '1. Takım (Güney & Kuzey)', score: t0, leading: t0 <= t1 },
+      { label: '2. Takım (Doğu & Batı)', score: t1, leading: t1 <= t0 }
     ];
     teams.forEach((team) => {
       const card = document.createElement('div');
@@ -1148,6 +1217,7 @@ els.btnSortRuns.addEventListener('click', () => {
   const arranged = autoArrangeRuns(hand, game.okeyTarget);
   scene3d.arrangeHandOrder(arranged);
   soundFX.playTileClack(1.1);
+  updateGameControls();
 });
 
 els.btnSortPairs.addEventListener('click', () => {
@@ -1157,61 +1227,39 @@ els.btnSortPairs.addEventListener('click', () => {
   const arranged = autoArrangePairs(hand, game.okeyTarget);
   scene3d.arrangeHandOrder(arranged);
   soundFX.playTileClack(1.1);
+  updateGameControls();
 });
 
-els.btnAutoStage.addEventListener('click', () => {
+els.btnOpenSeries?.addEventListener('click', () => {
   const game = currentRoom?.game;
   const mySeat = game?.seats[game.viewerSeatIndex];
-  if (!game || !mySeat || mySeat.opened) {
-    showNotice('Eliniz açıkken yeni grubu seçip Grubu İndir düğmesini kullanın.');
-    return;
-  }
-
-  const pairReq = game.pairThreshold || 5;
-  const pickedFromSeat =
-    game.pickedDiscardFromSeat != null ? game.seats?.[game.pickedDiscardFromSeat] : null;
-  const katlamaliPairOnly = Boolean(
-    game.options?.katlamali && game.pickedDiscardTileId && pickedFromSeat?.openMode === 'pairs'
-  );
-
-  const best = katlamaliPairOnly
-    ? { canOpen: false, groups: [], totalPoints: 0 }
-    : findBestOpening(mySeat.hand, game.okeyTarget, game.openThreshold);
-
-  if (best.groups.length > 0 && best.canOpen) {
-    stagedGroups = best.groups.map((g, idx) => ({
-      id: `auto-${Date.now()}-${idx}`,
-      mode: 'series',
-      tiles: g.slots.map((s) => s.tile),
-      points: g.points
-    }));
-    scene3d.clearSelection();
-    updateGameControls();
-  } else {
-    const pairs = findPairsInHand(mySeat.hand, game.okeyTarget);
-    if (pairs.length >= pairReq) {
-      stagedGroups = pairs.map((pair, idx) => ({
-        id: `pair-${Date.now()}-${idx}`,
-        mode: 'pairs',
-        tiles: pair,
-        points: validatePair(pair, game.okeyTarget).points
-      }));
-      scene3d.clearSelection();
-      updateGameControls();
-    } else if (best.groups.length > 0) {
-      stagedGroups = best.groups.map((g, idx) => ({
-        id: `auto-${Date.now()}-${idx}`,
-        mode: 'series',
-        tiles: g.slots.map((s) => s.tile),
-        points: g.points
-      }));
-      scene3d.clearSelection();
-      updateGameControls();
-      showNotice(`Bulunan en yüksek toplam ${best.totalPoints} sayı (açılış için ${game.openThreshold} gerekir).`);
+  if (!game || !mySeat || mySeat.opened) return;
+  if (liveAutoAnalysis.seriesGroups.length === 0) return;
+  const groups = liveAutoAnalysis.seriesGroups.map((g) => g.tiles.map((t) => t.id));
+  sendGameAction('game:openHand', { groups, mode: 'series' }, (res) => {
+    if (!res?.ok) {
+      showNotice(res?.error || 'El açılamadı.');
     } else {
-      showNotice('Istakada otomatik grup bulunamadı.');
+      stagedGroups = [];
+      scene3d.clearSelection();
     }
-  }
+  });
+});
+
+els.btnOpenPairs?.addEventListener('click', () => {
+  const game = currentRoom?.game;
+  const mySeat = game?.seats[game.viewerSeatIndex];
+  if (!game || !mySeat || mySeat.opened) return;
+  if (liveAutoAnalysis.pairGroups.length === 0) return;
+  const groups = liveAutoAnalysis.pairGroups.map((g) => g.tiles.map((t) => t.id));
+  sendGameAction('game:openHand', { groups, mode: 'pairs' }, (res) => {
+    if (!res?.ok) {
+      showNotice(res?.error || 'Çift açılamadı.');
+    } else {
+      stagedGroups = [];
+      scene3d.clearSelection();
+    }
+  });
 });
 
 els.btnStageGroup.addEventListener('click', () => {

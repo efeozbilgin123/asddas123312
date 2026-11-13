@@ -134,23 +134,16 @@ export function validateRun(tiles, okeyTarget) {
   const len = tiles.length;
   let bestCandidate = null;
 
-  for (let start = 1; start <= 15 - len; start += 1) {
+  for (let start = 1; start <= 14 - len; start += 1) {
     const end = start + len - 1;
-    // Build the numbers in this window [start..end], where 14 maps to 1
+    // Standard 101 Okey runs end at 13 (12-13-1 wraparound is not valid)
     const windowNums = [];
     const seen = new Set();
-    let conflict = false;
 
     for (let pos = start; pos <= end; pos += 1) {
-      const actualNum = pos === 14 ? 1 : pos;
-      if (seen.has(actualNum)) {
-        conflict = true;
-        break;
-      }
-      seen.add(actualNum);
-      windowNums.push(actualNum);
+      seen.add(pos);
+      windowNums.push(pos);
     }
-    if (conflict) continue;
 
     // Every normal tile must exist in windowNums
     let allNormalsFit = true;
@@ -299,13 +292,11 @@ export function findBestOpening(handTiles, okeyTarget, minPoints = 101) {
       }
     }
 
-    // Pure runs without wilds
-    for (let start = 1; start <= 12; start += 1) {
+    // Pure runs without wilds (stops at 13)
+    for (let start = 1; start <= 11; start += 1) {
       const seq = [];
-      for (let pos = start; pos <= 14; pos += 1) {
-        const num = pos === 14 ? 1 : pos;
-        if (pos === 14 && start === 1) break;
-        const bucket = byNum.get(num);
+      for (let pos = start; pos <= 13; pos += 1) {
+        const bucket = byNum.get(pos);
         if (!bucket || bucket.length === 0) break;
         seq.push(bucket[0]);
         if (seq.length >= 3) {
@@ -315,30 +306,22 @@ export function findBestOpening(handTiles, okeyTarget, minPoints = 101) {
       }
     }
 
-    // Runs with 1 wild
+    // Runs with 1 wild (stops at 13)
     if (wilds.length > 0) {
       for (const w of wilds) {
         for (let len = 3; len <= 7; len += 1) {
-          for (let start = 1; start <= 15 - len; start += 1) {
+          for (let start = 1; start <= 14 - len; start += 1) {
             const picked = [];
             let misses = 0;
-            let conflict = false;
-            const seenNums = new Set();
             for (let pos = start; pos < start + len; pos += 1) {
-              const num = pos === 14 ? 1 : pos;
-              if (seenNums.has(num)) {
-                conflict = true;
-                break;
-              }
-              seenNums.add(num);
-              const bucket = byNum.get(num);
+              const bucket = byNum.get(pos);
               if (bucket && bucket.length > 0) {
                 picked.push(bucket[0]);
               } else {
                 misses += 1;
               }
             }
-            if (!conflict && misses === 1 && picked.length >= 2) {
+            if (misses === 1 && picked.length >= 2) {
               const v = validateRun([...picked, w], okeyTarget);
               if (v.valid) candidates.push(v);
             }
@@ -584,3 +567,92 @@ export function autoArrangePairs(handTiles, okeyTarget) {
 
   return layoutGroupsOnRack(pairTilesList, rest);
 }
+
+/**
+ * Automatically evaluates both valid Seri/Per (Tek) points and valid Çift (Pair) count
+ * from the current rack slot layout (respecting manual gaps) as well as optimal full-hand combinations.
+ */
+export function analyzeHandLive(rackSlots, handTiles, okeyTarget, cols = 14) {
+  const safeHand = Array.isArray(handTiles) ? handTiles : [];
+  const rackSeriesGroups = [];
+  const rackPairGroups = [];
+  let rackSeriesPoints = 0;
+
+  if (Array.isArray(rackSlots) && rackSlots.length > 0) {
+    const handIds = new Set(safeHand.map((t) => t.id));
+    const segments = [];
+    const total = rackSlots.length;
+    const rows = Math.ceil(total / cols);
+
+    for (let r = 0; r < rows; r += 1) {
+      let current = [];
+      for (let c = 0; c < cols; c += 1) {
+        const idx = r * cols + c;
+        const tile = idx < total ? rackSlots[idx] : null;
+        if (tile && handIds.has(tile.id)) {
+          current.push(tile);
+        } else if (current.length > 0) {
+          segments.push(current);
+          current = [];
+        }
+      }
+      if (current.length > 0) segments.push(current);
+    }
+
+    const usedSeriesIds = new Set();
+    const usedPairIds = new Set();
+
+    for (const seg of segments) {
+      if (seg.length >= 3 && !seg.some((t) => usedSeriesIds.has(t.id))) {
+        const res = validateGroup(seg, okeyTarget);
+        if (res.valid) {
+          seg.forEach((t) => usedSeriesIds.add(t.id));
+          rackSeriesPoints += res.points;
+          rackSeriesGroups.push({
+            type: res.type,
+            points: res.points,
+            tiles: res.slots.map((s) => s.tile)
+          });
+        }
+      }
+      if (seg.length === 2 && !seg.some((t) => usedPairIds.has(t.id))) {
+        const pRes = validatePair(seg, okeyTarget);
+        if (pRes.valid) {
+          seg.forEach((t) => usedPairIds.add(t.id));
+          rackPairGroups.push({
+            points: pRes.points,
+            tiles: [...seg]
+          });
+        }
+      }
+    }
+  }
+
+  const bestSeries = findBestOpening(safeHand, okeyTarget, 0);
+  const useRackSeries = rackSeriesGroups.length > 0 && rackSeriesPoints >= bestSeries.totalPoints;
+  const seriesGroups = useRackSeries
+    ? rackSeriesGroups
+    : bestSeries.groups.map((g) => ({
+        type: g.type,
+        points: g.points,
+        tiles: g.slots.map((s) => s.tile)
+      }));
+  const seriesPoints = useRackSeries ? rackSeriesPoints : bestSeries.totalPoints;
+
+  const autoPairs = findPairsInHand(safeHand, okeyTarget);
+  const useRackPairs = rackPairGroups.length > 0 && rackPairGroups.length >= autoPairs.length;
+  const pairGroups = useRackPairs
+    ? rackPairGroups
+    : autoPairs.map((pair) => ({
+        points: validatePair(pair, okeyTarget).points,
+        tiles: pair
+      }));
+
+  return {
+    seriesPoints,
+    seriesGroups,
+    pairCount: pairGroups.length,
+    pairGroups
+  };
+}
+

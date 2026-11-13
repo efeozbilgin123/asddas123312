@@ -5,6 +5,7 @@ import { soundFX } from './sound.js';
 import {
   createNameplateTexture,
   getAvatarTexture,
+  getDiscardPadTexture,
   getFeltTexture,
   getKahveBackdropTexture,
   getMenuBoardTexture,
@@ -190,10 +191,12 @@ export class OkeyTable3D {
       antialias: true,
       powerPreference: 'high-performance'
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.basePixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+    this.musicPerfMode = false;
+    this.renderer.setPixelRatio(this.basePixelRatio);
     this.renderer.setSize(width, height, false);
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.14;
 
@@ -202,6 +205,7 @@ export class OkeyTable3D {
 
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
+    this.lastHoverCheckTime = 0;
     this.interactables = [];
     this.rackSlotMeshes = [];
     this.handSlotData = new Array(RACK_COLS * RACK_ROWS).fill(null);
@@ -224,6 +228,7 @@ export class OkeyTable3D {
     this.lastTableTileIds = new Set();
     this.lastHandIds = new Set();
 
+    // Cached geometries and materials to eliminate per-click / per-frame GC stalls
     this.tileGeom = createRoundedTileGeometry(TILE_W, TILE_H, TILE_D, 0.038, 0.015);
     this.sideTileMat = new THREE.MeshStandardMaterial({
       color: '#EAE1CE',
@@ -234,6 +239,55 @@ export class OkeyTable3D {
       map: getTileBackTexture(),
       roughness: 0.3,
       metalness: 0.04
+    });
+    this.tileFaceMatCache = new Map();
+    this.avatarMatCache = new Map();
+
+    const bustProfile = [
+      new THREE.Vector2(0.01, -0.35),
+      new THREE.Vector2(0.92, -0.35),
+      new THREE.Vector2(0.96, 0.38),
+      new THREE.Vector2(0.9, 0.92),
+      new THREE.Vector2(0.7, 1.24),
+      new THREE.Vector2(0.32, 1.44),
+      new THREE.Vector2(0.24, 1.64),
+      new THREE.Vector2(0.23, 1.94),
+      new THREE.Vector2(0.01, 1.94)
+    ];
+    this.bustGeom = new THREE.LatheGeometry(bustProfile, 24);
+    this.rearCapMat = new THREE.MeshStandardMaterial({
+      color: '#0E0E10',
+      roughness: 0.92,
+      metalness: 0.04
+    });
+    this.coverWoodMat = new THREE.MeshStandardMaterial({
+      map: getWoodTexture(),
+      color: '#5B361D',
+      roughness: 0.46,
+      metalness: 0.08
+    });
+    this.coverBrassMat = new THREE.MeshStandardMaterial({
+      color: '#B89242',
+      roughness: 0.34,
+      metalness: 0.65
+    });
+    this.oppShieldGeom = new THREE.BoxGeometry(9.5, 2.02, 0.24);
+    this.oppTrimGeom = new THREE.BoxGeometry(9.54, 0.07, 0.26);
+    this.gStandGeom = new THREE.BoxGeometry(0.84, 0.12, 1.08);
+    this.gStandMat = new THREE.MeshStandardMaterial({
+      map: getWoodTexture(),
+      color: '#8A5630',
+      roughness: 0.48
+    });
+    this.meldTrayGeomUnit = new THREE.BoxGeometry(1, 0.04, TILE_H * 0.74 + 0.14);
+    this.meldTrayMatDefault = new THREE.MeshStandardMaterial({
+      color: '#0E3122',
+      roughness: 0.85
+    });
+    this.meldTrayMatLayoff = new THREE.MeshStandardMaterial({
+      color: '#3FA876',
+      emissive: '#1F6B47',
+      roughness: 0.85
     });
 
     this.dynamicGroup = new THREE.Group();
@@ -255,6 +309,21 @@ export class OkeyTable3D {
     this.rafId = null;
     this.animate = this.animate.bind(this);
     this.animate();
+  }
+
+  setMusicPerformanceMode(active) {
+    const next = Boolean(active);
+    if (this.musicPerfMode === next) return;
+    this.musicPerfMode = next;
+    const targetRatio = next
+      ? Math.min(window.devicePixelRatio || 1, 1.15)
+      : this.basePixelRatio;
+    this.renderer.setPixelRatio(targetRatio);
+    this.onResize();
+  }
+
+  getRackSlots() {
+    return this.handSlotData;
   }
 
   buildPendantLamp(x, y, z, scale = 1, addLight = false) {
@@ -313,7 +382,6 @@ export class OkeyTable3D {
   buildWoodenChair(woodMat, leatherMat) {
     const chair = new THREE.Group();
 
-    // 4 tapered walnut legs (floor is y = -2.35, seat at y = -0.58)
     const legOffsets = [
       [-0.72, -1.48, -0.68],
       [0.72, -1.48, -0.68],
@@ -322,34 +390,28 @@ export class OkeyTable3D {
     ];
     for (const [lx, ly, lz] of legOffsets) {
       const leg = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.075, 0.055, 1.74, 10),
+        new THREE.CylinderGeometry(0.075, 0.055, 1.74, 8),
         woodMat
       );
       leg.position.set(lx, ly, lz);
-      leg.castShadow = true;
       chair.add(leg);
     }
 
-    // Wooden seat frame + padded dark leather cushion
     const frame = new THREE.Mesh(new THREE.BoxGeometry(1.66, 0.14, 1.56), woodMat);
     frame.position.set(0, -0.58, 0);
     chair.add(frame);
 
     const cushion = new THREE.Mesh(new THREE.BoxGeometry(1.52, 0.14, 1.44), leatherMat);
     cushion.position.set(0, -0.46, 0.02);
-    cushion.receiveShadow = true;
     chair.add(cushion);
 
-    // Upright back posts
     for (const sx of [-0.74, 0.74]) {
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.075, 2.28, 10), woodMat);
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.075, 2.28, 8), woodMat);
       post.position.set(sx, 0.56, -0.72);
       post.rotation.x = -0.06;
-      post.castShadow = true;
       chair.add(post);
     }
 
-    // Slatted backrest + arched crest rail
     for (const sx of [-0.46, 0, 0.46]) {
       const slat = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.42, 0.07), woodMat);
       slat.position.set(sx, 0.72, -0.73);
@@ -360,7 +422,6 @@ export class OkeyTable3D {
     const crestRail = new THREE.Mesh(new THREE.BoxGeometry(1.68, 0.26, 0.14), woodMat);
     crestRail.position.set(0, 1.58, -0.78);
     crestRail.rotation.x = -0.06;
-    crestRail.castShadow = true;
     chair.add(crestRail);
 
     return chair;
@@ -386,11 +447,8 @@ export class OkeyTable3D {
       roughness: 0.65
     });
 
-    // Side café table (square cozy wooden top + pedestal base)
     const top = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.24, 4.4), woodMat);
     top.position.y = -0.14;
-    top.castShadow = true;
-    top.receiveShadow = true;
     group.add(top);
 
     const feltCenter = new THREE.Mesh(
@@ -404,22 +462,20 @@ export class OkeyTable3D {
     feltCenter.position.y = -0.01;
     group.add(feltCenter);
 
-    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.55, 2.2, 16), darkWoodMat);
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.55, 2.2, 12), darkWoodMat);
     col.position.y = -1.25;
     group.add(col);
 
-    const baseFoot = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.35, 0.16, 16), darkWoodMat);
+    const baseFoot = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.35, 0.16, 12), darkWoodMat);
     baseFoot.position.y = -2.27;
     group.add(baseFoot);
 
     if (hasTavla) {
-      // Half-open Backgammon board + tea glasses
       const tavla = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.12, 1.15), darkWoodMat);
       tavla.position.set(0, 0.06, 0);
       tavla.rotation.y = 0.25;
       group.add(tavla);
     } else {
-      // Empty wooden okey racks ready on table
       [
         [0, 0.08, 1.5, 0],
         [0, 0.08, -1.5, Math.PI]
@@ -431,27 +487,21 @@ export class OkeyTable3D {
       });
     }
 
-    // Small tea glasses on corner of the side table
+    const saucerMat = new THREE.MeshStandardMaterial({ color: '#F0EAE0', roughness: 0.25 });
+    const teaMat = new THREE.MeshStandardMaterial({ color: '#8E250B', roughness: 0.15 });
     for (const [gx, gz] of [
       [-1.4, -1.3],
       [1.45, 1.35]
     ]) {
-      const saucer = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.24, 0.18, 0.03, 14),
-        new THREE.MeshStandardMaterial({ color: '#F0EAE0', roughness: 0.25 })
-      );
+      const saucer = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.18, 0.03, 12), saucerMat);
       saucer.position.set(gx, 0.03, gz);
       group.add(saucer);
 
-      const tea = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.11, 0.08, 0.26, 12),
-        new THREE.MeshStandardMaterial({ color: '#8E250B', roughness: 0.15 })
-      );
+      const tea = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.08, 0.26, 10), teaMat);
       tea.position.set(gx, 0.17, gz);
       group.add(tea);
     }
 
-    // 4 chairs tucked around the side table
     const chairConfigs = [
       [0, 0, 2.75, Math.PI],
       [0, 0, -2.75, 0],
@@ -474,7 +524,7 @@ export class OkeyTable3D {
     group.scale.setScalar(scale);
 
     const pot = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.68, 0.46, 1.15, 16),
+      new THREE.CylinderGeometry(0.68, 0.46, 1.15, 12),
       new THREE.MeshStandardMaterial({ color: '#7D3B22', roughness: 0.78 })
     );
     pot.position.y = 0.58;
@@ -496,7 +546,7 @@ export class OkeyTable3D {
       [-0.25, 2.48, -0.45, 0.46]
     ];
     for (const [lx, ly, lz, lr] of leafClusters) {
-      const crown = new THREE.Mesh(new THREE.DodecahedronGeometry(lr, 1), leafMat);
+      const crown = new THREE.Mesh(new THREE.DodecahedronGeometry(lr, 0), leafMat);
       crown.position.set(lx, ly, lz);
       group.add(crown);
     }
@@ -505,29 +555,29 @@ export class OkeyTable3D {
   }
 
   buildEnvironment() {
-    const hemi = new THREE.HemisphereLight('#FFEBD2', '#2B1C13', 1.02);
+    const hemi = new THREE.HemisphereLight('#FFEBD2', '#2B1C13', 1.15);
     this.scene.add(hemi);
 
-    // Warm kahvehane overhead key light + ambient fill
-    const pendantLight = new THREE.PointLight('#FFD18C', 58, 52, 1.3);
+    // Single warm kahvehane overhead key point light + shadow-casting directional
+    const pendantLight = new THREE.PointLight('#FFD18C', 52, 54, 1.25);
     pendantLight.position.set(0, 9.6, 0.5);
     this.scene.add(pendantLight);
 
     const keyLight = new THREE.DirectionalLight('#FFF0D4', 1.25);
     keyLight.position.set(6, 16, 9);
     keyLight.castShadow = true;
-    keyLight.shadow.mapSize.set(2048, 2048);
+    keyLight.shadow.mapSize.set(1024, 1024);
     keyLight.shadow.camera.near = 2;
-    keyLight.shadow.camera.far = 44;
-    const d = 15;
+    keyLight.shadow.camera.far = 38;
+    const d = 13.5;
     keyLight.shadow.camera.left = -d;
     keyLight.shadow.camera.right = d;
     keyLight.shadow.camera.top = d;
     keyLight.shadow.camera.bottom = -d;
-    keyLight.shadow.bias = -0.0004;
+    keyLight.shadow.bias = -0.0005;
     this.scene.add(keyLight);
 
-    const rimLight = new THREE.DirectionalLight('#CBD8FF', 0.34);
+    const rimLight = new THREE.DirectionalLight('#CBD8FF', 0.32);
     rimLight.position.set(-10, 9, -12);
     this.scene.add(rimLight);
 
@@ -570,7 +620,7 @@ export class OkeyTable3D {
       color: '#633D26',
       roughness: 0.65
     });
-    const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 2.2, 2.1, 24), legMat);
+    const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 2.2, 2.1, 20), legMat);
     pedestal.position.y = -1.35;
     this.scene.add(pedestal);
 
@@ -595,6 +645,11 @@ export class OkeyTable3D {
     const clockMat = new THREE.MeshBasicMaterial({ map: getWallClockTexture() });
     const windowMat = new THREE.MeshBasicMaterial({ map: getWindowNightTexture() });
     const photoMat = new THREE.MeshStandardMaterial({ map: getKahveBackdropTexture(), roughness: 0.65 });
+    const sconceMat = new THREE.MeshStandardMaterial({
+      color: '#FFE4A3',
+      emissive: '#FF9E3D',
+      emissiveIntensity: 1.55
+    });
 
     const roomHalf = 25.5;
     const wallSpecs = [
@@ -620,18 +675,15 @@ export class OkeyTable3D {
       rail.position.set(0, -2.35, 0.2);
       wallGroup.add(rail);
 
-      // Vertical wooden pilasters dividing the wall bays
       for (const px of [-20, -10, 10, 20]) {
         const pilaster = new THREE.Mesh(new THREE.BoxGeometry(0.65, 15.6, 0.38), wainscotMat);
         pilaster.position.set(px, 0, 0.18);
         wallGroup.add(pilaster);
       }
 
-      // Artwork & Blackboard menu placement
       [-15, 0, 15].forEach((px, pIdx) => {
-        if (wallIdx === 0 && px === 0) return; // Keep back center open for Ocakbaşı
+        if (wallIdx === 0 && px === 0) return;
         if (wallIdx === 0 && px === 15) {
-          // Wall Menu Chalkboard next to Ocakbaşı!
           const mFrame = new THREE.Mesh(new THREE.BoxGeometry(4.6, 5.6, 0.2), wainscotMat);
           mFrame.position.set(px, 1.45, 0.12);
           wallGroup.add(mFrame);
@@ -650,16 +702,8 @@ export class OkeyTable3D {
         wallGroup.add(art);
       });
 
-      // Warm wall brass sconces between bays
       [-10, 10].forEach((sx) => {
-        const sconce = new THREE.Mesh(
-          new THREE.SphereGeometry(0.32, 12, 10),
-          new THREE.MeshStandardMaterial({
-            color: '#FFE4A3',
-            emissive: '#FF9E3D',
-            emissiveIntensity: 1.55
-          })
-        );
+        const sconce = new THREE.Mesh(new THREE.SphereGeometry(0.32, 10, 8), sconceMat);
         sconce.position.set(sx, 2.2, 0.45);
         wallGroup.add(sconce);
       });
@@ -671,17 +715,18 @@ export class OkeyTable3D {
     const clockGroup = new THREE.Group();
     clockGroup.position.set(-7.6, 7.6, -roomHalf + 0.24);
     const clockCase = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.38, 1.48, 0.28, 32),
+      new THREE.CylinderGeometry(1.38, 1.48, 0.28, 24),
       wainscotMat
     );
     clockCase.rotation.x = Math.PI / 2;
     clockGroup.add(clockCase);
-    const clockFace = new THREE.Mesh(new THREE.CircleGeometry(1.18, 32), clockMat);
+    const clockFace = new THREE.Mesh(new THREE.CircleGeometry(1.18, 24), clockMat);
     clockFace.position.z = 0.16;
     clockGroup.add(clockFace);
     this.scene.add(clockGroup);
 
     // Rain-kissed Evening Windows on East & West walls with velvet drapes
+    const curtainMat = new THREE.MeshStandardMaterial({ color: '#53191B', roughness: 0.88 });
     [-1, 1].forEach((side) => {
       [-5.5, 5.5].forEach((wz) => {
         const winGroup = new THREE.Group();
@@ -706,10 +751,8 @@ export class OkeyTable3D {
           winGroup.add(bar);
         }
 
-        // Burgundy velvet curtains flanking each window
-        const curtainMat = new THREE.MeshStandardMaterial({ color: '#53191B', roughness: 0.88 });
         for (const cx of [-2.45, 2.45]) {
-          const drape = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.4, 6.4, 12), curtainMat);
+          const drape = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.4, 6.4, 10), curtainMat);
           drape.position.set(cx, 0, 0.16);
           winGroup.add(drape);
         }
@@ -747,7 +790,6 @@ export class OkeyTable3D {
     counterTop.position.y = 2.84;
     barGroup.add(counterTop);
 
-    // Ornate Copper & Brass Çay Kazanı (Tea Boiler)
     const copperMat = new THREE.MeshStandardMaterial({
       color: '#B86535',
       roughness: 0.26,
@@ -761,32 +803,25 @@ export class OkeyTable3D {
     kazanRim.position.set(-2.4, 4.65, 0);
     barGroup.add(kazanRim);
 
-    const demlik = new THREE.Mesh(new THREE.SphereGeometry(0.46, 18, 14), trimBrassMat);
+    const demlik = new THREE.Mesh(new THREE.SphereGeometry(0.46, 14, 10), trimBrassMat);
     demlik.scale.set(1.05, 0.88, 1.05);
     demlik.position.set(-2.4, 5.1, 0);
     barGroup.add(demlik);
 
-    // Back shelves stocked with tea & coffee cups
     for (const sy of [4.8, 6.3]) {
       const shelf = new THREE.Mesh(new THREE.BoxGeometry(9.6, 0.16, 0.95), wainscotMat);
       shelf.position.set(1.0, sy, -1.7);
       barGroup.add(shelf);
     }
+    const barGlassMat = new THREE.MeshStandardMaterial({ color: '#DCE8EB', transparent: true, opacity: 0.6, roughness: 0.1 });
     for (let i = 0; i < 8; i += 1) {
-      const glass = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.14, 0.11, 0.34, 12),
-        new THREE.MeshStandardMaterial({ color: '#DCE8EB', transparent: true, opacity: 0.6, roughness: 0.1 })
-      );
+      const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.11, 0.34, 10), barGlassMat);
       glass.position.set(-1.6 + i * 0.72, 5.05, -1.7);
       barGroup.add(glass);
     }
-
-    const barLight = new THREE.PointLight('#FFB75E', 24, 22, 1.3);
-    barLight.position.set(0, 6.2, 0.6);
-    barGroup.add(barLight);
     this.scene.add(barGroup);
 
-    // 4 Cozy Ambient Side Kahvehane Tables around the room (some with racks, some with tavla)
+    // 4 Cozy Ambient Side Kahvehane Tables around the room
     this.buildSideKahveTable(-16.2, -15.2, 0.18, false);
     this.buildSideKahveTable(16.2, -15.2, -0.22, true);
     this.buildSideKahveTable(-17.4, 10.2, -0.15, true);
@@ -798,10 +833,10 @@ export class OkeyTable3D {
     this.buildPottedPlant(-23.2, 22.8, 1.05);
     this.buildPottedPlant(23.2, 22.8, 1.1);
 
-    // Hanging Brass Mosaic Pendant Lamps over center & corner tables
+    // Hanging Brass Mosaic Pendant Lamps over center & corner tables (emissive globes, single central PointLight)
     this.buildPendantLamp(0, 10.4, 0, 1.25, false);
-    this.buildPendantLamp(-16.2, 7.2, -15.2, 1.05, true);
-    this.buildPendantLamp(16.2, 7.2, -15.2, 1.05, true);
+    this.buildPendantLamp(-16.2, 7.2, -15.2, 1.05, false);
+    this.buildPendantLamp(16.2, 7.2, -15.2, 1.05, false);
     this.buildPendantLamp(-17.4, 7.2, 10.2, 1.0, false);
     this.buildPendantLamp(17.4, 7.2, 10.2, 1.0, false);
   }
@@ -862,18 +897,63 @@ export class OkeyTable3D {
       new THREE.Vector3(-5.85, 0.04, 6.25)   // rel 3 (Directly left of your rack!)
     ];
 
+    this.discardPadMatIdle = new THREE.MeshStandardMaterial({
+      map: getDiscardPadTexture(false),
+      roughness: 0.76
+    });
+    this.discardPadMatActive = new THREE.MeshStandardMaterial({
+      map: getDiscardPadTexture(true),
+      emissive: '#6B4E0C',
+      emissiveIntensity: 0.45,
+      roughness: 0.56
+    });
+    const otherPadMat = new THREE.MeshStandardMaterial({
+      color: '#0F3625',
+      roughness: 0.88
+    });
+
     for (let rel = 0; rel < 4; rel += 1) {
       const pos = this.discardZoneCoords[rel];
-      const pad = new THREE.Mesh(
-        new THREE.BoxGeometry(1.12, 0.03, 1.38),
-        new THREE.MeshStandardMaterial({
-          color: '#0F3625',
-          roughness: 0.88
-        })
-      );
-      pad.position.set(pos.x, 0.02, pos.z);
-      pad.receiveShadow = true;
-      this.scene.add(pad);
+      if (rel === 0) {
+        const pad = new THREE.Mesh(
+          new THREE.PlaneGeometry(1.32, 1.62),
+          this.discardPadMatIdle
+        );
+        pad.rotation.x = -Math.PI / 2;
+        pad.position.set(pos.x, 0.032, pos.z);
+        pad.receiveShadow = true;
+        this.rightDiscardPadMesh = pad;
+        this.scene.add(pad);
+
+        // Glowing golden perimeter ring around right discard drop zone
+        this.rightDiscardRingMat = new THREE.MeshBasicMaterial({
+          color: '#F5C842',
+          transparent: true,
+          opacity: 0.0,
+          side: THREE.DoubleSide
+        });
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(0.84, 0.96, 32),
+          this.rightDiscardRingMat
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.set(pos.x, 0.038, pos.z);
+        this.rightDiscardRing = ring;
+        this.scene.add(ring);
+
+        // Tall invisible 3D hit column so First-Person drag drops never miss the pad
+        this.rightDiscardHitBox = new THREE.Mesh(
+          new THREE.BoxGeometry(2.1, 1.4, 2.3),
+          new THREE.MeshBasicMaterial({ visible: false })
+        );
+        this.rightDiscardHitBox.position.set(pos.x + 0.08, 0.62, pos.z);
+        this.scene.add(this.rightDiscardHitBox);
+      } else {
+        const pad = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.03, 1.38), otherPadMat);
+        pad.position.set(pos.x, 0.02, pos.z);
+        pad.receiveShadow = true;
+        this.scene.add(pad);
+      }
     }
   }
 
@@ -988,13 +1068,22 @@ export class OkeyTable3D {
   }
 
   createTileMesh(tile, { faceUp = true, okeyTarget = null, selected = false, mustUse = false } = {}) {
-    const faceMat = faceUp
-      ? new THREE.MeshStandardMaterial({
+    let faceMat = this.backTileMat;
+    if (faceUp) {
+      const isOkey = isOkeyTile(tile, okeyTarget);
+      const cacheKey = tile.isFakeOkey
+        ? `fake-${selected}-${mustUse}`
+        : `${tile.color}-${tile.number}-${isOkey}-${selected}-${mustUse}`;
+      faceMat = this.tileFaceMatCache.get(cacheKey);
+      if (!faceMat) {
+        faceMat = new THREE.MeshStandardMaterial({
           map: getTileFaceTexture(tile, okeyTarget, { selected, mustUse }),
           roughness: 0.22,
           metalness: 0.04
-        })
-      : this.backTileMat;
+        });
+        this.tileFaceMatCache.set(cacheKey, faceMat);
+      }
+    }
 
     // Group 0: front, Group 1: back, Group 2: bevel & sides
     const materials = [faceMat, this.backTileMat, this.sideTileMat];
@@ -1013,20 +1102,7 @@ export class OkeyTable3D {
       metalness: 0.08
     });
 
-    // Clean single-piece sculpted shoulders + neck bust silhouette
-    const bustProfile = [
-      new THREE.Vector2(0.01, -0.35),
-      new THREE.Vector2(0.92, -0.35),
-      new THREE.Vector2(0.96, 0.38),
-      new THREE.Vector2(0.9, 0.92),
-      new THREE.Vector2(0.7, 1.24),
-      new THREE.Vector2(0.32, 1.44),
-      new THREE.Vector2(0.24, 1.64),
-      new THREE.Vector2(0.23, 1.94),
-      new THREE.Vector2(0.01, 1.94)
-    ];
-    const bustGeom = new THREE.LatheGeometry(bustProfile, 32);
-    const bust = new THREE.Mesh(bustGeom, bustMat);
+    const bust = new THREE.Mesh(this.bustGeom, bustMat);
     bust.scale.set(1.26, 1.0, 0.58);
     bust.castShadow = true;
     bust.receiveShadow = true;
@@ -1034,7 +1110,7 @@ export class OkeyTable3D {
 
     if (isActive) {
       const turnRing = new THREE.Mesh(
-        new THREE.RingGeometry(1.18, 1.32, 32),
+        new THREE.RingGeometry(1.18, 1.32, 24),
         new THREE.MeshBasicMaterial({
           color: teamColor,
           transparent: true,
@@ -1052,7 +1128,6 @@ export class OkeyTable3D {
 
   renderPlayerHeads(state, viewerIdx) {
     const teamMode = state.options?.teamMode || 'solo';
-    // Omit rel === 0 so own PFP is hidden on viewer's screen; enlarge opponent PFPs!
     const seatPositions = [
       { rel: 1, pos: [8.85, 0.0, 0], headY: 2.78, medRadius: 0.98 },
       { rel: 2, pos: [0, 0.0, -8.85], headY: 2.92, medRadius: 1.06 },
@@ -1091,8 +1166,6 @@ export class OkeyTable3D {
       this.dynamicGroup.add(holder);
       holder.updateMatrixWorld(true);
 
-      // Large Framed PFP Medallion strictly facing the center of the table;
-      // Back side has solid walnut/brass cap so PFP NEVER shows from rear!
       const headY = cfg.headY;
       const medRadius = cfg.medRadius;
       const headGroup = new THREE.Group();
@@ -1109,42 +1182,39 @@ export class OkeyTable3D {
       });
 
       const bezel = new THREE.Mesh(
-        new THREE.CylinderGeometry(medRadius + 0.09, medRadius + 0.09, 0.22, 40),
+        new THREE.CylinderGeometry(medRadius + 0.09, medRadius + 0.09, 0.22, 28),
         ringMat
       );
       bezel.rotation.x = Math.PI / 2;
       bezel.castShadow = true;
       headGroup.add(bezel);
 
-      // Front table-facing portrait disc ONLY
-      const avatarMat = new THREE.MeshBasicMaterial({
-        map: getAvatarTexture(seat.avatar)
-      });
-      const frontDisc = new THREE.Mesh(new THREE.CircleGeometry(medRadius, 40), avatarMat);
+      const avatarKey = String(seat.avatar || 'avatar-1');
+      let avatarMat = this.avatarMatCache.get(avatarKey);
+      if (!avatarMat) {
+        avatarMat = new THREE.MeshBasicMaterial({
+          map: getAvatarTexture(avatarKey)
+        });
+        this.avatarMatCache.set(avatarKey, avatarMat);
+      }
+      const frontDisc = new THREE.Mesh(new THREE.CircleGeometry(medRadius, 28), avatarMat);
       frontDisc.position.z = 0.115;
       headGroup.add(frontDisc);
 
-      // Completely flat matte black back on rear (-Z) side so PFP stays hidden behind player
-      const rearCapMat = new THREE.MeshStandardMaterial({
-        color: '#0E0E10',
-        roughness: 0.92,
-        metalness: 0.04
-      });
-      const rearDisc = new THREE.Mesh(new THREE.CircleGeometry(medRadius + 0.01, 40), rearCapMat);
+      const rearDisc = new THREE.Mesh(new THREE.CircleGeometry(medRadius + 0.01, 28), this.rearCapMat);
       rearDisc.rotation.y = Math.PI;
       rearDisc.position.z = -0.114;
       headGroup.add(rearDisc);
 
       if (isActive) {
         const halo = new THREE.Mesh(
-          new THREE.RingGeometry(medRadius + 0.13, medRadius + 0.21, 40),
+          new THREE.RingGeometry(medRadius + 0.13, medRadius + 0.21, 28),
           new THREE.MeshBasicMaterial({ color: '#FFE082', transparent: true, opacity: 0.85, side: THREE.DoubleSide })
         );
         halo.position.z = 0.04;
         headGroup.add(halo);
       }
 
-      // Nameplate directly above enlarged head (ONLY player name, NO tile count!)
       const spriteMat = new THREE.SpriteMaterial({
         map: createNameplateTexture(seat.name, {
           isActive,
@@ -1818,17 +1888,6 @@ export class OkeyTable3D {
       { rel: 2, pos: [0, 0.22, -6.85], rotY: Math.PI },
       { rel: 3, pos: [-6.85, 0.22, 0], rotY: -Math.PI / 2 }
     ];
-    const coverWoodMat = new THREE.MeshStandardMaterial({
-      map: getWoodTexture(),
-      color: '#5B361D',
-      roughness: 0.46,
-      metalness: 0.08
-    });
-    const coverBrassMat = new THREE.MeshStandardMaterial({
-      color: '#B89242',
-      roughness: 0.34,
-      metalness: 0.65
-    });
 
     for (const cfg of oppConfigs) {
       const rackHolder = new THREE.Group();
@@ -1839,13 +1898,13 @@ export class OkeyTable3D {
       tilt.rotation.x = -0.32;
       rackHolder.add(tilt);
 
-      const shield = new THREE.Mesh(new THREE.BoxGeometry(9.5, 2.02, 0.24), coverWoodMat);
+      const shield = new THREE.Mesh(this.oppShieldGeom, this.coverWoodMat);
       shield.position.set(0, 1.15, 0.02);
       shield.castShadow = true;
       shield.receiveShadow = true;
       tilt.add(shield);
 
-      const topTrim = new THREE.Mesh(new THREE.BoxGeometry(9.54, 0.07, 0.26), coverBrassMat);
+      const topTrim = new THREE.Mesh(this.oppTrimGeom, this.coverBrassMat);
       topTrim.position.set(0, 2.16, 0.02);
       tilt.add(topTrim);
 
@@ -1878,7 +1937,7 @@ export class OkeyTable3D {
 
       if (isMyTurn && state.turnPhase === 'draw') {
         const glowRing = new THREE.Mesh(
-          new THREE.RingGeometry(0.6, 0.74, 32),
+          new THREE.RingGeometry(0.6, 0.74, 24),
           new THREE.MeshBasicMaterial({ color: '#F3CF42', side: THREE.DoubleSide })
         );
         glowRing.rotation.x = -Math.PI / 2;
@@ -1889,10 +1948,7 @@ export class OkeyTable3D {
     this.dynamicGroup.add(deckGroup);
 
     if (state.gosterge) {
-      const gStand = new THREE.Mesh(
-        new THREE.BoxGeometry(0.84, 0.12, 1.08),
-        new THREE.MeshStandardMaterial({ map: getWoodTexture(), color: '#8A5630', roughness: 0.48 })
-      );
+      const gStand = new THREE.Mesh(this.gStandGeom, this.gStandMat);
       gStand.position.set(0.68, 0.08, -3.9);
       gStand.castShadow = true;
       this.dynamicGroup.add(gStand);
@@ -1906,27 +1962,20 @@ export class OkeyTable3D {
       this.dynamicGroup.add(gMesh);
     }
 
-    // 5. Render 4 Corner Discard Piles (left neighbor sits right at left end of South rack!)
+    // 5. Render 4 Corner Discard Piles + right discard tray visual state
+    const canDiscardNow = isMyTurn && state.turnPhase === 'play';
+    if (this.rightDiscardPadMesh) {
+      this.rightDiscardPadMesh.material = this.discardPadMatIdle;
+    }
+    if (this.rightDiscardRingMat) {
+      this.rightDiscardRingMat.opacity = canDiscardNow ? 0.35 : 0.0;
+    }
+
     const nextDiscardTopIds = [null, null, null, null];
     for (let rel = 0; rel < 4; rel += 1) {
       const seatIdx = (viewerIdx + rel) % 4;
       const pileInfo = state.discardPiles[seatIdx];
       const baseCoord = this.discardZoneCoords[rel];
-
-      if (rel === 0 && isMyTurn && state.turnPhase === 'play') {
-        const hitPad = new THREE.Mesh(
-          new THREE.BoxGeometry(1.18, 0.1, 1.44),
-          new THREE.MeshBasicMaterial({
-            color: this.selectedTileIds.size === 1 ? '#F3CF42' : '#2C6E52',
-            transparent: true,
-            opacity: this.selectedTileIds.size === 1 ? 0.5 : 0.25
-          })
-        );
-        hitPad.position.set(baseCoord.x, 0.06, baseCoord.z);
-        hitPad.userData = { kind: 'discardTarget' };
-        this.dynamicGroup.add(hitPad);
-        this.interactables.push(hitPad);
-      }
 
       if (pileInfo && pileInfo.count > 0 && pileInfo.topTile) {
         nextDiscardTopIds[seatIdx] = pileInfo.topTile.id;
@@ -1950,7 +1999,7 @@ export class OkeyTable3D {
             this.interactables.push(tMesh);
 
             const ring = new THREE.Mesh(
-              new THREE.RingGeometry(0.62, 0.78, 28),
+              new THREE.RingGeometry(0.62, 0.78, 24),
               new THREE.MeshBasicMaterial({ color: '#4ADE80', side: THREE.DoubleSide })
             );
             ring.rotation.x = -Math.PI / 2;
@@ -2022,13 +2071,10 @@ export class OkeyTable3D {
         canLayoffTile(singleSelectedTile, meld, state.okeyTarget).valid;
 
       const tray = new THREE.Mesh(
-        new THREE.BoxGeometry(groupWidth + 0.16, 0.04, TILE_H * meldTileScale + 0.14),
-        new THREE.MeshStandardMaterial({
-          color: isLayoffTarget ? '#3FA876' : '#0E3122',
-          emissive: isLayoffTarget ? '#1F6B47' : '#000000',
-          roughness: 0.85
-        })
+        this.meldTrayGeomUnit,
+        isLayoffTarget ? this.meldTrayMatLayoff : this.meldTrayMatDefault
       );
+      tray.scale.set(groupWidth + 0.16, 1, 1);
       tray.position.set(cursorX + groupWidth / 2 - tileStep / 2 + 0.02, 0.03, cursorZ);
       tray.userData = { kind: 'tableMeld', meldId: meld.id, isLayoffTarget };
       this.dynamicGroup.add(tray);
@@ -2087,6 +2133,48 @@ export class OkeyTable3D {
     this.targetFov = preset.fov || 44;
   }
 
+  isMyPlayTurn() {
+    const viewerIdx = this.currentState?.viewerSeatIndex ?? 0;
+    return Boolean(
+      this.currentState?.phase === 'playing' &&
+      this.currentState?.currentSeat === viewerIdx &&
+      this.currentState?.turnPhase === 'play'
+    );
+  }
+
+  isOverRightDiscardZone(dragPlanePt = null) {
+    if (this.rightDiscardHitBox) {
+      const boxHits = this.raycaster.intersectObject(this.rightDiscardHitBox, false);
+      if (boxHits.length > 0) return true;
+    }
+    if (dragPlanePt) {
+      const dx = Math.abs(dragPlanePt.x - 5.85);
+      const dz = Math.abs(dragPlanePt.z - 6.25);
+      if (dx <= 1.35 && dz <= 1.55) return true;
+    }
+    return false;
+  }
+
+  setRightDiscardHighlight(isHovering, isDragging) {
+    const canDiscard = this.isMyPlayTurn();
+    if (this.rightDiscardPadMesh) {
+      this.rightDiscardPadMesh.material = canDiscard && isHovering
+        ? this.discardPadMatActive
+        : this.discardPadMatIdle;
+    }
+    if (this.rightDiscardRingMat) {
+      if (!canDiscard) {
+        this.rightDiscardRingMat.opacity = 0.0;
+      } else if (isHovering) {
+        this.rightDiscardRingMat.opacity = 1.0;
+      } else if (isDragging) {
+        this.rightDiscardRingMat.opacity = 0.72;
+      } else {
+        this.rightDiscardRingMat.opacity = 0.35;
+      }
+    }
+  }
+
   updatePointer(clientX, clientY) {
     const rect = this.canvas.getBoundingClientRect();
     this.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
@@ -2097,8 +2185,8 @@ export class OkeyTable3D {
     drag.moved = true;
     soundFX.playTilePickup();
     this.canvas.style.cursor = 'grabbing';
+    this.setRightDiscardHighlight(false, true);
 
-    // Hide slot mesh and spawn floating 3D tile smoothly starting from exact slot transform
     drag.mesh.visible = false;
     drag.mesh.updateMatrixWorld(true);
     const worldPos = new THREE.Vector3();
@@ -2118,7 +2206,6 @@ export class OkeyTable3D {
     this.scene.add(floating);
     drag.floatingMesh = floating;
 
-    // Smooth targets interpolated inside animate(dt)
     this.dragTargetPos = worldPos.clone().add(new THREE.Vector3(0, 0.18, 0.24));
     this.dragTargetQuat = new THREE.Quaternion().setFromEuler(
       new THREE.Euler(-0.36, isFlipped ? Math.PI : 0, 0, 'XYZ')
@@ -2157,12 +2244,6 @@ export class OkeyTable3D {
         this.callbacks.onDrawDeck?.();
       } else if (data.kind === 'leftDiscard') {
         this.callbacks.onDrawDiscard?.();
-      } else if (data.kind === 'discardTarget') {
-        const selected = this.getSelectedTiles();
-        if (selected.length === 1) {
-          this.callbacks.onDiscardTile?.(selected[0].id);
-          this.selectedTileIds.clear();
-        }
       } else if (data.kind === 'tableMeld' && data.isLayoffTarget) {
         const selected = this.getSelectedTiles();
         if (selected.length === 1) {
@@ -2200,7 +2281,6 @@ export class OkeyTable3D {
           this.updatePointer(e.clientX, e.clientY);
           this.raycaster.setFromCamera(this.pointer, this.camera);
 
-          // Highlight hovered rack slot marker without snapping tile position to discrete center
           const slotHits = this.raycaster.intersectObjects(this.rackSlotMeshes, false);
           this.rackSlotMeshes.forEach((m) => {
             m.material.opacity = 0;
@@ -2221,11 +2301,11 @@ export class OkeyTable3D {
             const localPt = this.southRackGroup.worldToLocal(rackPt.clone());
             if (
               slotHits.length > 0 ||
-              (Math.abs(localPt.x) <= 5.3 && localPt.y >= -0.15 && localPt.y <= 2.65)
+              (Math.abs(localPt.x) <= 5.1 && localPt.y >= -0.15 && localPt.y <= 2.65)
             ) {
               overRackPlane = true;
               const frontWorld = new THREE.Vector3(
-                THREE.MathUtils.clamp(localPt.x, -5.05, 5.05),
+                THREE.MathUtils.clamp(localPt.x, -4.95, 4.95),
                 THREE.MathUtils.clamp(localPt.y, 0.25, 2.35),
                 0.36
               ).applyMatrix4(this.southRackGroup.matrixWorld);
@@ -2237,12 +2317,14 @@ export class OkeyTable3D {
             }
           }
 
+          let dragTablePt = null;
           if (!overRackPlane) {
             const dragPt = new THREE.Vector3();
             if (this.raycaster.ray.intersectPlane(this.tableDragPlane, dragPt)) {
+              dragTablePt = dragPt;
               const clampedX = THREE.MathUtils.clamp(dragPt.x, -8.2, 8.2);
               const clampedZ = THREE.MathUtils.clamp(dragPt.z, -6.8, 8.2);
-              const overRackFootprint = Math.abs(clampedX) <= 5.2 && clampedZ >= 5.65 && clampedZ <= 7.45;
+              const overRackFootprint = Math.abs(clampedX) <= 5.0 && clampedZ >= 5.65 && clampedZ <= 7.45;
               if (!this.dragTargetPos) this.dragTargetPos = new THREE.Vector3();
               this.dragTargetPos.set(
                 clampedX,
@@ -2254,11 +2336,18 @@ export class OkeyTable3D {
               );
             }
           }
+
+          const overDiscard = !overRackPlane && this.isMyPlayTurn() && this.isOverRightDiscardZone(dragTablePt);
+          this.setRightDiscardHighlight(overDiscard, true);
         }
         return;
       }
 
       if (this.demoMode) return;
+      const now = performance.now();
+      if (now - this.lastHoverCheckTime < 40) return;
+      this.lastHoverCheckTime = now;
+
       this.updatePointer(e.clientX, e.clientY);
       this.raycaster.setFromCamera(this.pointer, this.camera);
       const hits = this.raycaster.intersectObjects(this.interactables, false);
@@ -2278,6 +2367,7 @@ export class OkeyTable3D {
       this.dragTargetQuat = null;
       this.dragTargetScale = null;
       this.canvas.style.cursor = 'default';
+      this.setRightDiscardHighlight(false, false);
       this.rackSlotMeshes.forEach((m) => {
         m.material.opacity = 0;
       });
@@ -2309,7 +2399,6 @@ export class OkeyTable3D {
           this.lastTileTap.tileId === drag.tile.id &&
           now - this.lastTileTap.time < 360
         ) {
-          // Double-click/tap: restore pre-tap selection and smoothly flip tile 180 deg!
           if (this.lastTileTap.wasSelectedBefore) {
             this.selectedTileIds.add(drag.tile.id);
           } else {
@@ -2345,26 +2434,23 @@ export class OkeyTable3D {
         return;
       }
 
-      // Check drop targets: Discard Pad, Valid Table Meld Layoff, or Rack Slot
+      // Check drop targets: Right Discard Tray, Valid Table Meld Layoff, or Rack Slot
       this.updatePointer(e.clientX, e.clientY);
       this.raycaster.setFromCamera(this.pointer, this.camera);
 
-      const discardHits = this.raycaster.intersectObjects(
-        this.interactables.filter((m) => m.userData?.kind === 'discardTarget'),
-        false
-      );
-      if (discardHits.length > 0) {
-        this.selectedTileIds.delete(drag.tile.id);
-        this.callbacks.onDiscardTile?.(drag.tile.id);
-        return;
-      }
-
       const viewerIdx = this.currentState?.viewerSeatIndex ?? 0;
       const mySeat = this.currentState?.seats?.[viewerIdx];
-      const isMyPlayTurn =
-        this.currentState?.phase === 'playing' &&
-        this.currentState?.currentSeat === viewerIdx &&
-        this.currentState?.turnPhase === 'play';
+      const isMyPlayTurn = this.isMyPlayTurn();
+
+      if (isMyPlayTurn) {
+        const dragPt = new THREE.Vector3();
+        const hasDragPt = this.raycaster.ray.intersectPlane(this.tableDragPlane, dragPt);
+        if (this.isOverRightDiscardZone(hasDragPt ? dragPt : null)) {
+          this.selectedTileIds.delete(drag.tile.id);
+          this.callbacks.onDiscardTile?.(drag.tile.id);
+          return;
+        }
+      }
 
       if (isMyPlayTurn && mySeat?.opened) {
         const meldHits = this.raycaster.intersectObjects(

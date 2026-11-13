@@ -210,6 +210,7 @@ body {
   height: 100dvh;
   min-height: 0;
   overflow: hidden;
+  isolation: isolate;
   background: var(--color-paper);
 }
 
@@ -218,6 +219,7 @@ body {
   width: 100%;
   height: 100%;
   touch-action: none;
+  transform: translateZ(0);
 }
 
 /* Lobby & Waiting Overlays */
@@ -756,6 +758,10 @@ body {
   color: var(--color-muted);
 }
 
+.dock-stat__live.is-ready {
+  color: var(--color-mint);
+}
+
 .selection-hint {
   font-size: var(--text-xs);
   font-weight: 700;
@@ -920,14 +926,16 @@ body {
   top: calc(var(--space-sm) + 48px);
   left: var(--space-md);
   z-index: var(--z-sticky);
-  width: min(370px, calc(100% - var(--space-lg)));
+  width: min(350px, calc(100% - var(--space-lg)));
   display: grid;
   gap: var(--space-xs);
   padding: var(--space-xs) var(--space-sm);
   border-radius: var(--radius-stock);
-  background: var(--grain), var(--fibre), var(--color-paper);
+  background: var(--color-paper);
   border: 1px solid var(--color-rule);
-  box-shadow: var(--shadow-card);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+  contain: layout paint;
+  transform: translateZ(0);
 }
 
 .music-dock[hidden] {
@@ -975,12 +983,12 @@ body {
   width: 100%;
   border-radius: var(--radius-input);
   overflow: hidden;
-  transition: opacity var(--dur-short) var(--ease-snap);
+  contain: layout paint;
 }
 
 .music-dock__body iframe {
   width: 100%;
-  height: 152px;
+  height: 84px;
   border: 0;
   display: block;
   border-radius: var(--radius-input);
@@ -994,13 +1002,16 @@ body {
 
 .music-dock.is-minimized {
   width: auto;
-  max-width: min(370px, calc(100% - var(--space-lg)));
+  max-width: min(350px, calc(100% - var(--space-lg)));
 }
 
 .music-dock.is-minimized .music-dock__body {
-  height: 0;
-  opacity: 0;
-  overflow: hidden;
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  width: 160px;
+  height: 84px;
+  opacity: 0.01;
   pointer-events: none;
 }
 

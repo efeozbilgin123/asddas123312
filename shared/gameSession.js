@@ -50,6 +50,7 @@ export class GameSession {
     this.discardPiles = [[], [], [], []];
     this.pickedDiscardTileId = null;
     this.pickedDiscardFromSeat = null;
+    this.lastDrawnTileId = null;
     this.committedMeldThisTurn = false;
     this.openedThisTurn = false;
     this.turnEndsAt = null;
@@ -128,6 +129,7 @@ export class GameSession {
     this.discardPiles = [[], [], [], []];
     this.pickedDiscardTileId = null;
     this.pickedDiscardFromSeat = null;
+    this.lastDrawnTileId = null;
     this.committedMeldThisTurn = false;
     this.openedThisTurn = false;
     this.roundSummary = null;
@@ -186,6 +188,11 @@ export class GameSession {
     const seat = this.seats[this.currentSeat];
     if (!seat) return;
 
+    // Return picked left-discard if stuck with it without opening
+    if (this.pickedDiscardTileId && !this.committedMeldThisTurn) {
+      this.returnPickedDiscard(seat.seatIndex, true);
+    }
+
     if (this.turnPhase === 'draw') {
       if (this.deck.length === 0) {
         this.finishRound(null, false, 'Ortadaki deste tükendi.');
@@ -193,21 +200,42 @@ export class GameSession {
       }
       const drawn = this.deck.pop();
       seat.hand.push(drawn);
+      this.lastDrawnTileId = drawn.id;
       this.turnPhase = 'play';
     }
 
-    // Return picked discard if stuck with it
-    if (this.pickedDiscardTileId && !this.committedMeldThisTurn) {
-      this.returnPickedDiscard(seat.seatIndex, true);
-      if (this.turnPhase === 'draw' && this.deck.length > 0) {
-        seat.hand.push(this.deck.pop());
-        this.turnPhase = 'play';
+    const isSafeDiscard = (t) =>
+      !isOkeyTile(t, this.okeyTarget) &&
+      !isDiscardPlayableOnTable(t, this.tableMelds, this.okeyTarget);
+
+    // Prefer discarding the tile drawn this turn so the player's arranged hand stays intact
+    const drawnTile = this.lastDrawnTileId
+      ? seat.hand.find((t) => t.id === this.lastDrawnTileId)
+      : null;
+
+    let candidate = null;
+    if (drawnTile && isSafeDiscard(drawnTile)) {
+      candidate = drawnTile;
+    } else {
+      for (let i = seat.hand.length - 1; i >= 0; i -= 1) {
+        if (isSafeDiscard(seat.hand[i])) {
+          candidate = seat.hand[i];
+          break;
+        }
+      }
+      if (!candidate) {
+        for (let i = seat.hand.length - 1; i >= 0; i -= 1) {
+          if (!isOkeyTile(seat.hand[i], this.okeyTarget)) {
+            candidate = seat.hand[i];
+            break;
+          }
+        }
+      }
+      if (!candidate) {
+        candidate = drawnTile || seat.hand[seat.hand.length - 1] || seat.hand[0];
       }
     }
 
-    // Discard last non-okey tile if possible
-    const candidate =
-      seat.hand.find((t) => !isOkeyTile(t, this.okeyTarget)) || seat.hand[0];
     if (candidate) {
       this.discardTile(seat.seatIndex, candidate.id, { forceTimeout: true });
     }
@@ -296,6 +324,7 @@ export class GameSession {
     this.turnPhase = 'play';
     this.pickedDiscardTileId = null;
     this.pickedDiscardFromSeat = null;
+    this.lastDrawnTileId = tile.id;
     this.committedMeldThisTurn = false;
     this.openedThisTurn = false;
 
@@ -324,8 +353,15 @@ export class GameSession {
     const seat = this.seats[seatIndex];
     seat.hand.push(tile);
     this.turnPhase = 'play';
-    this.pickedDiscardTileId = tile.id;
-    this.pickedDiscardFromSeat = leftSeat;
+    this.lastDrawnTileId = tile.id;
+    // Once a player has already opened their hand, taking from the left is unrestricted in 101 Okey
+    if (seat.opened) {
+      this.pickedDiscardTileId = null;
+      this.pickedDiscardFromSeat = null;
+    } else {
+      this.pickedDiscardTileId = tile.id;
+      this.pickedDiscardFromSeat = leftSeat;
+    }
     this.committedMeldThisTurn = false;
     this.openedThisTurn = false;
 
@@ -353,6 +389,7 @@ export class GameSession {
     this.discardPiles[fromSeat].push(tile);
     this.pickedDiscardTileId = null;
     this.pickedDiscardFromSeat = null;
+    this.lastDrawnTileId = null;
     this.turnPhase = 'draw';
 
     if (!silent) {
@@ -669,6 +706,7 @@ export class GameSession {
     this.discardPiles[seatIndex].push(tile);
     this.pickedDiscardTileId = null;
     this.pickedDiscardFromSeat = null;
+    this.lastDrawnTileId = null;
     this.committedMeldThisTurn = false;
 
     if (isFinalWin) {

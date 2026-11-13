@@ -753,9 +753,9 @@ test('GameSession.getClientView hides opponent tileCount while preserving viewer
   session.destroy();
 });
 
-test('GameSession prevents layMeld/layoffTile softlock when holding pickedDiscardTileId and emits islek/okey alertKind', () => {
+test('GameSession allows opened players to draw from left freely and emits islek/okey alertKind', () => {
   const session = new GameSession({
-    roomCode: 'LOCK',
+    roomCode: 'OPENL',
     seatsConfig: [
       { playerId: 'p0', name: 'Efe', isBot: false },
       { playerId: 'p1', name: 'Bot 1', isBot: true },
@@ -798,31 +798,22 @@ test('GameSession prevents layMeld/layoffTile softlock when holding pickedDiscar
   session.seats[0].hand = [...meldTiles, islekTile, okeyTile];
   session.discardPiles[3] = [pickedTile];
 
+  // Opened player takes from left without pickedDiscardTileId lock
   const pickRes = session.drawFromDiscard(0);
   assert.equal(pickRes.ok, true);
-  assert.equal(session.pickedDiscardTileId, pickedTile.id);
+  assert.equal(session.pickedDiscardTileId, null);
 
-  // Attempting layMeld without pickedTile must fail cleanly and NOT set committedMeldThisTurn
-  const badMeld = session.layMeld(0, meldTiles.map((x) => x.id));
-  assert.equal(badMeld.ok, false);
-  assert.equal(session.committedMeldThisTurn, false);
+  // Can lay a meld WITHOUT using pickedTile and keep pickedTile in hand!
+  const meldRes = session.layMeld(0, meldTiles.map((x) => x.id));
+  assert.equal(meldRes.ok, true);
+  assert.ok(session.seats[0].hand.some((t) => t.id === pickedTile.id));
 
-  // Attempting layoffTile on a different tile must also fail cleanly
-  const badLayoff = session.layoffTile(0, islekTile.id, 'm-1');
-  assert.equal(badLayoff.ok, false);
-  assert.equal(session.committedMeldThisTurn, false);
-
-  // Player is NOT softlocked: can return pickedTile cleanly
-  const retRes = session.returnPickedDiscard(0);
-  assert.equal(retRes.ok, true);
-  assert.equal(session.turnPhase, 'draw');
-
-  // Draw from deck and discard an islek tile -> emits alertKind: 'islek'
-  session.drawFromDeck(0);
+  // Can discard an islek tile -> emits alertKind: 'islek' while keeping pickedTile
   const discIslek = session.discardTile(0, islekTile.id);
   assert.equal(discIslek.ok, true);
   assert.equal(discIslek.islekTriggered, true);
   assert.equal(session.lastEvent.alertKind, 'islek');
+  assert.ok(session.seats[0].hand.some((t) => t.id === pickedTile.id));
 
   // Next turn for seat 0 discarding Okey mid-game -> emits alertKind: 'okey'
   session.currentSeat = 0;
@@ -831,6 +822,58 @@ test('GameSession prevents layMeld/layoffTile softlock when holding pickedDiscar
   assert.equal(discOkey.ok, true);
   assert.equal(discOkey.okeyDiscardPenalty, true);
   assert.equal(session.lastEvent.alertKind, 'okey');
+
+  session.destroy();
+});
+
+test('GameSession timeout returns left discard for unopened player and discards newly drawn deck tile instead of rack tile', () => {
+  const session = new GameSession({
+    roomCode: 'TMO',
+    seatsConfig: [
+      { playerId: 'p0', name: 'Efe', isBot: false },
+      { playerId: 'p1', name: 'Bot 1', isBot: true },
+      { playerId: 'p2', name: 'Bot 2', isBot: true },
+      { playerId: 'p3', name: 'Bot 3', isBot: true }
+    ],
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
+    onStateChange: () => {}
+  });
+
+  session.startRound();
+  session.okeyTarget = { color: 'yellow', number: 1 };
+  session.currentSeat = 0;
+  session.turnPhase = 'draw';
+  session.seats[0].opened = false;
+
+  const rackTile0 = { id: 'rack-0', color: 'black', number: 10, copy: 0, isFakeOkey: false };
+  const rackTile1 = { id: 'rack-1', color: 'black', number: 11, copy: 0, isFakeOkey: false };
+  const leftTile = { id: 'left-r5', color: 'red', number: 5, copy: 0, isFakeOkey: false };
+  const deckTopTile = { id: 'deck-b7', color: 'blue', number: 7, copy: 0, isFakeOkey: false };
+
+  session.seats[0].hand = [rackTile0, rackTile1];
+  session.discardPiles[3] = [leftTile];
+  session.deck.push(deckTopTile);
+
+  // Unopened player picks from left
+  const pickRes = session.drawFromDiscard(0);
+  assert.equal(pickRes.ok, true);
+  assert.equal(session.pickedDiscardTileId, leftTile.id);
+
+  // Guard still prevents discarding without opening/returning
+  const badDisc = session.discardTile(0, rackTile0.id);
+  assert.equal(badDisc.ok, false);
+
+  // Timer expires without opening:
+  // 1) leftTile must be returned to left pile
+  // 2) deckTopTile is drawn and discarded (since it's safe)
+  // 3) player's original rack tiles remain intact!
+  session.handleTurnTimeout();
+  assert.equal(session.discardPiles[3][session.discardPiles[3].length - 1].id, leftTile.id);
+  assert.equal(session.discardPiles[0][session.discardPiles[0].length - 1].id, deckTopTile.id);
+  assert.deepEqual(
+    session.seats[0].hand.map((t) => t.id),
+    [rackTile0.id, rackTile1.id]
+  );
 
   session.destroy();
 });

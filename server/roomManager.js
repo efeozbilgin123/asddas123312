@@ -1,5 +1,11 @@
 import { createEmptyOrders, KAHVE_MENU_MAP } from '../shared/menu.js';
-import { buildTvEmbedUrl, buildYouTubeEmbedUrl, parseMusicUrl, summarizeMusicQueue } from '../shared/music.js';
+import {
+  buildAmbianceEmbedUrl,
+  buildTvEmbedUrl,
+  buildYouTubeEmbedUrl,
+  parseMusicUrl,
+  summarizeMusicQueue
+} from '../shared/music.js';
 import {
   createEmptySocialStats,
   isPresetAvatar,
@@ -10,9 +16,16 @@ import {
   pickRandomBotAvatar,
   pickRandomBotName,
   PRESET_AVATAR_COUNT,
+  ROOM_AMBIANCES,
   TV_CHANNELS
 } from '../shared/presets.js';
-import { findAutoplayTrack, resolveMusicInput, resolveQueuedTrack, resolveTvInput } from './musicResolver.js';
+import {
+  findAutoplayTrack,
+  resolveAmbianceInput,
+  resolveMusicInput,
+  resolveQueuedTrack,
+  resolveTvInput
+} from './musicResolver.js';
 import { GameSession } from './gameSession.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -111,6 +124,7 @@ export class RoomManager {
       musicAutoplay: true,
       musicHistory: [],
       tv: null,
+      ambianceTrack: null,
       orders: createEmptyOrders(),
       lastOrder: null,
       orderSeq: 0,
@@ -495,11 +509,18 @@ export class RoomManager {
       }
     }
 
+    const prevAmbiance = room.options.roomAmbiance;
     if (options.roomAtmosphere !== undefined) {
       room.options.roomAtmosphere = normalizeRoomAtmosphere(options.roomAtmosphere);
     }
     if (options.roomAmbiance !== undefined) {
       room.options.roomAmbiance = normalizeRoomAmbiance(options.roomAmbiance);
+      if (room.options.roomAmbiance === 'none') {
+        room.ambianceTrack = null;
+        this.broadcastRoomAmbiance(room);
+      } else if (room.options.roomAmbiance !== prevAmbiance) {
+        room.ambianceTrack = null;
+      }
     }
 
     this.broadcastRoomState(room);
@@ -1070,6 +1091,110 @@ export class RoomManager {
     return { ok: true, tv: null };
   }
 
+  broadcastRoomAmbiance(room) {
+    for (const seat of room.seats) {
+      if (seat.type === 'human' && seat.playerId) {
+        this.io.to(`player:${seat.playerId}`).emit('room:ambiance', room.ambianceTrack || null);
+      }
+    }
+  }
+
+  async ensureRoomAmbianceResolved(roomCode, { fetchImpl = globalThis.fetch } = {}) {
+    const room = this.getRoom(roomCode);
+    if (!room) return null;
+    const ambId = room.options?.roomAmbiance || 'none';
+    if (ambId === 'none') {
+      room.ambianceTrack = null;
+      this.broadcastRoomAmbiance(room);
+      return null;
+    }
+
+    const res = await resolveAmbianceInput('', { ambianceId: ambId, fetchImpl });
+    const latestRoom = this.getRoom(roomCode);
+    if (!latestRoom || latestRoom.options?.roomAmbiance !== ambId) {
+      return null;
+    }
+    if (res?.ok && res.ambiance) {
+      latestRoom.ambianceTrack = {
+        ...res.ambiance,
+        updatedAt: Date.now()
+      };
+      this.broadcastRoomAmbiance(latestRoom);
+      return latestRoom.ambianceTrack;
+    }
+    return null;
+  }
+
+  async resolveAndSetRoomAmbiance({
+    roomCode,
+    hostPlayerId,
+    ambianceId = '',
+    url = '',
+    title = '',
+    ambiancePayload = null,
+    fetchImpl = globalThis.fetch
+  }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    if (room.hostPlayerId !== hostPlayerId) {
+      return { ok: false, error: 'Ortam sesini yalnızca masa kurucusu değiştirebilir.' };
+    }
+
+    const cleanId = String(ambianceId || '').trim();
+    const cleanUrl = String(url || '').trim();
+    if (cleanId === 'none' || cleanUrl.toLowerCase() === 'none') {
+      room.options.roomAmbiance = 'none';
+      room.ambianceTrack = null;
+      this.broadcastRoomAmbiance(room);
+      this.broadcastRoomState(room);
+      this.broadcastRoomsList();
+      return { ok: true, ambiance: null, options: room.options };
+    }
+
+    let resolved;
+    if (ambiancePayload && typeof ambiancePayload === 'object' && ambiancePayload.embedUrl) {
+      const videoId = ambiancePayload.videoId || null;
+      resolved = {
+        ok: true,
+        ambiance: {
+          ambianceId: cleanId || ambiancePayload.ambianceId || 'custom',
+          provider: 'youtube',
+          title: String(ambiancePayload.title || 'Ortam Sesi').slice(0, 64),
+          videoId,
+          fallbackVideoIds: Array.isArray(ambiancePayload.fallbackVideoIds)
+            ? ambiancePayload.fallbackVideoIds.slice(0, 5)
+            : [],
+          originalUrl: ambiancePayload.originalUrl || '',
+          embedUrl: videoId ? buildAmbianceEmbedUrl(videoId) : String(ambiancePayload.embedUrl)
+        }
+      };
+    } else {
+      resolved = await resolveAmbianceInput(cleanUrl, { ambianceId: cleanId, title, fetchImpl });
+    }
+
+    if (!resolved?.ok) {
+      return resolved || { ok: false, error: 'Ortam sesi çözümlenemedi.' };
+    }
+
+    if (ROOM_AMBIANCES.some((a) => a.id === cleanId)) {
+      room.options.roomAmbiance = cleanId;
+    } else if (room.options.roomAmbiance === 'none') {
+      room.options.roomAmbiance = 'rain';
+    }
+
+    room.ambianceTrack = resolved.ambiance
+      ? {
+          ...resolved.ambiance,
+          updatedAt: Date.now()
+        }
+      : null;
+
+    this.broadcastRoomAmbiance(room);
+    this.broadcastRoomState(room);
+    this.broadcastRoomsList();
+    return { ok: true, ambiance: room.ambianceTrack, options: room.options };
+  }
+
   orderTreat({ roomCode, playerId, itemId, target = 'self' }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
@@ -1344,6 +1469,7 @@ export class RoomManager {
       isHost: room.hostPlayerId === playerId,
       music: room.music || null,
       tv: room.tv || null,
+      ambianceTrack: room.ambianceTrack || null,
       orders: room.orders || createEmptyOrders(),
       lastOrder: room.lastOrder || null,
       socialStats: room.socialStats || createEmptySocialStats(),

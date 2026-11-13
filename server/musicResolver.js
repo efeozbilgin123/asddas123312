@@ -1,10 +1,11 @@
-import { buildTvEmbedUrl, buildYouTubeEmbedUrl, parseMusicUrl } from '../shared/music.js';
-import { TV_CHANNELS } from '../shared/presets.js';
+import { buildAmbianceEmbedUrl, buildTvEmbedUrl, buildYouTubeEmbedUrl, parseMusicUrl } from '../shared/music.js';
+import { ROOM_AMBIANCES, TV_CHANNELS } from '../shared/presets.js';
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 const MAX_PLAYLIST_TRACKS = 25;
+const ambianceCache = new Map();
 
 function decodeHtmlEntities(str) {
   return String(str || '')
@@ -239,9 +240,13 @@ export function extractYouTubeCandidatesFromHtml(html, query = '') {
     .filter((t) => t.length >= 3);
 
   const wantsRemix = /\b(remix|cover|karaoke|slowed|sped|live|konser|akustik|acoustic)\b/i.test(qLower);
-  const wantsLongOrLive = /\b(mix|hour|saat|playlist|set|canlı|canli|live|yayın|yayin|tv|film|sinema|4k|şömine|somine)\b/i.test(
+  const wantsLongOrLive = /\b(mix|hour|saat|playlist|set|canlı|canli|live|yayın|yayin|tv|film|sinema|4k|şömine|somine|ambience|ambient|yağmur|yagmur|rain|fireplace|ocakbaşı|kahvehane|sesi|sound|noise|sleep|relax|asmr|thunder|crickets|waves|seagulls)\b/i.test(
     qLower
   );
+  const isAmbianceQuery = /\b(ambience|ambient|yağmur|yagmur|rain|thunder|şömine|somine|fireplace|crackling|background noise|white noise|brown noise|crickets|seagulls|waves|asmr)\b/i.test(
+    qLower
+  );
+  const wantsNoMusic = /\bno music\b/i.test(qLower);
 
   return candidates
     .map((c, idx) => {
@@ -250,9 +255,15 @@ export function extractYouTubeCandidatesFromHtml(html, query = '') {
       let score = Math.max(0, 20 - idx * 2);
 
       // YouTube Auto-generated Topic channels are virtually always embeddable clean studio audio
-      if (chLower.endsWith('- topic') || chLower.includes('topic')) score += 45;
-      if (/\b(official audio|provided to youtube|audio)\b/i.test(tLower)) score += 22;
-      if (/\b(lyrics|lyric video|sözleri)\b/i.test(tLower)) score += 12;
+      if (!isAmbianceQuery && (chLower.endsWith('- topic') || chLower.includes('topic'))) score += 45;
+      if (!isAmbianceQuery && /\b(official audio|provided to youtube|audio)\b/i.test(tLower)) score += 22;
+      if (!isAmbianceQuery && /\b(lyrics|lyric video|sözleri)\b/i.test(tLower)) score += 12;
+      if (isAmbianceQuery && /\b(ambience|ambient|sound|noise|rain|fireplace|crackling|yağmur|şömine|thunder|crickets)\b/i.test(tLower)) {
+        score += 14;
+      }
+      if (wantsNoMusic && /\b(music|jazz|piano|lofi|beats|song|müzik|şarkı|remix|cover|karaoke)\b/i.test(tLower) && !/\bno music\b/i.test(tLower)) {
+        score -= 35;
+      }
       if (wantsLongOrLive && c.durationSeconds == null) score += 28;
       if (wantsLongOrLive && /\b(canlı|canli|live|yayın|yayin)\b/i.test(tLower)) score += 18;
 
@@ -722,5 +733,85 @@ export async function resolveTvInput(rawInput, customTitle = '', { channelId = '
 
   return { ok: false, error: 'Bu yayın bağlantısı TV oynatıcıda desteklenmiyor.' };
 }
+
+export async function resolveAmbianceInput(
+  rawInput = '',
+  { ambianceId = '', title = '', fetchImpl = globalThis.fetch } = {}
+) {
+  const cleanId = String(ambianceId || '').trim();
+  const cleanInput = String(rawInput || '').trim();
+  const cleanTitle = String(title || '').trim().slice(0, 64);
+
+  if (cleanId === 'none' || cleanInput.toLowerCase() === 'none') {
+    return { ok: true, ambiance: null };
+  }
+
+  const preset = cleanId ? ROOM_AMBIANCES.find((a) => a.id === cleanId && a.id !== 'none') : null;
+  const queryInput = cleanInput || preset?.query || '';
+  const displayTitle = cleanTitle || preset?.label || '';
+
+  if (!queryInput) {
+    return { ok: false, error: 'Lütfen bir ortam sesi seçin, YouTube linki yapıştırın veya arama yazın.' };
+  }
+
+  const useCache = fetchImpl === globalThis.fetch;
+  const cacheKey = `${preset?.id || 'custom'}|${queryInput.toLowerCase()}`;
+  if (useCache && ambianceCache.has(cacheKey)) {
+    const cached = ambianceCache.get(cacheKey);
+    if (Date.now() - cached.cachedAt < 6 * 3600 * 1000) {
+      return {
+        ok: true,
+        ambiance: {
+          ...cached.ambiance,
+          title: displayTitle || cached.ambiance.title
+        }
+      };
+    }
+    ambianceCache.delete(cacheKey);
+  }
+
+  const parsed = parseMusicUrl(queryInput, displayTitle);
+  if (!parsed.ok) return parsed;
+
+  if (parsed.provider === 'youtube' && parsed.videoId) {
+    const ambiance = {
+      ambianceId: preset?.id || 'custom',
+      provider: 'youtube',
+      title: displayTitle || parsed.title || 'Ortam Sesi',
+      videoId: parsed.videoId,
+      fallbackVideoIds: [],
+      originalUrl: parsed.originalUrl || `https://www.youtube.com/watch?v=${parsed.videoId}`,
+      embedUrl: buildAmbianceEmbedUrl(parsed.videoId)
+    };
+    if (useCache) {
+      ambianceCache.set(cacheKey, { ambiance, cachedAt: Date.now() });
+    }
+    return { ok: true, ambiance };
+  }
+
+  if (parsed.provider === 'search' || parsed.provider === 'youtube_channel' || parsed.provider === 'spotify') {
+    const searchQuery = parsed.query || parsed.title || queryInput;
+    const yt = await searchYouTubeAudio(searchQuery, { fetchImpl, limit: 4 });
+    if (!yt || yt.videoIds.length === 0) {
+      return { ok: false, error: `"${searchQuery}" için YouTube ortam sesi bulunamadı.` };
+    }
+    const ambiance = {
+      ambianceId: preset?.id || 'custom',
+      provider: 'youtube',
+      title: displayTitle || yt.matchedTitle || searchQuery,
+      videoId: yt.videoIds[0],
+      fallbackVideoIds: yt.videoIds.slice(1),
+      originalUrl: `https://www.youtube.com/watch?v=${yt.videoIds[0]}`,
+      embedUrl: buildAmbianceEmbedUrl(yt.videoIds[0])
+    };
+    if (useCache) {
+      ambianceCache.set(cacheKey, { ambiance, cachedAt: Date.now() });
+    }
+    return { ok: true, ambiance };
+  }
+
+  return { ok: false, error: 'Ortam sesi için YouTube linki veya arama terimi girin.' };
+}
+
 
 

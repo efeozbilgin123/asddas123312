@@ -7,8 +7,15 @@ import {
   validatePair
 } from '../shared/melds.js';
 import { KAHVE_MENU } from '../shared/menu.js';
-import { formatMusicPlayerDisplay, KAHVE_PLAYLISTS, parseMusicUrl, buildTvEmbedUrl } from '../shared/music.js';
 import {
+  buildAmbianceEmbedUrl,
+  buildTvEmbedUrl,
+  formatMusicPlayerDisplay,
+  KAHVE_PLAYLISTS,
+  parseMusicUrl
+} from '../shared/music.js';
+import {
+  AMBIANCE_SEARCH_SUGGESTIONS,
   isPresetAvatar,
   KAHVE_CATS,
   KAHVE_QUICK_CHATS,
@@ -186,6 +193,7 @@ const els = {
   tvExternalLink: document.getElementById('tv-external-link'),
   tvStop: document.getElementById('tv-stop'),
   tvPlayerHost: document.getElementById('tv-player-host'),
+  ambiancePlayerHost: document.getElementById('ambiance-player-host'),
 
   catToast: document.getElementById('cat-toast'),
   catToastImg: document.getElementById('cat-toast-img'),
@@ -228,6 +236,12 @@ const els = {
   cozyHostSection: document.getElementById('cozy-host-section'),
   cozyAtmosphere: document.getElementById('cozy-atmosphere'),
   cozyAmbiance: document.getElementById('cozy-ambiance'),
+  cozyAmbiancePresets: document.getElementById('cozy-ambiance-presets'),
+  cozyAmbianceForm: document.getElementById('cozy-ambiance-form'),
+  cozyAmbianceInput: document.getElementById('cozy-ambiance-input'),
+  cozyAmbianceHelp: document.getElementById('cozy-ambiance-help'),
+  btnAmbianceSet: document.getElementById('btn-ambiance-set'),
+  cozyAmbianceNow: document.getElementById('cozy-ambiance-now'),
   cozyGuestNote: document.getElementById('cozy-guest-note'),
   cozyGuestSummary: document.getElementById('cozy-guest-summary'),
   btnAmbianceMute: document.getElementById('btn-ambiance-mute'),
@@ -532,12 +546,203 @@ function applyTileTheme(themeId, persist = true) {
   });
 }
 
+let activeAmbianceTrackKey = null;
+let activeAmbianceTrackData = null;
+let ambianceIframeEl = null;
+let ambianceFallbackIdx = 0;
+let ambianceUseSynthFallback = false;
+let ambianceSubmitting = false;
+
+function postAmbianceCommand(func, args = []) {
+  if (!ambianceIframeEl) return;
+  try {
+    ambianceIframeEl.contentWindow?.postMessage(
+      JSON.stringify({ event: 'command', func, args }),
+      'https://www.youtube.com'
+    );
+  } catch {
+    // Ignore cross-origin postMessage restrictions
+  }
+}
+
+function updateAmbianceNowLabel() {
+  if (!els.cozyAmbianceNow) return;
+  if (!currentRoom || activeRoomAmbiance === 'none') {
+    els.cozyAmbianceNow.textContent = 'Şu an ortam sesi kapalı.';
+    return;
+  }
+  const title = activeAmbianceTrackData?.title;
+  const presetLabel = ROOM_AMBIANCES.find((a) => a.id === activeRoomAmbiance)?.label || 'Ortam Sesi';
+  if (title) {
+    els.cozyAmbianceNow.textContent = `Çalan YouTube ortamı: ${title}`;
+  } else if (ambianceUseSynthFallback) {
+    els.cozyAmbianceNow.textContent = `Yedek ortam sesi çalıyor: ${presetLabel}`;
+  } else {
+    els.cozyAmbianceNow.textContent = `Hazırlanıyor: ${presetLabel}`;
+  }
+}
+
+function syncYouTubeAmbianceAudio() {
+  const shouldMute =
+    ambianceMuted ||
+    soundFX.muted ||
+    activeRoomAmbiance === 'none' ||
+    ambianceVolPct <= 0;
+
+  if (!ambianceIframeEl) {
+    if (ambianceUseSynthFallback && !shouldMute && activeRoomAmbiance !== 'none') {
+      soundFX.setAmbiance(activeRoomAmbiance, ambianceVolPct / 100);
+    } else {
+      soundFX.setAmbiance('none', 0);
+    }
+    return;
+  }
+
+  soundFX.setAmbiance('none', 0);
+  if (shouldMute) {
+    postAmbianceCommand('mute');
+    postAmbianceCommand('pauseVideo');
+  } else {
+    postAmbianceCommand('unMute');
+    postAmbianceCommand('setVolume', [Math.round(ambianceVolPct)]);
+    postAmbianceCommand('playVideo');
+  }
+}
+
 function applyAmbiancePlayback(mode = activeRoomAmbiance) {
   activeRoomAmbiance = ROOM_AMBIANCES.some((a) => a.id === mode) ? mode : 'none';
-  if (ambianceMuted || soundFX.muted || activeRoomAmbiance === 'none' || ambianceVolPct <= 0) {
-    soundFX.setAmbiance('none', 0);
-  } else {
-    soundFX.setAmbiance(activeRoomAmbiance, ambianceVolPct / 100);
+  if (activeRoomAmbiance === 'none') {
+    ambianceUseSynthFallback = false;
+  }
+  syncYouTubeAmbianceAudio();
+  updateAmbianceNowLabel();
+}
+
+function applyRoomAmbianceTrack(track) {
+  if (!track || !track.embedUrl) {
+    activeAmbianceTrackKey = null;
+    activeAmbianceTrackData = null;
+    ambianceIframeEl = null;
+    ambianceFallbackIdx = 0;
+    if (els.ambiancePlayerHost) els.ambiancePlayerHost.innerHTML = '';
+    syncYouTubeAmbianceAudio();
+    updateAmbianceNowLabel();
+    return;
+  }
+
+  ambianceUseSynthFallback = false;
+  soundFX.setAmbiance('none', 0);
+
+  const key = `${track.embedUrl}|${track.updatedAt || 0}`;
+  if (key === activeAmbianceTrackKey && ambianceIframeEl) {
+    activeAmbianceTrackData = track;
+    syncYouTubeAmbianceAudio();
+    updateAmbianceNowLabel();
+    return;
+  }
+
+  activeAmbianceTrackKey = key;
+  activeAmbianceTrackData = track;
+  ambianceFallbackIdx = 0;
+  ambianceIframeEl = null;
+
+  if (!els.ambiancePlayerHost) {
+    updateAmbianceNowLabel();
+    return;
+  }
+  els.ambiancePlayerHost.innerHTML = '';
+
+  let iframeSrc = track.embedUrl;
+  if (!iframeSrc.includes('origin=')) {
+    const sep = iframeSrc.includes('?') ? '&' : '?';
+    iframeSrc = `${iframeSrc}${sep}origin=${encodeURIComponent(window.location.origin)}`;
+  }
+
+  const iframe = document.createElement('iframe');
+  iframe.src = iframeSrc;
+  iframe.allow = 'autoplay; encrypted-media';
+  iframe.referrerPolicy = 'no-referrer-when-downgrade';
+  iframe.loading = 'eager';
+  iframe.title = track.title || 'YouTube Ortam Sesi';
+  iframe.addEventListener('load', () => {
+    try {
+      iframe.contentWindow?.postMessage(
+        JSON.stringify({ event: 'listening', id: 3, channel: 'widget' }),
+        'https://www.youtube.com'
+      );
+    } catch {
+      // Ignore cross-origin restrictions
+    }
+    syncYouTubeAmbianceAudio();
+  });
+  els.ambiancePlayerHost.appendChild(iframe);
+  ambianceIframeEl = iframe;
+  updateAmbianceNowLabel();
+}
+
+function handleAmbiancePlaybackError() {
+  if (!ambianceIframeEl || !activeAmbianceTrackData) return;
+  const fallbacks = Array.isArray(activeAmbianceTrackData.fallbackVideoIds)
+    ? activeAmbianceTrackData.fallbackVideoIds
+    : [];
+  const nextId = fallbacks[ambianceFallbackIdx];
+  if (nextId) {
+    ambianceFallbackIdx += 1;
+    ambianceIframeEl.src = buildAmbianceEmbedUrl(nextId, window.location.origin);
+    return;
+  }
+  ambianceIframeEl = null;
+  if (els.ambiancePlayerHost) els.ambiancePlayerHost.innerHTML = '';
+  ambianceUseSynthFallback = activeRoomAmbiance !== 'none';
+  applyAmbiancePlayback();
+}
+
+async function resolveAndApplyOfflineAmbiance({ ambianceId = '', url = '', title = '' } = {}) {
+  if (!localClient) return { ok: false, error: 'Çevrimdışı oturum bulunamadı.' };
+  const cleanId = String(ambianceId || '').trim();
+  const cleanUrl = String(url || '').trim();
+  if (cleanId === 'none' || cleanUrl.toLowerCase() === 'none') {
+    return new Promise((resolve) => {
+      sendGameAction('room:ambianceSet', { ambianceId: 'none' }, (res) => {
+        applyRoomAmbianceTrack(null);
+        resolve(res || { ok: true });
+      });
+    });
+  }
+
+  try {
+    const resp = await fetch('/api/ambiance/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ambianceId: cleanId, url: cleanUrl, title })
+    });
+    const json = await resp.json();
+    if (!json?.ok || !json.ambiance) {
+      if (cleanId && ROOM_AMBIANCES.some((a) => a.id === cleanId && a.id !== 'none') && !cleanUrl) {
+        ambianceUseSynthFallback = true;
+        applyAmbiancePlayback(cleanId);
+      }
+      return { ok: false, error: json?.error || 'Ortam sesi çözümlenemedi.' };
+    }
+    if (!localClient) return { ok: false, error: 'Oturum kapandı.' };
+    return new Promise((resolve) => {
+      sendGameAction(
+        'room:ambianceSet',
+        { ambianceId: cleanId || 'custom', url: cleanUrl, title, ambiancePayload: json.ambiance },
+        (res) => {
+          if (res?.ok) {
+            applyRoomAmbianceTrack(res.ambiance || json.ambiance);
+          }
+          resolve(res || { ok: true, ambiance: json.ambiance });
+        }
+      );
+    });
+  } catch {
+    if (cleanId && ROOM_AMBIANCES.some((a) => a.id === cleanId && a.id !== 'none') && !cleanUrl) {
+      ambianceUseSynthFallback = true;
+      applyAmbiancePlayback(cleanId);
+    }
+    return { ok: false, error: 'Ortam sesi için sunucuya erişilemedi.' };
   }
 }
 
@@ -547,14 +752,8 @@ function resumeAudioOnGesture() {
     ctx.resume?.().then(() => {
       applyAmbiancePlayback();
     }).catch(() => {});
-  } else if (
-    !ambianceMuted &&
-    !soundFX.muted &&
-    activeRoomAmbiance !== 'none' &&
-    ambianceVolPct > 0 &&
-    !soundFX.ambianceNodes
-  ) {
-    applyAmbiancePlayback();
+  } else {
+    syncYouTubeAmbianceAudio();
   }
 }
 
@@ -848,16 +1047,20 @@ function startSingleplayer() {
   lastRoundModalNumber = 0;
   stagedGroups = [];
 
+  const lobbyOpts = readLobbyOptions();
   localClient = new LocalSingleplayerClient({
     playerName: name,
     playerAvatar: selectedAvatar,
     seatIndex: Number(els.optSeat?.value || 0),
-    options: readLobbyOptions(),
+    options: lobbyOpts,
     onState: (room) => {
       switchView(room);
     }
   });
   localClient.emitRoomState();
+  if (lobbyOpts.roomAmbiance && lobbyOpts.roomAmbiance !== 'none') {
+    resolveAndApplyOfflineAmbiance({ ambianceId: lobbyOpts.roomAmbiance });
+  }
 }
 
 function createRoom(quickStart) {
@@ -1579,6 +1782,25 @@ function applyRoomTv(tv) {
 }
 
 window.addEventListener('message', (event) => {
+  if (ambianceIframeEl && event.source === ambianceIframeEl.contentWindow) {
+    if (event.origin !== 'https://www.youtube.com') return;
+    let ambPayload;
+    try {
+      ambPayload = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+    } catch {
+      return;
+    }
+    if (!ambPayload || typeof ambPayload !== 'object') return;
+    if (ambPayload.event === 'onReady') {
+      syncYouTubeAmbianceAudio();
+    } else if (ambPayload.event === 'onStateChange' && ambPayload.info === 0) {
+      postAmbianceCommand('playVideo');
+    } else if (ambPayload.event === 'onError' && [100, 101, 150, 153].includes(Number(ambPayload.info))) {
+      handleAmbiancePlaybackError();
+    }
+    return;
+  }
+
   if (tvIframeEl && event.source === tvIframeEl.contentWindow) {
     if (event.origin !== 'https://www.youtube.com') return;
     let tvPayload;
@@ -1703,6 +1925,7 @@ function switchView(room) {
     applyRoomMusic(null);
     applyRoomTv(null);
     applyAmbiancePlayback('none');
+    applyRoomAmbianceTrack(null);
     scene3d.setRoomAtmosphere(els.optAtmosphere?.value || 'rainy');
     scene3d.setRoomOrders(null, 0);
     scene3d.renderGameState(null);
@@ -1728,6 +1951,9 @@ function switchView(room) {
   const amb = room.options?.roomAmbiance || 'rain';
   scene3d.setRoomAtmosphere(atmo);
   applyAmbiancePlayback(amb);
+  if (Object.prototype.hasOwnProperty.call(room, 'ambianceTrack')) {
+    applyRoomAmbianceTrack(room.ambianceTrack || null);
+  }
   if (els.dialogCozy?.open) {
     syncCozyDialogState();
   }
@@ -1787,7 +2013,9 @@ function renderWaitingRoom(room) {
       const atmoLabel =
         ROOM_ATMOSPHERES.find((a) => a.id === room.options?.roomAtmosphere)?.label || 'Yağmurlu Gece';
       const ambLabel =
-        ROOM_AMBIANCES.find((a) => a.id === room.options?.roomAmbiance)?.label || 'Dışarıda Yağmur';
+        (room.options?.roomAmbiance !== 'none' && room.ambianceTrack?.title) ||
+        ROOM_AMBIANCES.find((a) => a.id === room.options?.roomAmbiance)?.label ||
+        'Dışarıda Yağmur';
       els.waitAmbiancePill.textContent = `Ortam: ${atmoLabel} · Ses: ${ambLabel} (Oda kurucusu belirler)`;
       els.waitAmbiancePill.hidden = false;
     }
@@ -2753,9 +2981,7 @@ let muted = false;
 els.btnSound.addEventListener('click', () => {
   muted = !muted;
   soundFX.setMuted(muted);
-  if (!muted) {
-    applyAmbiancePlayback();
-  }
+  syncYouTubeAmbianceAudio();
   els.btnSound.setAttribute('aria-pressed', String(muted));
   els.btnSound.querySelector('span').textContent = muted ? 'Ses kapalı' : 'Ses açık';
 });
@@ -3501,6 +3727,23 @@ function renderCozyThemePills() {
   }
 }
 
+function renderCozyAmbiancePresets() {
+  if (!els.cozyAmbiancePresets) return;
+  els.cozyAmbiancePresets.innerHTML = '';
+  AMBIANCE_SEARCH_SUGGESTIONS.forEach((item) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn--quiet btn--sm';
+    btn.textContent = item.label;
+    btn.title = item.query;
+    btn.addEventListener('click', () => {
+      if (els.cozyAmbianceInput) els.cozyAmbianceInput.value = item.query;
+      submitRoomAmbiance({ url: item.query, title: item.label });
+    });
+    els.cozyAmbiancePresets.appendChild(btn);
+  });
+}
+
 function syncCozyDialogState() {
   const isHost = Boolean(currentRoom?.isHost);
   if (els.cozyHostSection) els.cozyHostSection.hidden = !isHost;
@@ -3513,7 +3756,10 @@ function syncCozyDialogState() {
 
   if (els.cozyGuestSummary) {
     const atmoLabel = ROOM_ATMOSPHERES.find((a) => a.id === atmo)?.label || 'Yağmurlu Gece';
-    const ambLabel = ROOM_AMBIANCES.find((a) => a.id === amb)?.label || 'Dışarıda Yağmur';
+    const ambLabel =
+      (amb !== 'none' && currentRoom?.ambianceTrack?.title) ||
+      ROOM_AMBIANCES.find((a) => a.id === amb)?.label ||
+      'Dışarıda Yağmur';
     els.cozyGuestSummary.textContent = `Mevcut ortam: ${atmoLabel} · ${ambLabel}`;
   }
 
@@ -3524,29 +3770,112 @@ function syncCozyDialogState() {
   if (els.cozyAmbianceVol) els.cozyAmbianceVol.value = String(ambianceVolPct);
   if (els.cozyAmbianceVolVal) els.cozyAmbianceVolVal.textContent = `${ambianceVolPct}%`;
 
+  updateAmbianceNowLabel();
   applyRackTheme(selectedRackTheme, false);
   applyTileTheme(selectedTileTheme, false);
 }
 
 function openCozyDialog() {
   if (!currentRoom) return;
+  if (els.cozyAmbianceHelp) els.cozyAmbianceHelp.textContent = '';
   renderCozyThemePills();
+  renderCozyAmbiancePresets();
   syncCozyDialogState();
   els.dialogCozy?.showModal();
+}
+
+async function submitRoomAmbiance({ ambianceId = '', url = '', title = '' } = {}) {
+  if (!currentRoom?.isHost || ambianceSubmitting) return;
+  const cleanUrl = String(url || els.cozyAmbianceInput?.value || '').trim();
+  const cleanId = String(ambianceId || '').trim();
+  if (!cleanUrl && !cleanId) {
+    if (els.cozyAmbianceHelp) {
+      els.cozyAmbianceHelp.textContent = 'YouTube linki yapıştırın veya arama terimi yazın.';
+    }
+    els.cozyAmbianceInput?.focus();
+    return;
+  }
+
+  ambianceSubmitting = true;
+  if (els.btnAmbianceSet) els.btnAmbianceSet.disabled = true;
+  if (els.cozyAmbianceHelp) {
+    els.cozyAmbianceHelp.textContent = 'YouTube ortam sesi aranıyor...';
+  }
+
+  const finish = () => {
+    ambianceSubmitting = false;
+    if (els.btnAmbianceSet) els.btnAmbianceSet.disabled = false;
+  };
+
+  if (localClient) {
+    const res = await resolveAndApplyOfflineAmbiance({
+      ambianceId: cleanId,
+      url: cleanUrl,
+      title
+    });
+    finish();
+    if (!res?.ok) {
+      if (els.cozyAmbianceHelp) {
+        els.cozyAmbianceHelp.textContent = res?.error || 'Ortam sesi ayarlanamadı.';
+      }
+      return;
+    }
+    if (els.cozyAmbianceHelp) {
+      els.cozyAmbianceHelp.textContent = res.ambiance?.title
+        ? `Masa ortamı ayarlandı: ${res.ambiance.title}`
+        : 'Masa ortam sesi güncellendi.';
+    }
+    syncCozyDialogState();
+    return;
+  }
+
+  sendGameAction(
+    'room:ambianceSet',
+    { ambianceId: cleanId, url: cleanUrl, title },
+    (res) => {
+      finish();
+      if (!res?.ok) {
+        if (els.cozyAmbianceHelp) {
+          els.cozyAmbianceHelp.textContent = res?.error || 'Ortam sesi ayarlanamadı.';
+        }
+        return;
+      }
+      if (currentRoom) {
+        if (res.options) currentRoom.options = res.options;
+        currentRoom.ambianceTrack = res.ambiance || null;
+      }
+      applyAmbiancePlayback(currentRoom?.options?.roomAmbiance || 'rain');
+      applyRoomAmbianceTrack(res.ambiance || null);
+      if (els.cozyAmbianceHelp) {
+        els.cozyAmbianceHelp.textContent = res.ambiance?.title
+          ? `Masa ortamı ayarlandı: ${res.ambiance.title}`
+          : 'Masa ortam sesi güncellendi.';
+      }
+      syncCozyDialogState();
+    }
+  );
 }
 
 function syncCozyHostOptions() {
   if (!currentRoom?.isHost) return;
   const roomAtmosphere = els.cozyAtmosphere?.value || 'rainy';
   const roomAmbiance = els.cozyAmbiance?.value || 'rain';
+  const prevAmb = currentRoom?.options?.roomAmbiance;
   sendGameAction('room:options', { roomAtmosphere, roomAmbiance }, (res) => {
     if (!res?.ok && res?.error) showNotice(res.error);
   });
+  if (localClient && roomAmbiance !== 'none' && roomAmbiance !== prevAmb) {
+    resolveAndApplyOfflineAmbiance({ ambianceId: roomAmbiance });
+  }
 }
 
 els.btnCozyPrefs?.addEventListener('click', openCozyDialog);
 els.cozyAtmosphere?.addEventListener('change', syncCozyHostOptions);
 els.cozyAmbiance?.addEventListener('change', syncCozyHostOptions);
+els.cozyAmbianceForm?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  submitRoomAmbiance();
+});
 els.btnAmbianceMute?.addEventListener('click', () => {
   ambianceMuted = !ambianceMuted;
   localStorage.setItem('yuzbir_ambiance_muted', ambianceMuted ? '1' : '0');
@@ -3892,6 +4221,19 @@ socket.on('room:tv', (tv) => {
   if (!localClient && currentRoom) {
     currentRoom.tv = tv || null;
     applyRoomTv(tv || null);
+  }
+});
+
+socket.on('room:ambiance', (ambianceTrack) => {
+  if (!localClient && currentRoom) {
+    currentRoom.ambianceTrack = ambianceTrack || null;
+    applyRoomAmbianceTrack(ambianceTrack || null);
+    if (els.dialogCozy?.open) {
+      syncCozyDialogState();
+    }
+    if (currentRoom.status === 'waiting') {
+      renderWaitingRoom(currentRoom);
+    }
   }
 });
 

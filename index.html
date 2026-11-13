@@ -522,6 +522,9 @@
       <div id="tv-player-host" class="tv-dock__body"></div>
     </aside>
 
+    <!-- Hidden YouTube Background Ambiance Audio Host -->
+    <div id="ambiance-player-host" class="ambiance-player-host" aria-hidden="true"></div>
+
     <!-- Cozy Cat Pet Reaction Toast -->
     <div id="cat-toast" class="cat-toast" role="status" aria-live="polite" hidden>
       <img id="cat-toast-img" class="cat-toast__img" src="/assets/cat-1.jpg" alt="Kahvehane kedisi">
@@ -691,6 +694,22 @@
             </select>
           </div>
         </div>
+
+        <div class="music-presets">
+          <span class="music-presets__label">YouTube Hazır Ortam Sesleri</span>
+          <div id="cozy-ambiance-presets" class="music-presets__grid"></div>
+        </div>
+
+        <form id="cozy-ambiance-form" class="cozy-ambiance-form" novalidate>
+          <div class="field">
+            <label for="cozy-ambiance-input">YouTube ortam sesi ara veya link yapıştır</label>
+            <div class="join-row">
+              <input id="cozy-ambiance-input" type="text" placeholder="Örn. heavy rain on window no music veya YouTube linki">
+              <button type="submit" id="btn-ambiance-set" class="btn btn--primary btn--sm">Çal</button>
+            </div>
+            <p id="cozy-ambiance-help" class="field__help" aria-live="polite"></p>
+          </div>
+        </form>
       </section>
 
       <section id="cozy-guest-note" class="cozy-guest-note" hidden>
@@ -708,6 +727,7 @@
           <input id="cozy-ambiance-vol" class="cozy-range" type="range" min="0" max="100" value="25">
           <span id="cozy-ambiance-vol-val" class="num">25%</span>
         </div>
+        <p id="cozy-ambiance-now" class="field__help" aria-live="polite"></p>
       </section>
 
       <section class="cozy-section">

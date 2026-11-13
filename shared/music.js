@@ -33,6 +33,24 @@ export function buildTvEmbedUrl(videoId, origin = '') {
   return `https://www.youtube.com/embed/${videoId}?${params.toString()}`;
 }
 
+export function buildAmbianceEmbedUrl(videoId, origin = '') {
+  const params = new URLSearchParams({
+    autoplay: '1',
+    enablejsapi: '1',
+    loop: '1',
+    playlist: videoId,
+    rel: '0',
+    playsinline: '1',
+    iv_load_policy: '3',
+    modestbranding: '1',
+    vq: 'small'
+  });
+  if (origin && /^https?:\/\//i.test(origin)) {
+    params.set('origin', origin);
+  }
+  return `https://www.youtube.com/embed/${videoId}?${params.toString()}`;
+}
+
 export function parseMusicUrl(rawUrl, customTitle = '') {
   const trimmed = String(rawUrl || '').trim();
   if (!trimmed) {

@@ -1885,4 +1885,22 @@ test('LocalSingleplayerClient handles live cozy options, TV set/stop, drink sip/
   assert.equal(petRes.ok, true);
   assert.equal(petRes.payload.cat.name, 'Yumak');
   assert.equal(states[states.length - 1].socialStats[0].catsPetted, 1);
+
+  let ambSet = null;
+  client.action('room:ambianceSet', {
+    ambianceId: 'rain',
+    ambiancePayload: {
+      ambianceId: 'rain',
+      title: 'Yağmur & Gök Gürültüsü',
+      videoId: 'rainVid999',
+      embedUrl: 'https://www.youtube.com/embed/rainVid999?autoplay=1&loop=1&playlist=rainVid999'
+    }
+  }, (r) => { ambSet = r; });
+  assert.equal(ambSet.ok, true);
+  assert.equal(states[states.length - 1].ambianceTrack.videoId, 'rainVid999');
+
+  let ambOff = null;
+  client.action('room:options', { roomAmbiance: 'none' }, (r) => { ambOff = r; });
+  assert.equal(ambOff.ok, true);
+  assert.equal(states[states.length - 1].ambianceTrack, null);
 });

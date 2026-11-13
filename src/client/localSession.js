@@ -8,7 +8,8 @@ import {
   normalizeRoomAmbiance,
   normalizeRoomAtmosphere,
   pickRandomBotAvatar,
-  pickRandomBotName
+  pickRandomBotName,
+  ROOM_AMBIANCES
 } from '../../shared/presets.js';
 
 const LOCAL_QUICK_CHAT_MAP = new Map(KAHVE_QUICK_CHATS.map((q) => [q.id, q]));
@@ -22,6 +23,7 @@ export class LocalSingleplayerClient {
     this.musicAutoplay = true;
     this.musicHistory = [];
     this.tv = null;
+    this.ambianceTrack = null;
     this.orders = createEmptyOrders();
     this.lastOrder = null;
     this.orderSeq = 0;
@@ -97,6 +99,7 @@ export class LocalSingleplayerClient {
       isLocal: true,
       music: this.music,
       tv: this.tv,
+      ambianceTrack: this.ambianceTrack,
       orders: this.orders,
       lastOrder: this.lastOrder,
       socialStats: this.socialStats,
@@ -521,10 +524,52 @@ export class LocalSingleplayerClient {
           this.session.options.roomAtmosphere = normalizeRoomAtmosphere(opts.roomAtmosphere);
         }
         if (opts.roomAmbiance !== undefined) {
-          this.session.options.roomAmbiance = normalizeRoomAmbiance(opts.roomAmbiance);
+          const nextAmb = normalizeRoomAmbiance(opts.roomAmbiance);
+          const changed = nextAmb !== this.session.options.roomAmbiance;
+          this.session.options.roomAmbiance = nextAmb;
+          if (nextAmb === 'none') {
+            this.ambianceTrack = null;
+          } else if (changed && data?.ambianceTrack === undefined) {
+            this.ambianceTrack = null;
+          }
+        }
+        if (data?.ambianceTrack !== undefined) {
+          this.ambianceTrack = data.ambianceTrack || null;
         }
         this.emitRoomState();
-        res = { ok: true, options: this.session.options };
+        res = { ok: true, options: this.session.options, ambiance: this.ambianceTrack };
+        break;
+      }
+      case 'room:ambianceSet': {
+        const ambId = String(data?.ambianceId || '').trim();
+        if (ambId === 'none') {
+          this.session.options.roomAmbiance = 'none';
+          this.ambianceTrack = null;
+          this.emitRoomState();
+          res = { ok: true, ambiance: null, options: this.session.options };
+          break;
+        }
+        const payload = data?.ambiancePayload;
+        if (!payload || typeof payload !== 'object' || !payload.embedUrl) {
+          res = { ok: false, error: 'Ortam sesi çözümlenemedi.' };
+          break;
+        }
+        if (ROOM_AMBIANCES.some((a) => a.id === ambId)) {
+          this.session.options.roomAmbiance = ambId;
+        } else if (this.session.options.roomAmbiance === 'none') {
+          this.session.options.roomAmbiance = 'rain';
+        }
+        this.ambianceTrack = {
+          ambianceId: payload.ambianceId || (ambId || 'custom'),
+          title: String(payload.title || 'Ortam Sesi').slice(0, 64),
+          videoId: payload.videoId || null,
+          fallbackVideoIds: Array.isArray(payload.fallbackVideoIds) ? payload.fallbackVideoIds.slice(0, 5) : [],
+          originalUrl: payload.originalUrl || '',
+          embedUrl: String(payload.embedUrl),
+          updatedAt: Date.now()
+        };
+        this.emitRoomState();
+        res = { ok: true, ambiance: this.ambianceTrack, options: this.session.options };
         break;
       }
       case 'room:tvSet': {

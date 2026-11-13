@@ -75,10 +75,38 @@ export const ROOM_ATMOSPHERES = Object.freeze([
 ]);
 
 export const ROOM_AMBIANCES = Object.freeze([
-  { id: 'rain', label: 'Dışarıda Yağmur', desc: 'Cama vuran hafif yağmur sesi' },
-  { id: 'ocakbasi', label: 'Ocakbaşı & Çay Kazanı', desc: 'Demlenen çay kazanı fısıltısı' },
-  { id: 'fireplace', label: 'Kuzine / Şömine', desc: 'Sıcacık odun çıtırtısı' },
-  { id: 'none', label: 'Sessiz', desc: 'Yalnızca oyun sesleri' }
+  {
+    id: 'rain',
+    label: 'Dışarıda Yağmur',
+    desc: 'Cama vuran hafif yağmur sesi',
+    query: 'heavy rain on window sound for sleeping no music'
+  },
+  {
+    id: 'ocakbasi',
+    label: 'Ocakbaşı & Çay Kazanı',
+    desc: 'Sıcak kahvehane & yağmurlu kafe arka plan sesi',
+    query: 'cozy coffee shop ambient sound background noise no music'
+  },
+  {
+    id: 'fireplace',
+    label: 'Kuzine / Şömine',
+    desc: 'Sıcacık odun çıtırtısı',
+    query: 'crackling fireplace sound no music 10 hours'
+  },
+  {
+    id: 'none',
+    label: 'Sessiz',
+    desc: 'Yalnızca oyun sesleri',
+    query: ''
+  }
+]);
+
+export const AMBIANCE_SEARCH_SUGGESTIONS = Object.freeze([
+  { id: 'rain-thunder', label: 'Yağmur & Gök Gürültüsü', query: 'rain and distant thunder sound no music' },
+  { id: 'wood-fire', label: 'Kuzine & Odun Çıtırtısı', query: 'crackling wood fireplace ambience no music' },
+  { id: 'tea-house', label: 'Kahvehane & Çay Ocağı', query: 'cozy tea house rain cafe ambience no music' },
+  { id: 'bosphorus', label: 'Boğaz Vapur & Martı', query: 'sea waves seagulls harbor ambient sound' },
+  { id: 'night-crickets', label: 'Gece Cırcır Böcekleri', query: 'summer night crickets forest ambience sound' }
 ]);
 
 export const RACK_THEMES = Object.freeze([

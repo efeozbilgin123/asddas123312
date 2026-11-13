@@ -491,3 +491,75 @@ test('resolveTvInput and RoomManager TV/sip/catPet track state, socialStats, and
   assert.equal(petRes.payload.socialStats[1].catsPetted, 1);
   assert.equal(io.emitted.some((e) => e.event === 'room:catPetted' && e.target === 'player:h1' && e.payload.catIndex === 2), true);
 });
+
+test('resolveAmbianceInput and RoomManager.resolveAndSetRoomAmbiance handle presets, no-music scoring, direct links, and host-only sync', async () => {
+  const { resolveAmbianceInput } = await import('../server/musicResolver.js');
+
+  const fakeAmbianceSearchHtml = `var ytInitialData = {"contents":{"twoColumnSearchResultsRenderer":{"primaryContents":{"sectionListRenderer":{"contents":[{"itemSectionRenderer":{"contents":[{"videoRenderer":{"videoId":"pianoBad001","title":{"runs":[{"text":"Rainy Day Relaxing Piano Music"}]},"ownerText":{"runs":[{"text":"Music Lab"}]},"lengthText":{"simpleText":"12:30"}}},{"videoRenderer":{"videoId":"rainGood123","title":{"runs":[{"text":"Heavy Rain on Window Sound No Music 3 Hours"}]},"ownerText":{"runs":[{"text":"Cozy Sounds"}]},"lengthText":{"simpleText":"3:00:00"}}}]}}]}}}}};`;
+
+  const presetAmb = await resolveAmbianceInput('', {
+    ambianceId: 'rain',
+    fetchImpl: async () => ({ ok: true, text: async () => fakeAmbianceSearchHtml })
+  });
+  assert.equal(presetAmb.ok, true);
+  assert.equal(presetAmb.ambiance.videoId, 'rainGood123');
+  assert.ok(presetAmb.ambiance.embedUrl.includes('loop=1'));
+  assert.ok(presetAmb.ambiance.embedUrl.includes('playlist=rainGood123'));
+
+  const directAmb = await resolveAmbianceInput('https://youtu.be/dQw4w9WgXcQ', { title: 'Özel Yağmur' });
+  assert.equal(directAmb.ok, true);
+  assert.equal(directAmb.ambiance.videoId, 'dQw4w9WgXcQ');
+  assert.equal(directAmb.ambiance.title, 'Özel Yağmur');
+
+  const noneAmb = await resolveAmbianceInput('', { ambianceId: 'none' });
+  assert.equal(noneAmb.ok, true);
+  assert.equal(noneAmb.ambiance, null);
+
+  const io = createMockIo();
+  const rm = new RoomManager(io);
+  const created = rm.createRoom({
+    playerId: 'h1',
+    playerName: 'Efe',
+    roomName: 'Ortam YouTube Odası'
+  });
+  const code = created.room.code;
+  rm.joinRoom({ roomCode: code, playerId: 'p2', playerName: 'Arhan' });
+
+  const guestAttempt = await rm.resolveAndSetRoomAmbiance({
+    roomCode: code,
+    hostPlayerId: 'p2',
+    url: 'https://youtu.be/dQw4w9WgXcQ'
+  });
+  assert.equal(guestAttempt.ok, false);
+
+  const hostSet = await rm.resolveAndSetRoomAmbiance({
+    roomCode: code,
+    hostPlayerId: 'h1',
+    url: 'https://youtu.be/dQw4w9WgXcQ',
+    title: 'Boğaz Yağmuru'
+  });
+  assert.equal(hostSet.ok, true);
+  assert.equal(hostSet.ambiance.videoId, 'dQw4w9WgXcQ');
+  assert.equal(created.room.ambianceTrack.title, 'Boğaz Yağmuru');
+  assert.equal(
+    io.emitted.some((e) => e.event === 'room:ambiance' && e.target === 'player:p2' && e.payload?.videoId === 'dQw4w9WgXcQ'),
+    true
+  );
+
+  const p2View = rm.getRoomPayloadForPlayer(created.room, 'p2');
+  assert.equal(p2View.ambianceTrack.videoId, 'dQw4w9WgXcQ');
+
+  const hostClear = await rm.resolveAndSetRoomAmbiance({
+    roomCode: code,
+    hostPlayerId: 'h1',
+    ambianceId: 'none'
+  });
+  assert.equal(hostClear.ok, true);
+  assert.equal(hostClear.ambiance, null);
+  assert.equal(created.room.ambianceTrack, null);
+  assert.equal(
+    io.emitted.some((e) => e.event === 'room:ambiance' && e.target === 'player:p2' && e.payload === null),
+    true
+  );
+});
+

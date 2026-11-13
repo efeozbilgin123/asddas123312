@@ -4,7 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Server } from 'socket.io';
-import { findAutoplayTrack, resolveMusicInput, resolveTvInput } from './musicResolver.js';
+import { findAutoplayTrack, resolveAmbianceInput, resolveMusicInput, resolveTvInput } from './musicResolver.js';
 import { RoomManager } from './roomManager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -52,6 +52,19 @@ app.post('/api/tv/resolve', async (req, res) => {
   } catch (err) {
     console.error('[/api/tv/resolve] error:', err);
     res.status(500).json({ ok: false, error: 'TV yayını çözümlenirken sunucu hatası oluştu.' });
+  }
+});
+
+app.post('/api/ambiance/resolve', async (req, res) => {
+  try {
+    const ambianceId = req.body?.ambianceId || '';
+    const query = req.body?.url || req.body?.query || '';
+    const title = req.body?.title || '';
+    const resolved = await resolveAmbianceInput(query, { ambianceId, title });
+    res.json(resolved);
+  } catch (err) {
+    console.error('[/api/ambiance/resolve] error:', err);
+    res.status(500).json({ ok: false, error: 'Ortam sesi çözümlenirken sunucu hatası oluştu.' });
   }
 });
 
@@ -157,6 +170,9 @@ io.on('connection', (socket) => {
       const payload = roomManager.getRoomPayloadForPlayer(res.room, playerId);
       socket.emit('room:state', payload);
       if (typeof ack === 'function') ack({ ok: true, state: payload });
+      if (res.room.options?.roomAmbiance && res.room.options.roomAmbiance !== 'none') {
+        roomManager.ensureRoomAmbianceResolved(res.room.code).catch(() => {});
+      }
     } else if (typeof ack === 'function') {
       ack(res);
     }
@@ -207,10 +223,34 @@ io.on('connection', (socket) => {
 
   safeOn('room:options', (data, ack) => {
     const code = roomManager.playerToRoom.get(playerId);
+    const prevAmbiance = roomManager.getRoom(code)?.options?.roomAmbiance;
     const res = roomManager.updateOptions({
       roomCode: code,
       hostPlayerId: playerId,
       options: data || {}
+    });
+    if (typeof ack === 'function') ack(res);
+    const updatedRoom = roomManager.getRoom(code);
+    if (
+      res.ok &&
+      updatedRoom &&
+      data?.roomAmbiance !== undefined &&
+      updatedRoom.options?.roomAmbiance !== 'none' &&
+      (updatedRoom.options?.roomAmbiance !== prevAmbiance || !updatedRoom.ambianceTrack)
+    ) {
+      roomManager.ensureRoomAmbianceResolved(code).catch(() => {});
+    }
+  });
+
+  safeOn('room:ambianceSet', async (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = await roomManager.resolveAndSetRoomAmbiance({
+      roomCode: code,
+      hostPlayerId: playerId,
+      ambianceId: data?.ambianceId || '',
+      url: data?.url || '',
+      title: data?.title || '',
+      ambiancePayload: data?.ambiancePayload || null
     });
     if (typeof ack === 'function') ack(res);
   });

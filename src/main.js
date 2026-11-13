@@ -126,6 +126,8 @@ const els = {
   btnStageGroup: document.getElementById('btn-stage-group'),
   btnLayMeld: document.getElementById('btn-lay-meld'),
   btnDiscardTile: document.getElementById('btn-discard-tile'),
+  btnShowRoundSummary: document.getElementById('btn-show-round-summary'),
+  btnHudNextRound: document.getElementById('btn-hud-next-round'),
 
   musicDock: document.getElementById('music-dock'),
   musicProviderBadge: document.getElementById('music-provider-badge'),
@@ -860,7 +862,10 @@ function updateTurnBanner() {
   }
 
   if (game.phase === 'roundOver') {
-    els.hudTurnText.textContent = game.roundSummary?.message || 'El tamamlandı.';
+    const baseMsg = game.roundSummary?.message || 'El tamamlandı.';
+    els.hudTurnText.textContent = currentRoom?.isHost
+      ? baseMsg
+      : `${baseMsg} · Masa kurucusunun devam etmesi bekleniyor.`;
     return;
   }
 
@@ -1018,7 +1023,9 @@ function updateGameControls() {
   els.selectionHint.textContent = selectionMsg;
 
   // Stage / Lay / Discard buttons
+  const isPlaying = game.phase === 'playing';
   const canStage =
+    isPlaying &&
     !mySeat?.opened &&
     ((validGroup && validGroup.valid) || (validPair && validPair.valid));
   const canLayNewMeld =
@@ -1029,6 +1036,19 @@ function updateGameControls() {
   els.btnStageGroup.hidden = !canStage;
   els.btnLayMeld.hidden = !(isPlayPhase && mySeat?.opened && canLayNewMeld);
   els.btnDiscardTile.hidden = !(isPlayPhase && selected.length === 1);
+
+  const isRoundOver = game.phase === 'roundOver' && Boolean(game.roundSummary);
+  if (els.btnShowRoundSummary) {
+    els.btnShowRoundSummary.hidden = !isRoundOver;
+  }
+  if (els.btnHudNextRound) {
+    els.btnHudNextRound.hidden = !(isRoundOver && currentRoom?.isHost);
+    if (isRoundOver) {
+      els.btnHudNextRound.textContent = game.roundSummary?.matchComplete
+        ? 'Devam Et (Ekstra El)'
+        : 'Sonraki El';
+    }
+  }
 
   renderStagingBar(game, mySeat, isPlayPhase);
 }
@@ -1276,10 +1296,18 @@ els.btnStartMatch.addEventListener('click', () => {
   });
 });
 
-els.btnNextRound.addEventListener('click', () => {
+function handleNextRound() {
   sendGameAction('game:nextRound', {}, (res) => {
     if (!res?.ok) showNotice(res?.error || 'Yeni el başlatılamadı.');
   });
+}
+
+els.btnNextRound.addEventListener('click', handleNextRound);
+els.btnHudNextRound?.addEventListener('click', handleNextRound);
+els.btnShowRoundSummary?.addEventListener('click', () => {
+  if (currentRoom?.game?.roundSummary) {
+    openRoundSummaryDialog(currentRoom, currentRoom.game.roundSummary);
+  }
 });
 
 els.btnDrawDeck.addEventListener('click', handleDrawDeck);

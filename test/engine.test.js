@@ -7,7 +7,9 @@ import {
   validateGroup,
   validatePair,
   canLayoffTile,
-  findBestOpening
+  findBestOpening,
+  autoArrangeRuns,
+  autoArrangePairs
 } from '../shared/melds.js';
 import { isDiscardPlayableOnTable, computeRoundScores } from '../shared/rules.js';
 
@@ -207,4 +209,66 @@ test('computeRoundScores applies 2x/4x multipliers, flat +101 for held Okey, and
     cancelled.map((r) => r.roundDelta),
     [0, 0, 0, 0]
   );
+});
+
+test('autoArrangeRuns and autoArrangePairs insert gaps between melds/pairs and preserve all tiles', () => {
+  const okeyTarget = { color: 'yellow', number: 1 };
+
+  // 3 melds (3+3+3 = 9 tiles) + 13 leftovers = 22 tiles
+  const runHand = [
+    t('r1', 'red', 10),
+    t('r2', 'red', 11),
+    t('r3', 'red', 12),
+    t('b1', 'blue', 7),
+    t('b2', 'blue', 8),
+    t('b3', 'blue', 9),
+    t('k1', 'black', 13),
+    t('r4', 'red', 13),
+    t('b4', 'blue', 13),
+    t('x1', 'red', 2),
+    t('x2', 'blue', 3),
+    t('x3', 'black', 4),
+    t('x4', 'yellow', 5),
+    t('x5', 'red', 6),
+    t('x6', 'blue', 2),
+    t('x7', 'black', 6),
+    t('x8', 'yellow', 3),
+    t('x9', 'red', 4),
+    t('x10', 'blue', 5),
+    t('x11', 'black', 2),
+    t('x12', 'yellow', 4),
+    t('x13', 'yellow', 6)
+  ];
+
+  const runSlots = autoArrangeRuns(runHand, okeyTarget);
+  assert.equal(runSlots.length, 28);
+  assert.equal(runSlots.filter(Boolean).length, 22);
+  // Top row (0..13): meld1 (0..2), null at 3, meld2 (4..6), null at 7, meld3 (8..10)
+  assert.equal(runSlots[3], null);
+  assert.equal(runSlots[7], null);
+  assert.notEqual(runSlots[0], null);
+  assert.notEqual(runSlots[4], null);
+  assert.notEqual(runSlots[8], null);
+
+  // 7 pairs (14 tiles) + 8 leftovers = 22 tiles
+  const pairHand = [];
+  for (let i = 0; i < 7; i += 1) {
+    pairHand.push({ id: `pa-${i}`, color: 'red', number: i + 2, copy: 0, isFakeOkey: false });
+    pairHand.push({ id: `pb-${i}`, color: 'red', number: i + 2, copy: 1, isFakeOkey: false });
+  }
+  for (let i = 0; i < 8; i += 1) {
+    pairHand.push(t(`left-${i}`, 'blue', i + 2));
+  }
+
+  const pairSlots = autoArrangePairs(pairHand, okeyTarget);
+  assert.equal(pairSlots.length, 28);
+  assert.equal(pairSlots.filter(Boolean).length, 22);
+  // 5 pairs on row 0 separated by single null gaps at indices 2, 5, 8, 11
+  assert.equal(pairSlots[2], null);
+  assert.equal(pairSlots[5], null);
+  assert.equal(pairSlots[8], null);
+  assert.equal(pairSlots[11], null);
+  // 2 remaining pairs on row 1 separated by null at 16, and null at 19 before leftovers
+  assert.equal(pairSlots[16], null);
+  assert.equal(pairSlots[19], null);
 });

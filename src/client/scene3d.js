@@ -1124,26 +1124,16 @@ export class OkeyTable3D {
       frontDisc.position.z = 0.115;
       headGroup.add(frontDisc);
 
-      // Solid opaque dark walnut & hair cap on rear (-Z) side so PFP is hidden behind player
+      // Completely flat matte black back on rear (-Z) side so PFP stays hidden behind player
       const rearCapMat = new THREE.MeshStandardMaterial({
-        map: getWoodTexture(),
-        color: '#2B1B13',
-        roughness: 0.58,
-        metalness: 0.12
+        color: '#0E0E10',
+        roughness: 0.92,
+        metalness: 0.04
       });
-      const rearDisc = new THREE.Mesh(new THREE.CircleGeometry(medRadius + 0.01, 36), rearCapMat);
+      const rearDisc = new THREE.Mesh(new THREE.CircleGeometry(medRadius + 0.01, 40), rearCapMat);
       rearDisc.rotation.y = Math.PI;
       rearDisc.position.z = -0.114;
       headGroup.add(rearDisc);
-
-      const backHeadDome = new THREE.Mesh(
-        new THREE.SphereGeometry(medRadius * 0.92, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.55),
-        new THREE.MeshStandardMaterial({ color: '#1F1612', roughness: 0.8 })
-      );
-      backHeadDome.rotation.x = -Math.PI / 2;
-      backHeadDome.scale.set(1.0, 1.0, 0.55);
-      backHeadDome.position.z = -0.06;
-      headGroup.add(backHeadDome);
 
       if (isActive) {
         const halo = new THREE.Mesh(

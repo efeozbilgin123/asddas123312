@@ -456,17 +456,88 @@ export function findPairsInHand(handTiles, okeyTarget) {
   return pairs;
 }
 
+export function layoutGroupsOnRack(groups, rest, cols = 14, rows = 2) {
+  const totalSlots = cols * rows;
+  const slots = new Array(totalSlots).fill(null);
+
+  let row = 0;
+  let col = 0;
+  const unplaced = [];
+
+  for (const group of groups) {
+    if (!group || group.length === 0) continue;
+    const len = group.length;
+
+    if (col > 0 && col + 1 + len <= cols) {
+      col += 1; // 1-slot gap between adjacent groups
+    } else if (col > 0 && row + 1 < rows) {
+      row += 1;
+      col = 0;
+    }
+
+    if (row < rows && col + len <= cols) {
+      const base = row * cols + col;
+      for (let i = 0; i < len; i += 1) {
+        slots[base + i] = group[i];
+      }
+      col += len;
+    } else {
+      unplaced.push(...group);
+    }
+  }
+
+  const remaining = [...unplaced, ...rest];
+  if (remaining.length > 0) {
+    // If all formed groups fit on upper rows and leftovers fit on the next row, start leftovers on a fresh row
+    if (row + 1 < rows && col > 0 && remaining.length <= (rows - 1 - row) * cols) {
+      row += 1;
+      col = 0;
+    } else if (col > 0) {
+      const curIdx = row * cols + col;
+      if (totalSlots - (curIdx + 1) >= remaining.length) {
+        if (col + 1 < cols) {
+          col += 1;
+        } else if (row + 1 < rows) {
+          row += 1;
+          col = 0;
+        }
+      }
+    }
+
+    let cursor = row * cols + col;
+    while (remaining.length > 0 && cursor < totalSlots) {
+      if (slots[cursor] === null) {
+        slots[cursor] = remaining.shift();
+      }
+      cursor += 1;
+    }
+
+    // Safety fallback: if any tiles still remain, pack into any remaining empty slots
+    for (let i = totalSlots - 1; i >= 0 && remaining.length > 0; i -= 1) {
+      if (slots[i] === null) {
+        slots[i] = remaining.pop();
+      }
+    }
+  }
+
+  return slots;
+}
+
 export function autoArrangeRuns(handTiles, okeyTarget) {
   const result = findBestOpening(handTiles, okeyTarget, 0);
   const usedIds = new Set();
-  const arranged = [];
+  const groupTilesList = [];
 
   for (const group of result.groups) {
+    const tiles = [];
     for (const slot of group.slots) {
       if (!usedIds.has(slot.tile.id)) {
         usedIds.add(slot.tile.id);
-        arranged.push(slot.tile);
+        tiles.push(slot.tile);
       }
+    }
+    if (tiles.length > 0) {
+      groupTilesList.push(tiles);
     }
   }
 
@@ -481,20 +552,24 @@ export function autoArrangeRuns(handTiles, okeyTarget) {
       return pa.number - pb.number;
     });
 
-  return [...arranged, ...rest];
+  return layoutGroupsOnRack(groupTilesList, rest);
 }
 
 export function autoArrangePairs(handTiles, okeyTarget) {
   const pairs = findPairsInHand(handTiles, okeyTarget);
   const usedIds = new Set();
-  const arranged = [];
+  const pairTilesList = [];
 
   for (const pair of pairs) {
+    const tiles = [];
     for (const t of pair) {
       if (!usedIds.has(t.id)) {
         usedIds.add(t.id);
-        arranged.push(t);
+        tiles.push(t);
       }
+    }
+    if (tiles.length > 0) {
+      pairTilesList.push(tiles);
     }
   }
 
@@ -507,5 +582,5 @@ export function autoArrangePairs(handTiles, okeyTarget) {
       return COLORS.indexOf(pa.color) - COLORS.indexOf(pb.color);
     });
 
-  return [...arranged, ...rest];
+  return layoutGroupsOnRack(pairTilesList, rest);
 }

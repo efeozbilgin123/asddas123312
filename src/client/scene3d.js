@@ -156,14 +156,14 @@ export class OkeyTable3D {
     this.callbacks = callbacks;
 
     this.scene = new THREE.Scene();
-    this.scene.background = getKahveBackdropTexture();
-    this.scene.fog = new THREE.FogExp2('#1C140F', 0.014);
+    this.scene.background = new THREE.Color('#130D0A');
+    this.scene.fog = new THREE.FogExp2('#130D0A', 0.011);
 
     const rect = canvas.getBoundingClientRect();
     const width = rect.width || window.innerWidth;
     const height = rect.height || window.innerHeight;
 
-    this.camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 90);
+    this.camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 120);
     this.camTarget = CAMERA_PRESETS.table.target.clone();
     this.camSpherical = new THREE.Spherical().setFromVector3(
       CAMERA_PRESETS.table.pos.clone().sub(this.camTarget)
@@ -181,7 +181,7 @@ export class OkeyTable3D {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.06;
+    this.renderer.toneMappingExposure = 1.08;
 
     this.demoMode = true;
     this.reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false;
@@ -196,7 +196,13 @@ export class OkeyTable3D {
 
     this.dragState = null;
     this.orbitDrag = null;
-    this.animations = [];
+    this.tileAnimations = [];
+    this.trackedMeshes = new Map();
+    this.discardTopMeshes = new Map();
+    this.meldTileMeshes = new Map();
+    this.lastDiscardTopIds = [null, null, null, null];
+    this.lastTableTileIds = new Set();
+    this.lastHandIds = new Set();
 
     this.tileGeom = createRoundedTileGeometry(TILE_W, TILE_H, TILE_D, 0.038, 0.015);
     this.sideTileMat = new THREE.MeshStandardMaterial({
@@ -225,22 +231,75 @@ export class OkeyTable3D {
     this.animate();
   }
 
+  buildPendantLamp(x, y, z, scale = 1, addLight = false) {
+    const group = new THREE.Group();
+    group.position.set(x, y, z);
+
+    const brassMat = new THREE.MeshStandardMaterial({
+      color: '#C79B42',
+      roughness: 0.28,
+      metalness: 0.8
+    });
+    const chainHeight = Math.max(1.2, 13.4 - y);
+    const chain = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.035, 0.035, chainHeight, 8),
+      brassMat
+    );
+    chain.position.y = chainHeight / 2;
+    group.add(chain);
+
+    const cap = new THREE.Mesh(
+      new THREE.ConeGeometry(0.45 * scale, 0.38 * scale, 16),
+      brassMat
+    );
+    cap.position.y = 0.24 * scale;
+    group.add(cap);
+
+    const globe = new THREE.Mesh(
+      new THREE.SphereGeometry(0.42 * scale, 20, 16),
+      new THREE.MeshStandardMaterial({
+        color: '#FFE099',
+        emissive: '#FF9E3D',
+        emissiveIntensity: 1.6,
+        roughness: 0.2
+      })
+    );
+    globe.position.y = -0.18 * scale;
+    group.add(globe);
+
+    const finial = new THREE.Mesh(
+      new THREE.ConeGeometry(0.14 * scale, 0.28 * scale, 12),
+      brassMat
+    );
+    finial.rotation.x = Math.PI;
+    finial.position.y = -0.68 * scale;
+    group.add(finial);
+
+    if (addLight) {
+      const pt = new THREE.PointLight('#FFBD6B', 22, 26, 1.5);
+      pt.position.y = -0.35 * scale;
+      group.add(pt);
+    }
+
+    this.scene.add(group);
+  }
+
   buildEnvironment() {
-    const hemi = new THREE.HemisphereLight('#FFEBD2', '#261A12', 0.85);
+    const hemi = new THREE.HemisphereLight('#FFEBD2', '#261A12', 0.92);
     this.scene.add(hemi);
 
-    // Warm kahvehane overhead pendant key light
-    const pendantLight = new THREE.PointLight('#FFCF86', 48, 36, 1.45);
-    pendantLight.position.set(0, 8.8, 0.5);
+    // Warm kahvehane overhead key light
+    const pendantLight = new THREE.PointLight('#FFCF86', 54, 42, 1.35);
+    pendantLight.position.set(0, 9.6, 0.5);
     this.scene.add(pendantLight);
 
-    const keyLight = new THREE.DirectionalLight('#FFF0D4', 1.32);
+    const keyLight = new THREE.DirectionalLight('#FFF0D4', 1.3);
     keyLight.position.set(6, 16, 9);
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.set(2048, 2048);
     keyLight.shadow.camera.near = 2;
-    keyLight.shadow.camera.far = 38;
-    const d = 13;
+    keyLight.shadow.camera.far = 42;
+    const d = 14;
     keyLight.shadow.camera.left = -d;
     keyLight.shadow.camera.right = d;
     keyLight.shadow.camera.top = d;
@@ -248,11 +307,11 @@ export class OkeyTable3D {
     keyLight.shadow.bias = -0.0004;
     this.scene.add(keyLight);
 
-    const rimLight = new THREE.DirectionalLight('#CBD8FF', 0.34);
+    const rimLight = new THREE.DirectionalLight('#CBD8FF', 0.36);
     rimLight.position.set(-9, 9, -10);
     this.scene.add(rimLight);
 
-    // Warm dark oak café floor + subtle Turkish kilim rug under table
+    // Dark oak café floor + Turkish kilim rug under table
     const floorMat = new THREE.MeshStandardMaterial({
       map: getWoodTexture(),
       color: '#4F3424',
@@ -282,6 +341,178 @@ export class OkeyTable3D {
     const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 2.2, 2.1, 24), legMat);
     pedestal.position.y = -1.35;
     this.scene.add(pedestal);
+
+    // 3D Kahvehane Interior Room (Walls, Wainscoting, Windows, Ceiling Beams, Samovar Bar)
+    const wallPlasterMat = new THREE.MeshStandardMaterial({
+      color: '#322017',
+      roughness: 0.92
+    });
+    const wainscotMat = new THREE.MeshStandardMaterial({
+      map: getWoodTexture(),
+      color: '#53321F',
+      roughness: 0.72
+    });
+    const trimBrassMat = new THREE.MeshStandardMaterial({
+      color: '#B58B3B',
+      roughness: 0.36,
+      metalness: 0.65
+    });
+    const paintingMat = new THREE.MeshStandardMaterial({
+      map: getKahveBackdropTexture(),
+      roughness: 0.65
+    });
+
+    const roomHalf = 22.5;
+    const wallSpecs = [
+      { pos: [0, 5.4, -roomHalf], rotY: 0 },
+      { pos: [0, 5.4, roomHalf], rotY: Math.PI },
+      { pos: [-roomHalf, 5.4, 0], rotY: Math.PI / 2 },
+      { pos: [roomHalf, 5.4, 0], rotY: -Math.PI / 2 }
+    ];
+
+    wallSpecs.forEach((ws, wallIdx) => {
+      const wallGroup = new THREE.Group();
+      wallGroup.position.set(...ws.pos);
+      wallGroup.rotation.y = ws.rotY;
+
+      const upper = new THREE.Mesh(new THREE.PlaneGeometry(45, 16), wallPlasterMat);
+      wallGroup.add(upper);
+
+      const lowerWood = new THREE.Mesh(new THREE.BoxGeometry(45, 5.2, 0.28), wainscotMat);
+      lowerWood.position.set(0, -5.2, 0.14);
+      wallGroup.add(lowerWood);
+
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(45, 0.24, 0.42), trimBrassMat);
+      rail.position.set(0, -2.55, 0.2);
+      wallGroup.add(rail);
+
+      // Framed paintings & warm sconces on each wall
+      [-11.5, 0, 11.5].forEach((px, pIdx) => {
+        if (wallIdx === 0 && px === 0) return; // Keep center back wall open for Ocakbaşı counter
+        const frame = new THREE.Mesh(new THREE.BoxGeometry(4.8, 3.2, 0.18), wainscotMat);
+        frame.position.set(px, 0.8, 0.12);
+        wallGroup.add(frame);
+
+        const art = new THREE.Mesh(
+          new THREE.PlaneGeometry(4.2, 2.65),
+          (wallIdx + pIdx) % 2 === 0
+            ? paintingMat
+            : new THREE.MeshStandardMaterial({
+                color: '#734224',
+                emissive: '#3D1E0C',
+                emissiveIntensity: 0.45,
+                roughness: 0.7
+              })
+        );
+        art.position.set(px, 0.8, 0.23);
+        wallGroup.add(art);
+      });
+
+      // Warm wall sconces between frames
+      [-6.0, 6.0].forEach((sx) => {
+        const sconce = new THREE.Mesh(
+          new THREE.SphereGeometry(0.28, 12, 10),
+          new THREE.MeshStandardMaterial({
+            color: '#FFE099',
+            emissive: '#FF9E3D',
+            emissiveIntensity: 1.4
+          })
+        );
+        sconce.position.set(sx, 1.3, 0.35);
+        wallGroup.add(sconce);
+      });
+
+      this.scene.add(wallGroup);
+    });
+
+    // Arched Evening Windows on East & West walls
+    [-1, 1].forEach((side) => {
+      const winGroup = new THREE.Group();
+      winGroup.position.set(side * (roomHalf - 0.16), 1.4, -5.5);
+      winGroup.rotation.y = side === -1 ? Math.PI / 2 : -Math.PI / 2;
+
+      const glowPane = new THREE.Mesh(
+        new THREE.PlaneGeometry(4.2, 5.4),
+        new THREE.MeshBasicMaterial({ color: '#4B3221' })
+      );
+      winGroup.add(glowPane);
+
+      const frameOuter = new THREE.Mesh(new THREE.BoxGeometry(4.6, 5.8, 0.24), wainscotMat);
+      frameOuter.position.z = -0.14;
+      winGroup.add(frameOuter);
+
+      for (const mx of [-0.7, 0.7]) {
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 5.4, 0.16), wainscotMat);
+        bar.position.set(mx, 0, 0.08);
+        winGroup.add(bar);
+      }
+      for (const my of [-0.9, 0.9]) {
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.12, 0.16), wainscotMat);
+        bar.position.set(0, my, 0.08);
+        winGroup.add(bar);
+      }
+      this.scene.add(winGroup);
+    });
+
+    // Ceiling & Exposed Timber Beams
+    const ceiling = new THREE.Mesh(
+      new THREE.PlaneGeometry(46, 46),
+      new THREE.MeshStandardMaterial({ color: '#1E130D', roughness: 0.95 })
+    );
+    ceiling.rotation.x = Math.PI / 2;
+    ceiling.position.y = 13.4;
+    this.scene.add(ceiling);
+
+    [-14, -7, 0, 7, 14].forEach((bz) => {
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(45, 0.55, 0.7), wainscotMat);
+      beam.position.set(0, 13.1, bz);
+      this.scene.add(beam);
+    });
+
+    // Kahvehane Ocakbaşı (Tea Counter + Brass Samovar) against back wall
+    const barGroup = new THREE.Group();
+    barGroup.position.set(0, -2.35, -19.8);
+    const counter = new THREE.Mesh(new THREE.BoxGeometry(10.5, 2.7, 2.2), wainscotMat);
+    counter.position.y = 1.35;
+    barGroup.add(counter);
+
+    const counterTop = new THREE.Mesh(
+      new THREE.BoxGeometry(10.8, 0.18, 2.45),
+      new THREE.MeshStandardMaterial({ color: '#8A5630', roughness: 0.38 })
+    );
+    counterTop.position.y = 2.78;
+    barGroup.add(counterTop);
+
+    // Brass Samovar (Semaver)
+    const samovarBody = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.45, 0.58, 1.35, 18),
+      trimBrassMat
+    );
+    samovarBody.position.set(-2.2, 3.55, 0);
+    barGroup.add(samovarBody);
+
+    const samovarDome = new THREE.Mesh(
+      new THREE.SphereGeometry(0.42, 16, 12),
+      trimBrassMat
+    );
+    samovarDome.position.set(-2.2, 4.25, 0);
+    barGroup.add(samovarDome);
+
+    const backShelf = new THREE.Mesh(new THREE.BoxGeometry(8.8, 0.18, 0.9), wainscotMat);
+    backShelf.position.set(0, 5.2, -1.5);
+    barGroup.add(backShelf);
+
+    const barLight = new THREE.PointLight('#FFB75E', 18, 16, 1.4);
+    barLight.position.set(0, 5.6, 0.5);
+    barGroup.add(barLight);
+    this.scene.add(barGroup);
+
+    // 5 Hanging Turkish Brass Mosaic Pendant Lamps (positioned high above player heads!)
+    this.buildPendantLamp(0, 10.4, 0, 1.25, false);
+    this.buildPendantLamp(-9.5, 8.6, -9.5, 1.0, true);
+    this.buildPendantLamp(9.5, 8.6, -9.5, 1.0, true);
+    this.buildPendantLamp(-9.5, 8.6, 9.5, 1.0, false);
+    this.buildPendantLamp(9.5, 8.6, 9.5, 1.0, false);
   }
 
   buildTeaGlass(x, z) {
@@ -520,10 +751,10 @@ export class OkeyTable3D {
   renderPlayerHeads(state, viewerIdx) {
     const teamMode = state.options?.teamMode || 'solo';
     const seatPositions = [
-      { rel: 0, pos: [-5.85, 0.0, 8.1], rotY: 0, compact: true },
-      { rel: 1, pos: [8.85, 0.0, 0], rotY: -Math.PI / 2, compact: false },
-      { rel: 2, pos: [0, 0.0, -8.85], rotY: 0, compact: false },
-      { rel: 3, pos: [-8.85, 0.0, 0], rotY: Math.PI / 2, compact: false }
+      { rel: 0, pos: [-5.95, 0.0, 8.15], headY: 1.05, medRadius: 0.48, compact: true },
+      { rel: 1, pos: [8.9, 0.0, 0], headY: 2.55, medRadius: 0.68, compact: false },
+      { rel: 2, pos: [0, 0.0, -8.9], headY: 2.75, medRadius: 0.72, compact: false },
+      { rel: 3, pos: [-8.9, 0.0, 0], headY: 2.55, medRadius: 0.68, compact: false }
     ];
 
     for (const cfg of seatPositions) {
@@ -540,39 +771,73 @@ export class OkeyTable3D {
 
       const holder = new THREE.Group();
       holder.position.set(...cfg.pos);
+      // Orient player seat & shoulders toward table center (local +Z -> table center)
+      holder.lookAt(0, 0, 0);
+
+      const torsoColor = teamMode === 'paired'
+        ? (seat.teamIndex === 0 ? '#6A4D1F' : '#1F4B6A')
+        : '#3A2D26';
+      const torsoMat = new THREE.MeshStandardMaterial({
+        color: torsoColor,
+        roughness: 0.75
+      });
 
       if (!cfg.compact) {
-        // Seated torso / shoulders + wooden kahve chair back
+        // Wooden kahvehane chair back behind the seated player
         const chairWood = new THREE.MeshStandardMaterial({
           map: getWoodTexture(),
           color: '#6C4227',
-          roughness: 0.65
+          roughness: 0.62
         });
-        const chairBack = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.5, 0.14), chairWood);
-        chairBack.position.set(
-          cfg.rel === 1 ? 0.55 : cfg.rel === 3 ? -0.55 : 0,
-          0.35,
-          cfg.rel === 2 ? -0.55 : 0
-        );
-        chairBack.rotation.y = cfg.rotY;
+        const chairBack = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.95, 0.14), chairWood);
+        chairBack.position.set(0, 1.0, -0.66);
+        chairBack.castShadow = true;
         holder.add(chairBack);
 
-        const torsoMat = new THREE.MeshStandardMaterial({
-          color: teamMode === 'paired' ? (seat.teamIndex === 0 ? '#6A4D1F' : '#1F4B6A') : '#382C25',
-          roughness: 0.78
-        });
+        // Seated lower torso + curved shoulders bust right below circular PFP
         const torso = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.55, 0.72, 0.85, 20),
+          new THREE.CylinderGeometry(0.62, 0.78, 1.35, 24),
           torsoMat
         );
-        torso.position.y = 0.45;
+        torso.position.y = 0.85;
         holder.add(torso);
+
+        const shoulders = new THREE.Mesh(
+          new THREE.SphereGeometry(0.76, 24, 16),
+          torsoMat
+        );
+        shoulders.scale.set(1.45, 0.68, 0.65);
+        shoulders.position.set(0, cfg.headY - cfg.medRadius - 0.36, 0);
+        holder.add(shoulders);
+
+        const neck = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.22, 0.28, 0.36, 20),
+          torsoMat
+        );
+        neck.position.set(0, cfg.headY - cfg.medRadius - 0.08, 0);
+        holder.add(neck);
+      } else {
+        // Compact South-West player shoulder silhouette right under circular PFP
+        const shoulders = new THREE.Mesh(
+          new THREE.SphereGeometry(0.45, 20, 12),
+          torsoMat
+        );
+        shoulders.scale.set(1.38, 0.62, 0.62);
+        shoulders.position.set(0, cfg.headY - cfg.medRadius - 0.18, 0);
+        holder.add(shoulders);
       }
 
-      // Sculpted Head Pedestal + Framed Profile Avatar Medallion ("oturan kafası")
-      const headY = cfg.compact ? 0.65 : 1.32;
+      this.dynamicGroup.add(holder);
+      holder.updateMatrixWorld(true);
+
+      // Framed Circular PFP Medallion oriented strictly toward the center of the table
+      const headY = cfg.headY;
+      const medRadius = cfg.medRadius;
       const headGroup = new THREE.Group();
-      headGroup.position.y = headY;
+      headGroup.position.set(0, headY, 0);
+      holder.add(headGroup);
+      headGroup.updateMatrixWorld(true);
+      headGroup.lookAt(0, headY, 0);
 
       const ringMat = new THREE.MeshStandardMaterial({
         color: isActive ? '#F4C44E' : teamColor,
@@ -581,9 +846,8 @@ export class OkeyTable3D {
         metalness: 0.65
       });
 
-      const medRadius = cfg.compact ? 0.44 : 0.62;
       const bezel = new THREE.Mesh(
-        new THREE.CylinderGeometry(medRadius + 0.07, medRadius + 0.07, 0.16, 32),
+        new THREE.CylinderGeometry(medRadius + 0.075, medRadius + 0.075, 0.16, 36),
         ringMat
       );
       bezel.rotation.x = Math.PI / 2;
@@ -592,18 +856,14 @@ export class OkeyTable3D {
       const avatarMat = new THREE.MeshBasicMaterial({
         map: getAvatarTexture(seat.avatar)
       });
-      const frontDisc = new THREE.Mesh(new THREE.CircleGeometry(medRadius, 32), avatarMat);
-      frontDisc.position.z = 0.085;
+      const frontDisc = new THREE.Mesh(new THREE.CircleGeometry(medRadius, 36), avatarMat);
+      frontDisc.position.z = 0.086;
       headGroup.add(frontDisc);
 
-      const backDisc = new THREE.Mesh(new THREE.CircleGeometry(medRadius, 32), avatarMat);
+      const backDisc = new THREE.Mesh(new THREE.CircleGeometry(medRadius, 36), avatarMat);
       backDisc.rotation.y = Math.PI;
-      backDisc.position.z = -0.085;
+      backDisc.position.z = -0.086;
       headGroup.add(backDisc);
-
-      // Orient avatar head toward the south camera so portraits are always clearly readable
-      headGroup.lookAt(0, headY, 13.5);
-      holder.add(headGroup);
 
       // Nameplate directly above head (ONLY player name, NO tile count!)
       const spriteMat = new THREE.SpriteMaterial({
@@ -617,12 +877,10 @@ export class OkeyTable3D {
         depthTest: false
       });
       const nameplate = new THREE.Sprite(spriteMat);
-      nameplate.position.set(0, headY + (cfg.compact ? 0.8 : 1.05), 0);
-      nameplate.scale.set(cfg.compact ? 2.1 : 2.65, cfg.compact ? 0.52 : 0.66, 1);
+      nameplate.position.set(0, headY + medRadius + (cfg.compact ? 0.44 : 0.56), 0);
+      nameplate.scale.set(cfg.compact ? 2.15 : 2.75, cfg.compact ? 0.54 : 0.68, 1);
       nameplate.renderOrder = 20;
       holder.add(nameplate);
-
-      this.dynamicGroup.add(holder);
     }
   }
 
@@ -683,6 +941,118 @@ export class OkeyTable3D {
     }
     this.interactables = [];
     this.rackTileMeshes = new Map();
+    this.trackedMeshes = new Map();
+    this.discardTopMeshes = new Map();
+    this.meldTileMeshes = new Map();
+    this.tileAnimations = [];
+  }
+
+  captureTileSnapshot() {
+    this.scene.updateMatrixWorld(true);
+    const tileTransforms = new Map();
+    const discardTopBySeat = new Map();
+
+    for (const [tileId, mesh] of this.trackedMeshes.entries()) {
+      if (!mesh || !mesh.parent) continue;
+      const pos = new THREE.Vector3();
+      const quat = new THREE.Quaternion();
+      const scale = new THREE.Vector3();
+      mesh.getWorldPosition(pos);
+      mesh.getWorldQuaternion(quat);
+      mesh.getWorldScale(scale);
+      tileTransforms.set(tileId, { pos, quat, scale });
+    }
+
+    if (
+      this.lastDraggedTransform &&
+      performance.now() < this.lastDraggedTransform.expiresAt
+    ) {
+      tileTransforms.set(this.lastDraggedTransform.tileId, {
+        pos: this.lastDraggedTransform.pos.clone(),
+        quat: this.lastDraggedTransform.quat.clone(),
+        scale: this.lastDraggedTransform.scale.clone()
+      });
+    }
+
+    for (const [seatIdx, mesh] of this.discardTopMeshes.entries()) {
+      if (!mesh || !mesh.parent) continue;
+      const pos = new THREE.Vector3();
+      const quat = new THREE.Quaternion();
+      const scale = new THREE.Vector3();
+      mesh.getWorldPosition(pos);
+      mesh.getWorldQuaternion(quat);
+      mesh.getWorldScale(scale);
+      discardTopBySeat.set(seatIdx, { pos, quat, scale });
+    }
+
+    return {
+      tileTransforms,
+      discardTopBySeat,
+      prevDiscardTopIds: [...this.lastDiscardTopIds],
+      prevTableTileIds: new Set(this.lastTableTileIds),
+      prevHandIds: new Set(this.lastHandIds)
+    };
+  }
+
+  getOpponentOriginWorld(rel) {
+    const origins = [
+      new THREE.Vector3(0, 1.35, 6.85),
+      new THREE.Vector3(6.85, 1.35, 0),
+      new THREE.Vector3(0, 1.35, -6.85),
+      new THREE.Vector3(-6.85, 1.35, 0)
+    ];
+    return origins[rel % 4].clone();
+  }
+
+  enqueueAnimationFromWorld(mesh, startWorldPos, startWorldQuat, startWorldScale, opts = {}) {
+    if (this.reducedMotion || !mesh || !mesh.parent || !startWorldPos) return;
+
+    mesh.parent.updateMatrixWorld(true);
+    const targetPos = mesh.position.clone();
+    const targetQuat = mesh.quaternion.clone();
+    const targetScale = mesh.scale.clone();
+
+    const startLocalPos = mesh.parent.worldToLocal(startWorldPos.clone());
+    const parentQuat = new THREE.Quaternion();
+    mesh.parent.getWorldQuaternion(parentQuat);
+    const startLocalQuat = startWorldQuat
+      ? parentQuat.clone().invert().multiply(startWorldQuat.clone())
+      : targetQuat.clone();
+
+    let startLocalScale = targetScale.clone();
+    if (startWorldScale) {
+      const parentScale = new THREE.Vector3();
+      mesh.parent.getWorldScale(parentScale);
+      startLocalScale = new THREE.Vector3(
+        startWorldScale.x / (parentScale.x || 1),
+        startWorldScale.y / (parentScale.y || 1),
+        startWorldScale.z / (parentScale.z || 1)
+      );
+    }
+
+    const moveDist = startLocalPos.distanceTo(targetPos);
+    const rotDiff = 1 - Math.abs(startLocalQuat.dot(targetQuat));
+    if (moveDist < 0.015 && rotDiff < 0.002) {
+      return;
+    }
+
+    mesh.position.copy(startLocalPos);
+    mesh.quaternion.copy(startLocalQuat);
+    mesh.scale.copy(startLocalScale);
+
+    this.tileAnimations.push({
+      mesh,
+      startPos: startLocalPos,
+      targetPos,
+      startQuat: startLocalQuat,
+      targetQuat,
+      startScale: startLocalScale,
+      targetScale,
+      elapsed: 0,
+      delay: opts.delay || 0,
+      duration: opts.duration || 0.36,
+      arcHeight: opts.arcHeight ?? 0.35
+    });
   }
 
   syncHandToSlots(serverHand) {
@@ -760,12 +1130,21 @@ export class OkeyTable3D {
     }
   }
 
-  renderGameState(state, { skipSlotSync = false } = {}) {
+  renderGameState(state, { skipSlotSync = false, instant = false } = {}) {
+    const sameRound = Boolean(state && this.lastRenderedRound === state.roundNumber);
+    const snapshot = !instant && !this.reducedMotion && state && sameRound
+      ? this.captureTileSnapshot()
+      : null;
+
     this.demoMode = false;
     this.currentState = state;
     this.clearDynamic();
 
     if (!state) {
+      this.lastRenderedRound = null;
+      this.lastHandIds = new Set();
+      this.lastTableTileIds = new Set();
+      this.lastDiscardTopIds = [null, null, null, null];
       this.buildDemoSetup();
       return;
     }
@@ -773,18 +1152,27 @@ export class OkeyTable3D {
     const viewerIdx = state.viewerSeatIndex ?? 0;
     const mySeat = state.seats[viewerIdx];
     const isMyTurn = state.phase === 'playing' && state.currentSeat === viewerIdx;
+    const isFreshRoundDeal = !sameRound && !instant && !this.reducedMotion && state.phase === 'playing';
+    this.lastRenderedRound = state.roundNumber;
 
     if (!skipSlotSync && mySeat?.hand) {
       this.syncHandToSlots(mySeat.hand);
     }
 
+    const deckTopWorldPos = new THREE.Vector3(-0.68, 0.35, -3.9);
+    const deckTopQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+    const flatTileQuat = deckTopQuat.clone();
+
     const rackMeshes = [];
     this.dynamicGroup.userData.rackMeshes = rackMeshes;
+    const newHandIds = new Set();
+    let dealIdx = 0;
 
     // 1. Render South rack tiles (Your hand)
     for (let slotIdx = 0; slotIdx < this.handSlotData.length; slotIdx += 1) {
       const tile = this.handSlotData[slotIdx];
       if (!tile) continue;
+      newHandIds.add(tile.id);
 
       const isSelected = this.selectedTileIds.has(tile.id);
       const mustUse = state.pickedDiscardTileId === tile.id;
@@ -805,7 +1193,44 @@ export class OkeyTable3D {
       rackMeshes.push(mesh);
       this.interactables.push(mesh);
       this.rackTileMeshes.set(tile.id, mesh);
+      this.trackedMeshes.set(tile.id, mesh);
+
+      if (isFreshRoundDeal) {
+        this.enqueueAnimationFromWorld(mesh, deckTopWorldPos, deckTopQuat, null, {
+          duration: 0.42,
+          arcHeight: 0.65,
+          delay: dealIdx * 0.016
+        });
+        dealIdx += 1;
+      } else if (snapshot) {
+        const prev = snapshot.tileTransforms.get(tile.id);
+        if (prev) {
+          this.southRackGroup.updateMatrixWorld(true);
+          const targetWorld = mesh.getWorldPosition(new THREE.Vector3());
+          const moveDist = prev.pos.distanceTo(targetWorld);
+          const isSelectLift = moveDist < 0.32;
+          this.enqueueAnimationFromWorld(mesh, prev.pos, prev.quat, prev.scale, {
+            duration: isSelectLift ? 0.14 : 0.34,
+            arcHeight: isSelectLift ? 0 : 0.24
+          });
+        } else {
+          // Newly drawn or swapped into hand
+          const leftSeatIdx = (viewerIdx + 3) % 4;
+          const isLeftDiscardDraw = state.lastEvent?.type === 'draw_discard';
+          const leftSnap = snapshot.discardTopBySeat.get(leftSeatIdx);
+          const startPos = isLeftDiscardDraw
+            ? (leftSnap?.pos || this.discardZoneCoords[3].clone().setY(0.25))
+            : deckTopWorldPos;
+          const startQuat = isLeftDiscardDraw ? (leftSnap?.quat || flatTileQuat) : deckTopQuat;
+          this.enqueueAnimationFromWorld(mesh, startPos, startQuat, null, {
+            duration: 0.44,
+            arcHeight: isLeftDiscardDraw ? 0.65 : 0.92
+          });
+        }
+      }
     }
+    this.lastHandIds = newHandIds;
+    this.lastDraggedTransform = null;
 
     // 2. Render Opponent racks (face-down 3D tiles, zero clipping)
     const oppConfigs = [
@@ -891,6 +1316,7 @@ export class OkeyTable3D {
     }
 
     // 5. Render 4 Corner Discard Piles (left neighbor sits right at left end of South rack!)
+    const nextDiscardTopIds = [null, null, null, null];
     for (let rel = 0; rel < 4; rel += 1) {
       const seatIdx = (viewerIdx + rel) % 4;
       const pileInfo = state.discardPiles[seatIdx];
@@ -912,6 +1338,7 @@ export class OkeyTable3D {
       }
 
       if (pileInfo && pileInfo.count > 0 && pileInfo.topTile) {
+        nextDiscardTopIds[seatIdx] = pileInfo.topTile.id;
         const layers = Math.min(4, pileInfo.count);
         for (let i = 0; i < layers; i += 1) {
           const isTop = i === layers - 1;
@@ -940,17 +1367,41 @@ export class OkeyTable3D {
             this.dynamicGroup.add(ring);
           }
           this.dynamicGroup.add(tMesh);
+
+          if (isTop) {
+            this.discardTopMeshes.set(seatIdx, tMesh);
+            if (snapshot && pileInfo.topTile.id !== snapshot.prevDiscardTopIds[seatIdx]) {
+              const fromRack = snapshot.tileTransforms.get(pileInfo.topTile.id);
+              if (fromRack) {
+                this.enqueueAnimationFromWorld(tMesh, fromRack.pos, fromRack.quat, fromRack.scale, {
+                  duration: 0.4,
+                  arcHeight: 0.9
+                });
+              } else {
+                const startOrigin = this.getOpponentOriginWorld(rel);
+                this.enqueueAnimationFromWorld(tMesh, startOrigin, null, null, {
+                  duration: 0.42,
+                  arcHeight: 0.85
+                });
+              }
+            }
+          }
         }
       }
     }
+    this.lastDiscardTopIds = nextDiscardTopIds;
 
     // 6. Render Opened Table Melds
-    this.renderTableMelds(state, mySeat, isMyTurn);
+    this.renderTableMelds(state, mySeat, isMyTurn, snapshot, viewerIdx);
   }
 
-  renderTableMelds(state, mySeat, isMyTurn) {
+  renderTableMelds(state, mySeat, isMyTurn, snapshot = null, viewerIdx = 0) {
     const melds = state.tableMelds || [];
-    if (melds.length === 0) return;
+    const nextTableTileIds = new Set();
+    if (melds.length === 0) {
+      this.lastTableTileIds = nextTableTileIds;
+      return;
+    }
 
     const selected = this.getSelectedTiles();
     const canTryLayoff =
@@ -966,6 +1417,7 @@ export class OkeyTable3D {
 
     let cursorX = -maxRowWidth / 2;
     let cursorZ = startZ;
+    let meldAnimIdx = 0;
 
     for (const meld of melds) {
       const groupWidth = meld.slots.length * tileStep;
@@ -994,6 +1446,7 @@ export class OkeyTable3D {
       }
 
       meld.slots.forEach((slot, sIdx) => {
+        nextTableTileIds.add(slot.tile.id);
         const mesh = this.createTileMesh(slot.tile, {
           faceUp: true,
           okeyTarget: state.okeyTarget
@@ -1003,13 +1456,37 @@ export class OkeyTable3D {
         mesh.position.set(cursorX + sIdx * tileStep, 0.095, cursorZ);
         mesh.userData = { kind: 'tableMeld', meldId: meld.id, isLayoffTarget };
         this.dynamicGroup.add(mesh);
+        this.trackedMeshes.set(slot.tile.id, mesh);
         if (isLayoffTarget) {
           this.interactables.push(mesh);
+        }
+
+        if (snapshot) {
+          const prev = snapshot.tileTransforms.get(slot.tile.id);
+          if (prev) {
+            const cameFromHand = snapshot.prevHandIds.has(slot.tile.id);
+            this.enqueueAnimationFromWorld(mesh, prev.pos, prev.quat, prev.scale, {
+              duration: cameFromHand ? 0.44 : 0.24,
+              arcHeight: cameFromHand ? 0.85 : 0.08,
+              delay: cameFromHand ? Math.min(0.26, meldAnimIdx * 0.026) : 0
+            });
+            if (cameFromHand) meldAnimIdx += 1;
+          } else if (!snapshot.prevTableTileIds.has(slot.tile.id)) {
+            const ownerRel = ((meld.ownerSeat ?? 0) - viewerIdx + 4) % 4;
+            const oppOrigin = this.getOpponentOriginWorld(ownerRel);
+            this.enqueueAnimationFromWorld(mesh, oppOrigin, null, null, {
+              duration: 0.44,
+              arcHeight: 0.85,
+              delay: Math.min(0.26, meldAnimIdx * 0.024)
+            });
+            meldAnimIdx += 1;
+          }
         }
       });
 
       cursorX += groupWidth + groupGap;
     }
+    this.lastTableTileIds = nextTableTileIds;
   }
 
   setCameraPreset(presetName) {
@@ -1170,6 +1647,20 @@ export class OkeyTable3D {
         m.material.opacity = 0;
       });
       if (drag.floatingMesh) {
+        drag.floatingMesh.updateMatrixWorld(true);
+        const pos = new THREE.Vector3();
+        const quat = new THREE.Quaternion();
+        const scale = new THREE.Vector3();
+        drag.floatingMesh.getWorldPosition(pos);
+        drag.floatingMesh.getWorldQuaternion(quat);
+        drag.floatingMesh.getWorldScale(scale);
+        this.lastDraggedTransform = {
+          tileId: drag.tile.id,
+          pos,
+          quat,
+          scale,
+          expiresAt: performance.now() + 1200
+        };
         this.scene.remove(drag.floatingMesh);
       }
       if (drag.mesh) {
@@ -1248,7 +1739,7 @@ export class OkeyTable3D {
       this.targetSpherical.radius = THREE.MathUtils.clamp(
         this.targetSpherical.radius + e.deltaY * 0.008,
         9.5,
-        22
+        20.0
       );
     };
 
@@ -1277,6 +1768,28 @@ export class OkeyTable3D {
 
     if (this.demoMode && !this.reducedMotion) {
       this.targetSpherical.theta += dt * 0.08;
+    }
+
+    for (let i = this.tileAnimations.length - 1; i >= 0; i -= 1) {
+      const anim = this.tileAnimations[i];
+      anim.elapsed += dt;
+      if (anim.elapsed < anim.delay) {
+        continue;
+      }
+
+      const progress = Math.min(1, (anim.elapsed - anim.delay) / anim.duration);
+      const ease = 1 - (1 - progress) ** 3;
+      anim.mesh.position.lerpVectors(anim.startPos, anim.targetPos, ease);
+      anim.mesh.position.y += Math.sin(progress * Math.PI) * anim.arcHeight;
+      anim.mesh.quaternion.slerpQuaternions(anim.startQuat, anim.targetQuat, ease);
+      anim.mesh.scale.lerpVectors(anim.startScale, anim.targetScale, ease);
+
+      if (progress >= 1) {
+        anim.mesh.position.copy(anim.targetPos);
+        anim.mesh.quaternion.copy(anim.targetQuat);
+        anim.mesh.scale.copy(anim.targetScale);
+        this.tileAnimations.splice(i, 1);
+      }
     }
 
     const damp = this.reducedMotion ? 1 : Math.min(1, dt * 8);

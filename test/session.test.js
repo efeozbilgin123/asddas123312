@@ -448,3 +448,183 @@ test('GameSession detects elden bitme (opening and finishing on the same turn) f
 
   session.destroy();
 });
+
+test('Paired katlamali isolates opening & pair thresholds to opponent team only (partner never raises partner)', async () => {
+  const session = new GameSession({
+    roomCode: 'PKAT',
+    seatsConfig: [
+      { playerId: 'p0', name: 'A', isBot: false },
+      { playerId: 'p1', name: 'B', isBot: false },
+      { playerId: 'p2', name: 'C', isBot: false },
+      { playerId: 'p3', name: 'D', isBot: false }
+    ],
+    options: { katlamali: true, teamMode: 'paired', islekPenalty: true, turnSeconds: 60 },
+    onStateChange: () => {}
+  });
+
+  session.startRound();
+  session.okeyTarget = { color: 'yellow', number: 1 };
+  assert.equal(session.getOpenThreshold(0), 101);
+  assert.equal(session.getOpenThreshold(2), 101);
+  assert.equal(session.getOpenThreshold(1), 101);
+
+  // Seat 0 (Team 0) opens with 114 points -> Team 1 threshold rises to 115, Team 0 stays 101!
+  session.currentSeat = 0;
+  session.turnPhase = 'play';
+  session.seats[0].hand = [
+    tile('t0-1', 'red', 12),
+    tile('t0-2', 'red', 13),
+    tile('t0-3', 'red', 13, 1), // invalid wait, let's make valid runs:
+  ];
+  session.seats[0].hand = [
+    tile('t0-1', 'red', 11),
+    tile('t0-2', 'red', 12),
+    tile('t0-3', 'red', 13), // 36
+    tile('t0-4', 'blue', 11),
+    tile('t0-5', 'blue', 12),
+    tile('t0-6', 'blue', 13), // 36
+    tile('t0-7', 'black', 13),
+    tile('t0-8', 'black', 13, 1) // wait need valid 3-4 tile group:
+  ];
+  session.seats[0].hand = [
+    tile('t0-1', 'red', 11),
+    tile('t0-2', 'red', 12),
+    tile('t0-3', 'red', 13), // 36
+    tile('t0-4', 'blue', 11),
+    tile('t0-5', 'blue', 12),
+    tile('t0-6', 'blue', 13), // 36
+    tile('t0-7', 'black', 10),
+    tile('t0-8', 'black', 11),
+    tile('t0-9', 'black', 12),
+    tile('t0-10', 'black', 13), // 46 -> total 118
+    tile('t0-k', 'red', 2)
+  ];
+
+  const o0 = session.openHand(
+    0,
+    [
+      ['t0-1', 't0-2', 't0-3'],
+      ['t0-4', 't0-5', 't0-6'],
+      ['t0-7', 't0-8', 't0-9', 't0-10']
+    ],
+    'series'
+  );
+  assert.equal(o0.ok, true);
+  assert.equal(session.getOpenThreshold(1), 119);
+  assert.equal(session.getOpenThreshold(3), 119);
+  assert.equal(session.getOpenThreshold(2), 101); // Partner unaffected!
+
+  // Seat 2 (Partner on Team 0) can still open with 105 (less than Team 1's 119)
+  session.currentSeat = 2;
+  session.turnPhase = 'play';
+  session.seats[2].hand = [
+    tile('t2-1', 'red', 11, 1),
+    tile('t2-2', 'red', 12, 1),
+    tile('t2-3', 'red', 13, 1), // 36
+    tile('t2-4', 'blue', 11, 1),
+    tile('t2-5', 'blue', 12, 1),
+    tile('t2-6', 'blue', 13, 1), // 36
+    tile('t2-7', 'black', 10, 1),
+    tile('t2-8', 'black', 11, 1),
+    tile('t2-9', 'black', 12, 1), // 33 -> total 105
+    tile('t2-k', 'blue', 2)
+  ];
+  const o2 = session.openHand(
+    2,
+    [
+      ['t2-1', 't2-2', 't2-3'],
+      ['t2-4', 't2-5', 't2-6'],
+      ['t2-7', 't2-8', 't2-9']
+    ],
+    'series'
+  );
+  assert.equal(o2.ok, true);
+  assert.equal(session.getOpenThreshold(1), 119); // Team 1 stays max(119, 106) = 119
+
+  // Pair opening by Seat 1 (Team 1) with 6 pairs raises ONLY Team 0 pairThreshold to 7
+  session.currentSeat = 1;
+  session.turnPhase = 'play';
+  const make6Pairs = [];
+  const p6Groups = [];
+  for (let i = 0; i < 6; i += 1) {
+    const a = tile(`p1-a-${i}`, 'red', i + 2, 0);
+    const b = tile(`p1-b-${i}`, 'red', i + 2, 1);
+    make6Pairs.push(a, b);
+    p6Groups.push([a.id, b.id]);
+  }
+  session.seats[1].hand = [...make6Pairs, tile('p1-k', 'black', 2)];
+  const o1 = session.openHand(1, p6Groups, 'pairs');
+  assert.equal(o1.ok, true);
+  assert.equal(session.getPairThreshold(0), 7);
+  assert.equal(session.getPairThreshold(2), 7);
+  assert.equal(session.getPairThreshold(3), 5); // Partner on Team 1 stays at 5!
+
+  session.destroy();
+});
+
+test('parseMusicUrl handles YouTube, Spotify, SoundCloud, MP3 audio, web players and rejects unsafe URLs', async () => {
+  const { parseMusicUrl } = await import('../shared/music.js');
+
+  const yt = parseMusicUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'Test Track');
+  assert.equal(yt.ok, true);
+  assert.equal(yt.provider, 'youtube');
+  assert.equal(yt.kind, 'iframe');
+  assert.match(yt.embedUrl, /youtube\.com\/embed\/dQw4w9WgXcQ/);
+
+  const sp = parseMusicUrl('https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT?si=123');
+  assert.equal(sp.ok, true);
+  assert.equal(sp.provider, 'spotify');
+  assert.match(sp.embedUrl, /open\.spotify\.com\/embed\/track\/4cOdK2wGLETKBW3PvgPWqT/);
+
+  const sc = parseMusicUrl('https://soundcloud.com/lofi_girl/lofi-hip-hop');
+  assert.equal(sc.ok, true);
+  assert.equal(sc.provider, 'soundcloud');
+  assert.match(sc.embedUrl, /w\.soundcloud\.com\/player/);
+
+  const mp3 = parseMusicUrl('https://example.com/music/kahve.mp3');
+  assert.equal(mp3.ok, true);
+  assert.equal(mp3.provider, 'audio');
+  assert.equal(mp3.kind, 'audio');
+
+  const web = parseMusicUrl('https://radio.garden/listen/istanbul');
+  assert.equal(web.ok, true);
+  assert.equal(web.provider, 'web');
+
+  assert.equal(parseMusicUrl('').ok, false);
+  assert.equal(parseMusicUrl('javascript:alert(1)').ok, false);
+  assert.equal(parseMusicUrl('ftp://files.example.com/song.mp3').ok, false);
+});
+
+test('RoomManager validates custom base64 avatars and broadcasts room music', async () => {
+  const { RoomManager } = await import('../server/roomManager.js');
+  const emitted = [];
+  const fakeIo = {
+    to: () => ({ emit: (ev, payload) => emitted.push({ ev, payload }) }),
+    emit: (ev, payload) => emitted.push({ ev, payload })
+  };
+  const rm = new RoomManager(fakeIo);
+  const sampleDataUri = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAA==';
+
+  const created = rm.createRoom({
+    playerId: 'host-1',
+    playerName: 'Efe',
+    playerAvatar: sampleDataUri,
+    roomName: 'Müzikli Masa'
+  });
+  assert.equal(created.ok, true);
+  assert.equal(created.room.seats[0].avatar, sampleDataUri);
+
+  const musicRes = rm.setRoomMusic({
+    roomCode: created.room.code,
+    playerId: 'host-1',
+    url: 'https://youtu.be/dQw4w9WgXcQ',
+    title: 'Kahvehane Chill'
+  });
+  assert.equal(musicRes.ok, true);
+  assert.equal(created.room.music.provider, 'youtube');
+  assert.equal(created.room.music.title, 'Kahvehane Chill');
+
+  const stopRes = rm.stopRoomMusic({ roomCode: created.room.code, playerId: 'host-1' });
+  assert.equal(stopRes.ok, true);
+  assert.equal(created.room.music, null);
+});

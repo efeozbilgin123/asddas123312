@@ -41,6 +41,8 @@ export class GameSession {
     this.currentSeat = 0;
     this.openThreshold = 101;
     this.pairThreshold = 5;
+    this.teamOpenThresholds = [101, 101];
+    this.teamPairThresholds = [5, 5];
     this.gosterge = null;
     this.okeyTarget = null;
     this.deck = [];
@@ -74,6 +76,20 @@ export class GameSession {
 
     this.turnTimer = null;
     this.botTimer = null;
+  }
+
+  getOpenThreshold(seatIndex) {
+    if (this.options.teamMode === 'paired') {
+      return this.teamOpenThresholds[seatIndex % 2];
+    }
+    return this.openThreshold;
+  }
+
+  getPairThreshold(seatIndex) {
+    if (this.options.teamMode === 'paired') {
+      return this.teamPairThresholds[seatIndex % 2];
+    }
+    return this.pairThreshold;
   }
 
   destroy() {
@@ -117,6 +133,8 @@ export class GameSession {
     this.roundSummary = null;
     this.openThreshold = 101;
     this.pairThreshold = 5;
+    this.teamOpenThresholds = [101, 101];
+    this.teamPairThresholds = [5, 5];
     this.phase = 'playing';
     this.currentSeat = starterSeat;
     this.turnPhase = 'play'; // Starter begins with 22 tiles and plays/discards
@@ -402,14 +420,17 @@ export class GameSession {
       }
     }
 
+    const reqPairs = this.getPairThreshold(seatIndex);
+    const reqOpen = this.getOpenThreshold(seatIndex);
+
     if (mode === 'pairs') {
-      if (validatedGroups.length < this.pairThreshold) {
-        return { ok: false, error: `Çift açmak için en az ${this.pairThreshold} çift gerekir.` };
+      if (validatedGroups.length < reqPairs) {
+        return { ok: false, error: `Çift açmak için en az ${reqPairs} çift gerekir.` };
       }
-    } else if (totalPoints < this.openThreshold) {
+    } else if (totalPoints < reqOpen) {
       return {
         ok: false,
-        error: `Açmak için en az ${this.openThreshold} sayı gerekir (seçilen: ${totalPoints}).`
+        error: `Açmak için en az ${reqOpen} sayı gerekir (seçilen: ${totalPoints}).`
       };
     }
 
@@ -444,9 +465,24 @@ export class GameSession {
     }
 
     if (this.options.katlamali) {
-      if (mode === 'pairs') {
-        this.pairThreshold = validatedGroups.length + 1;
-      } else if (totalPoints >= this.openThreshold) {
+      if (this.options.teamMode === 'paired') {
+        const oppTeam = 1 - (seatIndex % 2);
+        if (mode === 'pairs') {
+          this.teamPairThresholds[oppTeam] = Math.max(
+            this.teamPairThresholds[oppTeam],
+            validatedGroups.length + 1
+          );
+          this.pairThreshold = Math.max(...this.teamPairThresholds);
+        } else if (totalPoints >= reqOpen) {
+          this.teamOpenThresholds[oppTeam] = Math.max(
+            this.teamOpenThresholds[oppTeam],
+            totalPoints + 1
+          );
+          this.openThreshold = Math.max(...this.teamOpenThresholds);
+        }
+      } else if (mode === 'pairs') {
+        this.pairThreshold = Math.max(this.pairThreshold, validatedGroups.length + 1);
+      } else if (totalPoints >= reqOpen) {
         this.openThreshold = totalPoints + 1;
       }
     }
@@ -736,8 +772,10 @@ export class GameSession {
       phase: this.phase,
       turnPhase: this.turnPhase,
       currentSeat: this.currentSeat,
-      openThreshold: this.openThreshold,
-      pairThreshold: this.pairThreshold,
+      openThreshold: this.getOpenThreshold(viewerSeatIndex),
+      pairThreshold: this.getPairThreshold(viewerSeatIndex),
+      teamOpenThresholds: [...this.teamOpenThresholds],
+      teamPairThresholds: [...this.teamPairThresholds],
       gosterge: this.gosterge,
       okeyTarget: this.okeyTarget,
       deckCount: this.deck.length,

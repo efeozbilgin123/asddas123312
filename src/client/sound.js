@@ -25,6 +25,10 @@ const SOUND_POOLS = {
 class SoundFX {
   constructor() {
     this.ctx = null;
+    this.master = null;
+    this.dryBus = null;
+    this.wetBus = null;
+    this.convolver = null;
     this.muted = false;
     this.buffers = new Map();
     this.loading = false;
@@ -36,6 +40,7 @@ class SoundFX {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (AudioCtx) {
         this.ctx = new AudioCtx();
+        this.setupBuses();
       }
     }
     if (this.ctx && this.ctx.state === 'suspended') {
@@ -45,6 +50,65 @@ class SoundFX {
       this.preloadAll();
     }
     return this.ctx;
+  }
+
+  setupBuses() {
+    if (!this.ctx) return;
+    const comp = this.ctx.createDynamicsCompressor();
+    comp.threshold.value = -16;
+    comp.knee.value = 18;
+    comp.ratio.value = 3.5;
+    comp.attack.value = 0.004;
+    comp.release.value = 0.16;
+
+    this.master = this.ctx.createGain();
+    this.master.gain.value = 0.92;
+    this.master.connect(comp);
+    comp.connect(this.ctx.destination);
+
+    this.dryBus = this.ctx.createGain();
+    this.dryBus.gain.value = 0.88;
+    this.dryBus.connect(this.master);
+
+    // Warm kahvehane wooden room impulse response
+    const irLen = Math.floor(this.ctx.sampleRate * 0.42);
+    const irBuf = this.ctx.createBuffer(2, irLen, this.ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch += 1) {
+      const data = irBuf.getChannelData(ch);
+      for (let i = 0; i < irLen; i += 1) {
+        const decay = Math.exp(-i / (irLen * 0.24));
+        const earlyTap = i === 180 || i === 420 || i === 790 ? 0.5 : 0;
+        data[i] = ((Math.random() * 2 - 1) * 0.35 + earlyTap) * decay;
+      }
+    }
+
+    this.convolver = this.ctx.createConvolver();
+    this.convolver.buffer = irBuf;
+
+    const wetFilter = this.ctx.createBiquadFilter();
+    wetFilter.type = 'lowpass';
+    wetFilter.frequency.value = 2600;
+
+    this.wetBus = this.ctx.createGain();
+    this.wetBus.gain.value = 0.26;
+
+    this.convolver.connect(wetFilter);
+    wetFilter.connect(this.wetBus);
+    this.wetBus.connect(this.master);
+  }
+
+  routeNode(node, wetAmount = 0.3) {
+    if (!this.dryBus || !this.convolver) {
+      node.connect(this.ctx.destination);
+      return;
+    }
+    node.connect(this.dryBus);
+    if (wetAmount > 0) {
+      const send = this.ctx.createGain();
+      send.gain.value = wetAmount;
+      node.connect(send);
+      send.connect(this.convolver);
+    }
   }
 
   preloadAll() {
@@ -66,7 +130,7 @@ class SoundFX {
     this.muted = Boolean(muted);
   }
 
-  playBufferFromPool(poolName, { volume = 0.72, playbackRate = 1 } = {}) {
+  playBufferFromPool(poolName, { volume = 0.78, playbackRate = 1, wet = 0.32, filterHz = 5200 } = {}) {
     const ctx = this.ensureCtx();
     if (!ctx) return false;
     const pool = SOUND_POOLS[poolName];
@@ -81,105 +145,248 @@ class SoundFX {
 
     const src = ctx.createBufferSource();
     src.buffer = buffer;
-    src.playbackRate.value = playbackRate * (0.96 + Math.random() * 0.08);
+    src.playbackRate.value = playbackRate * (0.95 + Math.random() * 0.1);
+
+    const tone = ctx.createBiquadFilter();
+    tone.type = 'lowpass';
+    tone.frequency.value = filterHz;
 
     const gain = ctx.createGain();
     gain.gain.value = volume;
 
-    src.connect(gain);
-    gain.connect(ctx.destination);
+    src.connect(tone);
+    tone.connect(gain);
+    this.routeNode(gain, wet);
     src.start();
     return true;
   }
 
-  playSynthesizedClack(pitch = 1, volume = 0.22) {
+  playWoodKnock(freq = 165, volume = 0.24, duration = 0.07) {
     const ctx = this.ensureCtx();
     if (!ctx) return;
-
     const now = ctx.currentTime;
-    // Short filtered wood/ceramic impulse
-    const bufferSize = Math.floor(ctx.sampleRate * 0.035);
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freq * 1.35, now);
+    osc.frequency.exponentialRampToValueAtTime(freq * 0.62, now + duration);
+
+    gain.gain.setValueAtTime(volume, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+    osc.connect(gain);
+    this.routeNode(gain, 0.35);
+    osc.start(now);
+    osc.stop(now + duration + 0.01);
+  }
+
+  playCeramicSnap(pitch = 1, volume = 0.22) {
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    const bufferSize = Math.floor(ctx.sampleRate * 0.045);
     const noiseBuf = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
     const data = noiseBuf.getChannelData(0);
     for (let i = 0; i < bufferSize; i += 1) {
-      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.18));
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.14));
     }
 
     const noise = ctx.createBufferSource();
     noise.buffer = noiseBuf;
 
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.setValueAtTime(1650 * pitch, now);
-    filter.Q.setValueAtTime(2.6, now);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(2100 * pitch, now);
+    bp.Q.setValueAtTime(2.2, now);
 
     const nGain = ctx.createGain();
     nGain.gain.setValueAtTime(volume * 1.4, now);
-    nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.035);
+    nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.042);
 
-    noise.connect(filter);
-    filter.connect(nGain);
-    nGain.connect(ctx.destination);
+    noise.connect(bp);
+    bp.connect(nGain);
+    this.routeNode(nGain, 0.28);
     noise.start(now);
 
-    // Resonant ceramic body tap
     const osc = ctx.createOscillator();
     const oGain = ctx.createGain();
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(420 * pitch, now);
-    osc.frequency.exponentialRampToValueAtTime(190 * pitch, now + 0.045);
+    osc.frequency.setValueAtTime(520 * pitch, now);
+    osc.frequency.exponentialRampToValueAtTime(210 * pitch, now + 0.05);
 
-    oGain.gain.setValueAtTime(volume * 0.7, now);
-    oGain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+    oGain.gain.setValueAtTime(volume * 0.75, now);
+    oGain.gain.exponentialRampToValueAtTime(0.001, now + 0.055);
 
     osc.connect(oGain);
-    oGain.connect(ctx.destination);
+    this.routeNode(oGain, 0.25);
     osc.start(now);
-    osc.stop(now + 0.055);
+    osc.stop(now + 0.06);
+  }
+
+  playFeltSlide(volume = 0.14, duration = 0.14) {
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    const len = Math.floor(ctx.sampleRate * duration);
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i += 1) {
+      const env = Math.sin((i / len) * Math.PI);
+      data[i] = (Math.random() * 2 - 1) * env;
+    }
+
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(920, now);
+    filter.frequency.linearRampToValueAtTime(1450, now + duration);
+    filter.Q.value = 1.4;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(volume, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+    src.connect(filter);
+    filter.connect(gain);
+    this.routeNode(gain, 0.22);
+    src.start(now);
   }
 
   playTilePickup() {
-    if (!this.playBufferFromPool('pickup', { volume: 0.65, playbackRate: 1.02 })) {
-      this.playSynthesizedClack(1.25, 0.14);
+    if (!this.playBufferFromPool('pickup', { volume: 0.72, playbackRate: 1.04, wet: 0.25 })) {
+      this.playCeramicSnap(1.28, 0.16);
     }
+    this.playWoodKnock(210, 0.1, 0.045);
   }
 
   playTileClack(pitch = 1) {
-    if (!this.playBufferFromPool('drop', { volume: 0.78, playbackRate: pitch })) {
-      this.playSynthesizedClack(pitch, 0.2);
+    if (!this.playBufferFromPool('drop', { volume: 0.85, playbackRate: pitch, wet: 0.36 })) {
+      this.playCeramicSnap(pitch, 0.22);
     }
+    this.playWoodKnock(155 * pitch, 0.22, 0.075);
   }
 
   playTileFlip() {
-    if (!this.playBufferFromPool('flip', { volume: 0.68, playbackRate: 1 })) {
-      this.playSynthesizedClack(1.12, 0.16);
+    this.playFeltSlide(0.11, 0.11);
+    if (!this.playBufferFromPool('flip', { volume: 0.74, playbackRate: 1, wet: 0.28 })) {
+      this.playCeramicSnap(1.12, 0.17);
     }
   }
 
   playTileShuffle() {
-    if (!this.playBufferFromPool('shuffle', { volume: 0.55, playbackRate: 1 })) {
-      this.playSynthesizedClack(0.95, 0.18);
-    }
+    this.playBufferFromPool('shuffle', { volume: 0.72, playbackRate: 1, wet: 0.42 });
+    this.playWoodKnock(135, 0.18, 0.09);
+  }
+
+  playOpenHand() {
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+
+    // Cascading wooden rack clatter of laying down multiple tiles
+    [0, 65, 130, 195].forEach((delayMs, i) => {
+      setTimeout(() => {
+        if (this.muted) return;
+        this.playBufferFromPool('drop', {
+          volume: 0.52 - i * 0.06,
+          playbackRate: 0.96 + i * 0.07,
+          wet: 0.4
+        });
+        this.playWoodKnock(175 + i * 24, 0.14, 0.06);
+      }, delayMs);
+    });
+
+    // Warm acoustic chord swell
+    const now = ctx.currentTime;
+    [392.0, 493.88, 587.33, 783.99].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = i % 2 === 0 ? 'triangle' : 'sine';
+      osc.frequency.setValueAtTime(freq, now + 0.08 + i * 0.05);
+      gain.gain.setValueAtTime(0.001, now + 0.08 + i * 0.05);
+      gain.gain.linearRampToValueAtTime(0.07, now + 0.11 + i * 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.55 + i * 0.05);
+      osc.connect(gain);
+      this.routeNode(gain, 0.45);
+      osc.start(now + 0.08 + i * 0.05);
+      osc.stop(now + 0.6 + i * 0.05);
+    });
   }
 
   playMeldChime() {
+    this.playOpenHand();
+  }
+
+  playRoundWin() {
     const ctx = this.ensureCtx();
     if (!ctx) return;
-    this.playBufferFromPool('drop', { volume: 0.55, playbackRate: 1.05 });
+    this.playFeltSlide(0.14, 0.18);
+    this.playWoodKnock(145, 0.24, 0.09);
 
     const now = ctx.currentTime;
-    [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
+    const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5];
+    notes.forEach((freq, i) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'triangle';
-      osc.frequency.setValueAtTime(freq, now + i * 0.055);
-      gain.gain.setValueAtTime(0.065, now + i * 0.055);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.055 + 0.28);
+      const t = now + i * 0.065;
+      osc.frequency.setValueAtTime(freq, t);
+      gain.gain.setValueAtTime(0.001, t);
+      gain.gain.linearRampToValueAtTime(0.085, t + 0.018);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.52);
       osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now + i * 0.055);
-      osc.stop(now + i * 0.055 + 0.3);
+      this.routeNode(gain, 0.5);
+      osc.start(t);
+      osc.stop(t + 0.56);
     });
+  }
+
+  playPenalty() {
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+    this.playWoodKnock(110, 0.28, 0.11);
+
+    const now = ctx.currentTime;
+    [220, 196].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 720;
+
+      const t = now + i * 0.11;
+      osc.frequency.setValueAtTime(freq, t);
+      gain.gain.setValueAtTime(0.075, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+
+      osc.connect(lp);
+      lp.connect(gain);
+      this.routeNode(gain, 0.35);
+      osc.start(t);
+      osc.stop(t + 0.22);
+    });
+  }
+
+  playTurnBell() {
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, now);
+    gain.gain.setValueAtTime(0.045, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+    osc.connect(gain);
+    this.routeNode(gain, 0.45);
+    osc.start(now);
+    osc.stop(now + 0.26);
   }
 }
 

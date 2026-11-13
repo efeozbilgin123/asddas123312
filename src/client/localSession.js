@@ -1,12 +1,15 @@
 import { GameSession } from '../../shared/gameSession.js';
+import { parseMusicUrl } from '../../shared/music.js';
 
 export class LocalSingleplayerClient {
   constructor({ playerName, playerAvatar, options, onState }) {
     this.onState = onState;
+    this.music = null;
+    this.playerName = playerName || 'Oyuncu';
     this.session = new GameSession({
       roomCode: 'TEK1',
       seatsConfig: [
-        { playerId: 'local-0', name: playerName || 'Oyuncu', avatar: playerAvatar || 'avatar-1', isBot: false, connected: true },
+        { playerId: 'local-0', name: this.playerName, avatar: playerAvatar || 'avatar-1', isBot: false, connected: true },
         { playerId: 'bot-1', name: 'Selim (Bot)', avatar: 'avatar-4', isBot: true, connected: true },
         { playerId: 'bot-2', name: 'Zeynep (Bot)', avatar: 'avatar-2', isBot: true, connected: true },
         { playerId: 'bot-3', name: 'Kerem (Bot)', avatar: 'avatar-3', isBot: true, connected: true }
@@ -27,6 +30,7 @@ export class LocalSingleplayerClient {
       status: 'playing',
       isHost: true,
       isLocal: true,
+      music: this.music,
       options: this.session.options,
       viewerSeatIndex: 0,
       seats: this.session.seats.map((s) => ({
@@ -72,6 +76,26 @@ export class LocalSingleplayerClient {
         break;
       case 'game:nextRound':
         this.session.startRound();
+        res = { ok: true };
+        break;
+      case 'room:musicSet': {
+        const parsed = parseMusicUrl(data?.url, data?.title);
+        if (!parsed.ok) {
+          res = parsed;
+        } else {
+          this.music = {
+            ...parsed,
+            updatedBy: this.playerName,
+            updatedAt: Date.now()
+          };
+          this.emitRoomState();
+          res = { ok: true, music: this.music };
+        }
+        break;
+      }
+      case 'room:musicStop':
+        this.music = null;
+        this.emitRoomState();
         res = { ok: true };
         break;
       case 'admin:unlock':

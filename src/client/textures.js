@@ -42,17 +42,23 @@ export function getKahveBackdropTexture() {
 }
 
 export function getAvatarTexture(avatarId = 'avatar-1') {
-  const safeId = /^avatar-[1-6]$/.test(String(avatarId || ''))
-    ? avatarId
-    : 'avatar-1';
-  if (avatarCache.has(safeId)) return avatarCache.get(safeId);
+  const raw = String(avatarId || '').trim();
+  const isDataUrl = /^data:image\/(?:jpeg|jpg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(raw);
+  const key = isDataUrl
+    ? raw
+    : /^avatar-[1-6]$/.test(raw)
+      ? raw
+      : 'avatar-1';
 
-  const tex = textureLoader.load(`/assets/${safeId}.jpg`, (loaded) => {
+  if (avatarCache.has(key)) return avatarCache.get(key);
+
+  const src = isDataUrl ? key : `/assets/${key}.jpg`;
+  const tex = textureLoader.load(src, (loaded) => {
     loaded.needsUpdate = true;
   });
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
-  avatarCache.set(safeId, tex);
+  avatarCache.set(key, tex);
   return tex;
 }
 

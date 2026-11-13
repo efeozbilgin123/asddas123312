@@ -129,6 +129,26 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack(res);
   });
 
+  socket.on('room:musicSet', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.setRoomMusic({
+      roomCode: code,
+      playerId,
+      url: data?.url,
+      title: data?.title
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  socket.on('room:musicStop', (_data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.stopRoomMusic({
+      roomCode: code,
+      playerId
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
   function withSession(fn) {
     const code = roomManager.playerToRoom.get(playerId);
     const room = roomManager.getRoom(code);

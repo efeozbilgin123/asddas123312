@@ -24,6 +24,14 @@
         <button type="button" class="seg__btn" data-cam="top">Üstten</button>
         <button type="button" class="seg__btn" data-cam="rack">Istaka</button>
       </div>
+      <button type="button" id="btn-music" class="btn btn--quiet btn--sm" hidden title="Ortak oda müziği">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M9 18V5l12-2v13"/>
+          <circle cx="6" cy="18" r="3"/>
+          <circle cx="18" cy="16" r="3"/>
+        </svg>
+        <span>Müzik</span>
+      </button>
       <button type="button" id="btn-sound" class="btn btn--quiet btn--sm" aria-pressed="false" title="Ses efektleri">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M11 5L6 9H2v6h4l5 4V5z"/>
@@ -44,7 +52,7 @@
       <div class="lobby-panel">
         <div class="lobby-panel__head">
           <h1>101 Okey Kahvehanesi</h1>
-          <p class="lead">Profil fotoğrafını seç, tekli ya da eşli masa kur veya botlarla hemen başla.</p>
+          <p class="lead">Profil fotoğrafını seç veya yükle, tekli ya da eşli masa kur, ortak müzik aç.</p>
         </div>
 
         <form id="lobby-form" class="lobby-form" novalidate>
@@ -62,7 +70,13 @@
           </div>
 
           <div class="avatar-field">
-            <span class="avatar-field__label">Profil fotoğrafı</span>
+            <div class="avatar-field__head">
+              <span class="avatar-field__label">Profil fotoğrafı</span>
+              <div class="avatar-upload-row">
+                <label for="avatar-upload" class="btn btn--quiet btn--sm avatar-upload-label">Fotoğraf Yükle</label>
+                <input id="avatar-upload" type="file" accept="image/*" hidden>
+              </div>
+            </div>
             <div id="avatar-picker" class="avatar-picker" role="radiogroup" aria-label="Profil fotoğrafı seçin">
               <button type="button" class="avatar-btn is-selected" data-avatar="avatar-1" role="radio" aria-checked="true" aria-label="Avatar 1">
                 <img src="/assets/avatar-1.jpg" alt="Karakter 1">
@@ -81,6 +95,9 @@
               </button>
               <button type="button" class="avatar-btn" data-avatar="avatar-6" role="radio" aria-checked="false" aria-label="Avatar 6">
                 <img src="/assets/avatar-6.jpg" alt="Karakter 6">
+              </button>
+              <button type="button" id="custom-avatar-btn" class="avatar-btn" data-avatar="custom" role="radio" aria-checked="false" aria-label="Özel Profil Fotoğrafı" hidden>
+                <img id="custom-avatar-img" src="/assets/avatar-1.jpg" alt="Özel Profil">
               </button>
             </div>
           </div>
@@ -192,6 +209,7 @@
           </div>
           <div class="code-share">
             <span id="wait-room-code" class="code-badge num"></span>
+            <button type="button" id="btn-wait-music" class="btn btn--quiet btn--sm">Ortak Müzik</button>
             <button type="button" id="btn-copy-code" class="btn btn--quiet btn--sm">Davet Linki Kopyala</button>
           </div>
         </div>
@@ -303,7 +321,50 @@
         </div>
       </div>
     </section>
+
+    <!-- Persistent Shared Room Music Player Dock -->
+    <aside id="music-dock" class="music-dock" hidden aria-label="Ortak oda müziği oynatıcısı">
+      <div class="music-dock__bar">
+        <div class="music-dock__meta">
+          <span id="music-provider-badge" class="pill pill--ok">Müzik</span>
+          <strong id="music-track-title" class="music-dock__title">Oda Müziği</strong>
+        </div>
+        <div class="music-dock__controls">
+          <input id="music-volume" class="music-volume" type="range" min="0" max="100" value="55" aria-label="Müzik ses seviyesi">
+          <a id="music-external-link" class="btn btn--quiet btn--sm" href="#" target="_blank" rel="noopener noreferrer" hidden>Aç</a>
+          <button type="button" id="music-dock-toggle" class="btn btn--quiet btn--sm" aria-expanded="true">Gizle</button>
+          <button type="button" id="music-dock-stop" class="btn btn--quiet btn--sm">Durdur</button>
+        </div>
+      </div>
+      <div id="music-player-host" class="music-dock__body"></div>
+    </aside>
   </main>
+
+  <!-- Shared Music Dialog -->
+  <dialog id="dialog-music" class="dialog">
+    <div class="dialog__head">
+      <h2>Ortak Oda Müziği</h2>
+      <button type="button" class="btn btn--quiet btn--sm" data-close-dialog="dialog-music">Kapat</button>
+    </div>
+    <div class="dialog__body">
+      <p class="lead">YouTube, Spotify, SoundCloud, doğrudan ses akışı (.mp3) veya herhangi bir web oynatıcı bağlantısı yapıştırın. Odadaki herkes aynı anda dinler.</p>
+      <form id="music-form" class="lobby-form" novalidate>
+        <div class="field">
+          <label for="music-url-input">Müzik bağlantısı</label>
+          <input id="music-url-input" type="url" placeholder="https://www.youtube.com/watch?v=... veya Spotify / SoundCloud linki" required>
+          <p id="music-url-help" class="field__help" aria-live="polite"></p>
+        </div>
+        <div class="field">
+          <label for="music-title-input">Parça adı (isteğe bağlı)</label>
+          <input id="music-title-input" type="text" maxlength="64" placeholder="Örn. Kahvehane Akşamı">
+        </div>
+        <div class="dialog__actions">
+          <button type="button" id="btn-music-stop" class="btn btn--quiet">Müziği Durdur</button>
+          <button type="submit" class="btn btn--primary">Odada Çal</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
 
   <!-- Rules Dialog -->
   <dialog id="dialog-rules" class="dialog">
@@ -314,11 +375,11 @@
     <div class="dialog__body">
       <ul class="rules-list">
         <li><strong>Amaç:</strong> Elini açtıktan sonra tüm taşlarını masaya indirip son kalan tek taşı sağ kenara atarak eli bitirmek ve en düşük ceza puanıyla oyunu tamamlamak.</li>
-        <li><strong>Tekli ve Eşli Mod:</strong> Eşli modda karşılıklı oturan oyuncular (Güney-Kuzey ve Doğu-Batı) aynı takımdır. Bir oyuncu eli bitirdiğinde takım arkadaşı açmama cezası almaz.</li>
-        <li><strong>Çift Açma &amp; Katlamalı:</strong> En az 5 çiftle açılabilir. Çift açan oyuncu normal seri/per açamaz; sadece yeni çift indirebilir veya masadaki perlere tek taş işleyebilir. Katlamalı modda her el açan hem sayı barajını hem de çift barajını yükseltir. 4 oyuncu da çift açarsa el iptal olur ve kimseye puan yazılmaz.</li>
+        <li><strong>Tekli ve Eşli Mod:</strong> Eşli modda karşılıklı oturan oyuncular (Güney-Kuzey ve Doğu-Batı) aynı takımdır. Bir oyuncu eli bitirdiğinde takım arkadaşı açmama cezası almaz. Eşli katlamalı modda bir oyuncunun el açması yalnızca rakip takımın barajını yükseltir, kendi eşinin açma barajını katlamaz.</li>
+        <li><strong>Çift Açma &amp; Katlamalı:</strong> En az 5 çiftle açılabilir. Çift açan oyuncu normal seri/per açamaz; sadece yeni çift indirebilir veya masadaki perlere tek taş işleyebilir. Katlamalı modda her el açan (eşli modda rakibin) hem sayı barajını hem de çift barajını yükseltir. 4 oyuncu da çift açarsa el iptal olur ve kimseye puan yazılmaz.</li>
         <li><strong>Yandan Taş Alma:</strong> Solunuzdaki taş alanı ıstakanızın hemen solundadır. Yandan taş alırsanız o tur içinde açtığınız perlerde kullanmalısınız (katlamalıda çift açandan alınan taşla yalnızca çifte açılır). Yere atılan Okey taşı yandan alınamaz.</li>
-        <li><strong>Cezalar:</strong> El ortasında yere Okey atma (+101), eli bitiremeyip elde Okey bırakma (+101), işlek taş atma (+101) ve hiç el açamama (+202) ceza puanı yazar. Çift açan oyuncuların elinde kalan taşların cezası 2× sayılır.</li>
-        <li><strong>Bitiş Çarpanları:</strong> Okey atarak, çiftten veya elden (aynı turda açıp tek taş atarak) bitişte puanlar 2×; bu durumlar birleştiğinde (ör. elden veya çiftten Okey atarak) 4× olur.</li>
+        <li><strong>Cezalar:</strong> El ortasında yere Okey atma (+101), eli bitiremeyip elde Okey bırakma (+101), işlek taş atma (+101) ve hiç el açamama (+202) ceza puanı yazar. Çift açan oyuncuların elinde kalan taşların cezası 2x sayılır.</li>
+        <li><strong>Bitiş Çarpanları:</strong> Okey atarak, çiftten veya elden (aynı turda açıp tek taş atarak) bitişte puanlar 2x; bu durumlar birleştiğinde (ör. elden veya çiftten Okey atarak) 4x olur.</li>
         <li><strong>3D Sürükle-Bırak:</strong> Taşı tutup kaldırarak ıstakanın diğer yuvalarına, sağdaki atma alanına veya masadaki yeşil perlerin üzerine bırakabilirsiniz.</li>
       </ul>
     </div>

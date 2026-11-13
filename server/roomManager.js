@@ -1,3 +1,4 @@
+import { parseMusicUrl } from '../shared/music.js';
 import { GameSession } from './gameSession.js';
 
 const BOT_NAMES = ['Selim (Bot)', 'Zeynep (Bot)', 'Kerem (Bot)', 'Defne (Bot)'];
@@ -17,6 +18,12 @@ function generateRoomCode(existing) {
 function normalizeAvatar(val, fallbackIdx = 0) {
   const s = String(val || '').trim();
   if (/^avatar-[1-6]$/.test(s)) return s;
+  if (
+    s.length <= 180000 &&
+    /^data:image\/(?:jpeg|jpg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(s)
+  ) {
+    return s;
+  }
   return `avatar-${(fallbackIdx % 6) + 1}`;
 }
 
@@ -65,6 +72,7 @@ export class RoomManager {
       hostPlayerId: playerId,
       status: 'waiting', // 'waiting' | 'playing'
       createdAt: Date.now(),
+      music: null,
       options: {
         katlamali: Boolean(options.katlamali),
         teamMode: options.teamMode === 'paired' ? 'paired' : 'solo',
@@ -342,6 +350,44 @@ export class RoomManager {
     return { ok: true };
   }
 
+  setRoomMusic({ roomCode, playerId, url, title }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
+    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+
+    const parsed = parseMusicUrl(url, title);
+    if (!parsed.ok) return parsed;
+
+    room.music = {
+      ...parsed,
+      updatedBy: seat.name || 'Oyuncu',
+      updatedAt: Date.now()
+    };
+
+    this.broadcastRoomMusic(room);
+    return { ok: true, music: room.music };
+  }
+
+  stopRoomMusic({ roomCode, playerId }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
+    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+
+    room.music = null;
+    this.broadcastRoomMusic(room);
+    return { ok: true };
+  }
+
+  broadcastRoomMusic(room) {
+    for (const seat of room.seats) {
+      if (seat.type === 'human' && seat.playerId) {
+        this.io.to(`player:${seat.playerId}`).emit('room:music', room.music);
+      }
+    }
+  }
+
   getRoomPayloadForPlayer(room, playerId) {
     const mySeat = room.seats.find(
       (s) => s.type === 'human' && s.playerId === playerId
@@ -354,6 +400,7 @@ export class RoomManager {
       status: room.status,
       hostPlayerId: room.hostPlayerId,
       isHost: room.hostPlayerId === playerId,
+      music: room.music || null,
       options: room.options,
       viewerSeatIndex,
       seats: room.seats.map((s) => ({

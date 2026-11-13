@@ -337,10 +337,24 @@ body {
   gap: var(--space-xs);
 }
 
+.avatar-field__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
 .avatar-field__label {
   font-size: var(--text-sm);
   font-weight: 700;
   color: var(--color-ink-2);
+}
+
+.avatar-upload-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
 }
 
 .avatar-picker {
@@ -900,11 +914,106 @@ body {
   color: var(--color-ink);
 }
 
+/* Persistent Shared Room Music Player Dock */
+.music-dock {
+  position: fixed;
+  top: calc(var(--space-sm) + 48px);
+  left: var(--space-md);
+  z-index: var(--z-sticky);
+  width: min(370px, calc(100% - var(--space-lg)));
+  display: grid;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-stock);
+  background: var(--grain), var(--fibre), var(--color-paper);
+  border: 1px solid var(--color-rule);
+  box-shadow: var(--shadow-card);
+}
+
+.music-dock[hidden] {
+  display: none;
+}
+
+.music-dock__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.music-dock__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+  flex: 1;
+}
+
+.music-dock__title {
+  font-size: var(--text-xs);
+  color: var(--color-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.music-dock__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  flex-wrap: wrap;
+}
+
+.music-volume {
+  width: 68px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.music-dock__body {
+  width: 100%;
+  border-radius: var(--radius-input);
+  overflow: hidden;
+  transition: opacity var(--dur-short) var(--ease-snap);
+}
+
+.music-dock__body iframe {
+  width: 100%;
+  height: 152px;
+  border: 0;
+  display: block;
+  border-radius: var(--radius-input);
+  background: var(--color-card);
+}
+
+.music-dock__body audio {
+  width: 100%;
+  display: block;
+}
+
+.music-dock.is-minimized {
+  width: auto;
+  max-width: min(370px, calc(100% - var(--space-lg)));
+}
+
+.music-dock.is-minimized .music-dock__body {
+  height: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 @media (max-width: 60rem) {
   .topbar {
     top: var(--space-xs);
     left: var(--space-xs);
     right: var(--space-xs);
+  }
+  .music-dock {
+    top: calc(var(--space-xs) + 54px);
+    left: var(--space-xs);
+    width: calc(100% - var(--space-md));
   }
   .field-row,
   .wait-seats,

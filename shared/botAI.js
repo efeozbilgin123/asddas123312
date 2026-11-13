@@ -13,6 +13,12 @@ export function chooseBotDrawSource({ seat, leftDiscardTop, state }) {
   const leftSeatIdx = (seat.seatIndex + 3) % 4;
   const leftSeat = state.seats?.[leftSeatIdx];
   const katlamaliPairLock = Boolean(state.options?.katlamali && leftSeat?.openMode === 'pairs');
+  const openTarget = typeof state.getOpenThreshold === 'function'
+    ? state.getOpenThreshold(seat.seatIndex)
+    : state.openThreshold;
+  const pairTarget = typeof state.getPairThreshold === 'function'
+    ? state.getPairThreshold(seat.seatIndex)
+    : (state.pairThreshold || 5);
 
   // If bot already opened and can immediately lay off leftDiscardTop onto the table, take it!
   if (seat.opened) {
@@ -23,7 +29,7 @@ export function chooseBotDrawSource({ seat, leftDiscardTop, state }) {
   } else {
     if (!katlamaliPairLock) {
       const withTile = [...seat.hand, leftDiscardTop];
-      const openTry = findBestOpening(withTile, state.okeyTarget, state.openThreshold);
+      const openTry = findBestOpening(withTile, state.okeyTarget, openTarget);
       if (openTry.canOpen) {
         const usesTile = openTry.groups.some((g) =>
           g.slots.some((s) => s.tile.id === leftDiscardTop.id)
@@ -33,7 +39,7 @@ export function chooseBotDrawSource({ seat, leftDiscardTop, state }) {
     } else {
       const withTile = [...seat.hand, leftDiscardTop];
       const pairList = findPairsInHand(withTile, state.okeyTarget);
-      if (pairList.length >= (state.pairThreshold || 5)) {
+      if (pairList.length >= pairTarget) {
         const usesTile = pairList.some((pair) => pair.some((t) => t.id === leftDiscardTop.id));
         if (usesTile) return 'discard';
       }
@@ -53,7 +59,12 @@ export function computeBotTurnActions({ seat, state }) {
   let opened = seat.opened;
   let openMode = seat.openMode;
   const mustUseId = state.pickedDiscardTileId;
-  const pairTarget = state.pairThreshold || 5;
+  const openTarget = typeof state.getOpenThreshold === 'function'
+    ? state.getOpenThreshold(seat.seatIndex)
+    : state.openThreshold;
+  const pairTarget = typeof state.getPairThreshold === 'function'
+    ? state.getPairThreshold(seat.seatIndex)
+    : (state.pairThreshold || 5);
   const pickedFromSeat = state.pickedDiscardFromSeat != null
     ? state.seats?.[state.pickedDiscardFromSeat]
     : null;
@@ -63,7 +74,7 @@ export function computeBotTurnActions({ seat, state }) {
 
   // 1. Try opening if not yet opened
   if (!opened) {
-    const opening = findBestOpening(workingHand, state.okeyTarget, state.openThreshold);
+    const opening = findBestOpening(workingHand, state.okeyTarget, openTarget);
     const pairList = findPairsInHand(workingHand, state.okeyTarget);
     const canOpenPairs = pairList.length >= pairTarget;
 

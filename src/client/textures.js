@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { isOkeyTile } from '../../shared/tiles.js';
+import { isPresetAvatar } from '../../shared/presets.js';
 
 const TILE_INK = {
   red: '#C8222B',
@@ -46,7 +47,7 @@ export function getAvatarTexture(avatarId = 'avatar-1') {
   const isDataUrl = /^data:image\/(?:jpeg|jpg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(raw);
   const key = isDataUrl
     ? raw
-    : /^avatar-[1-6]$/.test(raw)
+    : isPresetAvatar(raw)
       ? raw
       : 'avatar-1';
 

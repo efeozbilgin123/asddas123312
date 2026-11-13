@@ -192,3 +192,35 @@ test('RoomManager handles malformed inputs, double startGame, disconnected takeo
   assert.equal(rm.playerToRoom.has('p3'), false);
 });
 
+test('RoomManager accepts all 16 preset avatars and selects unique bot names from custom pool', async (ctx) => {
+  const { BOT_NAME_POOL, isPresetAvatar } = await import('../shared/presets.js');
+  const io = createMockIo();
+  const rm = new RoomManager(io);
+  let created = null;
+  ctx.after(() => {
+    created?.room?.session?.destroy();
+  });
+
+  created = rm.createRoom({
+    playerId: 'p1',
+    playerName: 'Serhat',
+    playerAvatar: 'avatar-16',
+    roomName: 'Arkadaş Masası'
+  });
+  assert.equal(created.ok, true);
+  assert.equal(created.room.seats[0].avatar, 'avatar-16');
+
+  const startRes = rm.startGame(created.room.code, 'p1');
+  assert.equal(startRes.ok, true);
+
+  const botSeats = created.room.seats.filter((s) => s.type === 'bot');
+  assert.equal(botSeats.length, 3);
+  const names = botSeats.map((s) => s.name);
+  assert.equal(new Set(names).size, 3);
+  for (const s of botSeats) {
+    assert.ok(BOT_NAME_POOL.includes(s.name), `Unexpected bot name: ${s.name}`);
+    assert.notEqual(s.name, 'Serhat');
+    assert.ok(isPresetAvatar(s.avatar), `Unexpected bot avatar: ${s.avatar}`);
+  }
+});
+

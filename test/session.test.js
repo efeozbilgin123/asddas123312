@@ -1476,3 +1476,34 @@ test('LocalSingleplayerClient supports custom starting seatIndex for human playe
   client.destroy();
 });
 
+test('LocalSingleplayerClient accepts avatar-7..16 and picks unique bot names from BOT_NAME_POOL', async () => {
+  const { BOT_NAME_POOL, isPresetAvatar, PRESET_AVATAR_COUNT } = await import('../shared/presets.js');
+  assert.equal(PRESET_AVATAR_COUNT, 16);
+  assert.equal(isPresetAvatar('avatar-7'), true);
+  assert.equal(isPresetAvatar('avatar-16'), true);
+  assert.equal(isPresetAvatar('avatar-17'), false);
+
+  const states = [];
+  const client = new LocalSingleplayerClient({
+    playerName: 'Arhan',
+    playerAvatar: 'avatar-12',
+    seatIndex: 1,
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
+    onState: (room) => states.push(room)
+  });
+
+  client.emitRoomState();
+  const latest = states[states.length - 1];
+  assert.equal(latest.seats[1].avatar, 'avatar-12');
+  const bots = latest.seats.filter((s) => s.type === 'bot');
+  assert.equal(bots.length, 3);
+  assert.equal(new Set(bots.map((b) => b.name)).size, 3);
+  for (const b of bots) {
+    assert.ok(BOT_NAME_POOL.includes(b.name), `Unexpected bot name: ${b.name}`);
+    assert.notEqual(b.name, 'Arhan');
+    assert.ok(isPresetAvatar(b.avatar), `Unexpected bot avatar: ${b.avatar}`);
+  }
+
+  client.destroy();
+});
+

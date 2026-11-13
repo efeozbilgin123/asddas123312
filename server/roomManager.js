@@ -1,9 +1,14 @@
 import { createEmptyOrders, KAHVE_MENU_MAP } from '../shared/menu.js';
 import { buildYouTubeEmbedUrl, parseMusicUrl } from '../shared/music.js';
+import {
+  isPresetAvatar,
+  pickRandomBotAvatar,
+  pickRandomBotName,
+  PRESET_AVATAR_COUNT
+} from '../shared/presets.js';
 import { findAutoplayTrack, resolveMusicInput, resolveQueuedTrack } from './musicResolver.js';
 import { GameSession } from './gameSession.js';
 
-const BOT_NAMES = ['Selim (Bot)', 'Zeynep (Bot)', 'Kerem (Bot)', 'Defne (Bot)'];
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 function generateRoomCode(existing) {
@@ -19,14 +24,24 @@ function generateRoomCode(existing) {
 
 function normalizeAvatar(val, fallbackIdx = 0) {
   const s = String(val || '').trim();
-  if (/^avatar-[1-6]$/.test(s)) return s;
+  if (isPresetAvatar(s)) return s;
   if (
     s.length <= 180000 &&
     /^data:image\/(?:jpeg|jpg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(s)
   ) {
     return s;
   }
-  return `avatar-${(fallbackIdx % 6) + 1}`;
+  return `avatar-${(fallbackIdx % PRESET_AVATAR_COUNT) + 1}`;
+}
+
+function assignBotIdentity(room, seat) {
+  const otherSeats = room.seats.filter((s) => s.seatIndex !== seat.seatIndex);
+  const usedNames = otherSeats.filter((s) => s.name).map((s) => s.name);
+  const usedAvatars = otherSeats
+    .filter((s) => s.type !== 'empty' && s.avatar)
+    .map((s) => s.avatar);
+  seat.name = pickRandomBotName(usedNames);
+  seat.avatar = pickRandomBotAvatar(usedAvatars);
 }
 
 export class RoomManager {
@@ -73,7 +88,7 @@ export class RoomManager {
     const seats = [0, 1, 2, 3].map((idx) => (
       idx === preferredSeat
         ? { seatIndex: idx, type: 'human', playerId, name: cleanName, avatar: normalizeAvatar(playerAvatar, idx), connected: true }
-        : { seatIndex: idx, type: 'empty', playerId: null, name: null, avatar: `avatar-${(idx % 6) + 1}`, connected: false }
+        : { seatIndex: idx, type: 'empty', playerId: null, name: null, avatar: `avatar-${(idx % PRESET_AVATAR_COUNT) + 1}`, connected: false }
     ));
 
     const room = {
@@ -258,7 +273,7 @@ export class RoomManager {
       seat.type = 'empty';
       seat.playerId = null;
       seat.name = null;
-      seat.avatar = `avatar-${(seat.seatIndex % 6) + 1}`;
+      seat.avatar = `avatar-${(seat.seatIndex % PRESET_AVATAR_COUNT) + 1}`;
       seat.connected = false;
     } else {
       // Convert leaving player's seat to a bot so remaining players can finish
@@ -322,13 +337,13 @@ export class RoomManager {
     if (seat.type === 'empty') {
       seat.type = 'bot';
       seat.playerId = `bot-${seatIndex}`;
-      seat.name = BOT_NAMES[seatIndex] || `Bot ${seatIndex + 1}`;
+      assignBotIdentity(room, seat);
       seat.connected = true;
     } else {
       seat.type = 'empty';
       seat.playerId = null;
       seat.name = null;
-      seat.avatar = `avatar-${(seat.seatIndex % 6) + 1}`;
+      seat.avatar = `avatar-${(seat.seatIndex % PRESET_AVATAR_COUNT) + 1}`;
       seat.connected = false;
     }
 
@@ -388,7 +403,7 @@ export class RoomManager {
       mySeat.type = 'empty';
       mySeat.playerId = null;
       mySeat.name = null;
-      mySeat.avatar = `avatar-${(mySeat.seatIndex % 6) + 1}`;
+      mySeat.avatar = `avatar-${(mySeat.seatIndex % PRESET_AVATAR_COUNT) + 1}`;
       mySeat.connected = false;
     } else if (prevTarget.type === 'bot') {
       mySeat.type = 'bot';
@@ -468,8 +483,7 @@ export class RoomManager {
       if (seat.type === 'empty') {
         seat.type = 'bot';
         seat.playerId = `bot-${seat.seatIndex}`;
-        seat.name = BOT_NAMES[seat.seatIndex] || `Bot ${seat.seatIndex + 1}`;
-        seat.avatar = `avatar-${((seat.seatIndex + 1) % 6) + 1}`;
+        assignBotIdentity(room, seat);
         seat.connected = true;
       }
     }

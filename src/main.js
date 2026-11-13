@@ -8,6 +8,7 @@ import {
 } from '../shared/melds.js';
 import { KAHVE_MENU } from '../shared/menu.js';
 import { parseMusicUrl } from '../shared/music.js';
+import { isPresetAvatar } from '../shared/presets.js';
 import { COLOR_LABELS, formatTileLabel, isOkeyTile } from '../shared/tiles.js';
 import { LocalSingleplayerClient } from './client/localSession.js';
 import { OkeyTable3D } from './client/scene3d.js';
@@ -36,7 +37,7 @@ const savedAvatar = localStorage.getItem('yuzbir_player_avatar') || 'avatar-1';
 let customAvatarDataUrl = isValidCustomAvatar(savedAvatar) ? savedAvatar : '';
 let selectedAvatar = isValidCustomAvatar(savedAvatar)
   ? savedAvatar
-  : /^avatar-[1-6]$/.test(savedAvatar)
+  : isPresetAvatar(savedAvatar)
     ? savedAvatar
     : 'avatar-1';
 
@@ -189,7 +190,7 @@ function setSelectedAvatar(avatarVal) {
   const isCustom = isValidCustomAvatar(avatarVal);
   selectedAvatar = isCustom
     ? avatarVal
-    : /^avatar-[1-6]$/.test(avatarVal)
+    : isPresetAvatar(avatarVal)
       ? avatarVal
       : 'avatar-1';
 
@@ -990,7 +991,7 @@ function renderWaitingRoom(room) {
 
     const avatarImg = document.createElement('img');
     avatarImg.className = 'wait-seat__avatar';
-    const avatarVal = seat.avatar || `avatar-${(seat.seatIndex % 6) + 1}`;
+    const avatarVal = seat.avatar || `avatar-${(seat.seatIndex % 16) + 1}`;
     avatarImg.src = avatarVal.startsWith('data:image/')
       ? avatarVal
       : `/assets/${avatarVal}.jpg`;

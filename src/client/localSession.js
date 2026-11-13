@@ -1,6 +1,7 @@
 import { GameSession } from '../../shared/gameSession.js';
 import { createEmptyOrders, KAHVE_MENU_MAP } from '../../shared/menu.js';
 import { buildYouTubeEmbedUrl, parseMusicUrl } from '../../shared/music.js';
+import { pickRandomBotAvatar, pickRandomBotName } from '../../shared/presets.js';
 
 export class LocalSingleplayerClient {
   constructor({ playerName, playerAvatar, seatIndex = 0, options, onState }) {
@@ -16,28 +17,27 @@ export class LocalSingleplayerClient {
     this.playerName = (typeof playerName === 'string' ? playerName.trim().slice(0, 20) : '') || 'Oyuncu';
     this.viewerSeatIndex = [0, 1, 2, 3].includes(Number(seatIndex)) ? Number(seatIndex) : 0;
 
-    const botProfiles = [
-      { name: 'Selim (Bot)', avatar: 'avatar-4' },
-      { name: 'Zeynep (Bot)', avatar: 'avatar-2' },
-      { name: 'Kerem (Bot)', avatar: 'avatar-3' }
-    ];
-    let botCursor = 0;
+    const humanAvatar = playerAvatar || 'avatar-1';
+    const usedNames = [this.playerName];
+    const usedAvatars = [humanAvatar];
     const seatsConfig = [0, 1, 2, 3].map((idx) => {
       if (idx === this.viewerSeatIndex) {
         return {
           playerId: `local-${idx}`,
           name: this.playerName,
-          avatar: playerAvatar || 'avatar-1',
+          avatar: humanAvatar,
           isBot: false,
           connected: true
         };
       }
-      const bot = botProfiles[botCursor % botProfiles.length];
-      botCursor += 1;
+      const botName = pickRandomBotName(usedNames);
+      const botAvatar = pickRandomBotAvatar(usedAvatars);
+      usedNames.push(botName);
+      usedAvatars.push(botAvatar);
       return {
         playerId: `bot-${idx}`,
-        name: bot.name,
-        avatar: bot.avatar,
+        name: botName,
+        avatar: botAvatar,
         isBot: true,
         connected: true
       };

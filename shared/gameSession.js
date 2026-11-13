@@ -66,7 +66,7 @@ export class GameSession {
       teamIndex: idx % 2,
       playerId: cfg.playerId,
       name: cfg.name,
-      avatar: cfg.avatar || `avatar-${(idx % 6) + 1}`,
+      avatar: cfg.avatar || `avatar-${(idx % 16) + 1}`,
       isBot: Boolean(cfg.isBot),
       connected: cfg.connected !== false,
       hand: [],

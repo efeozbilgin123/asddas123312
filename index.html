@@ -342,17 +342,19 @@
       </div>
     </section>
 
-    <!-- Persistent Shared Room Music Player Dock -->
-    <aside id="music-dock" class="music-dock" hidden aria-label="Ortak oda müziği oynatıcısı">
+    <!-- Persistent Shared Room Music Player Dock (Discord LunaBot Style) -->
+    <aside id="music-dock" class="music-dock is-minimized" hidden aria-label="Ortak oda müziği oynatıcısı">
       <div class="music-dock__bar">
         <div class="music-dock__meta">
-          <span id="music-provider-badge" class="pill pill--ok">Müzik</span>
+          <span id="music-provider-badge" class="pill pill--ok">LunaBot</span>
           <strong id="music-track-title" class="music-dock__title">Oda Müziği</strong>
         </div>
         <div class="music-dock__controls">
+          <button type="button" id="music-dock-playpause" class="btn btn--quiet btn--sm" hidden>Duraklat</button>
+          <button type="button" id="music-dock-next" class="btn btn--quiet btn--sm" hidden>Sonraki</button>
           <input id="music-volume" class="music-volume" type="range" min="0" max="100" value="55" aria-label="Müzik ses seviyesi">
           <a id="music-external-link" class="btn btn--quiet btn--sm" href="#" target="_blank" rel="noopener noreferrer" hidden>Aç</a>
-          <button type="button" id="music-dock-toggle" class="btn btn--quiet btn--sm" aria-expanded="true">Gizle</button>
+          <button type="button" id="music-dock-toggle" class="btn btn--quiet btn--sm" aria-expanded="false" hidden>Göster</button>
           <button type="button" id="music-dock-stop" class="btn btn--quiet btn--sm">Durdur</button>
         </div>
       </div>
@@ -363,15 +365,15 @@
   <!-- Shared Music Dialog -->
   <dialog id="dialog-music" class="dialog">
     <div class="dialog__head">
-      <h2>Ortak Oda Müziği</h2>
+      <h2>Ortak Oda Müziği · LunaBot</h2>
       <button type="button" class="btn btn--quiet btn--sm" data-close-dialog="dialog-music">Kapat</button>
     </div>
     <div class="dialog__body">
-      <p class="lead">YouTube, Spotify, SoundCloud, doğrudan ses akışı (.mp3) veya herhangi bir web oynatıcı bağlantısı yapıştırın. Odadaki herkes aynı anda dinler.</p>
+      <p class="lead">Spotify şarkı veya çalma listesi linki, YouTube/SoundCloud linki ya da doğrudan şarkı adı yazın. Spotify player açmadan Discord botu gibi arka planda tam şarkı çalar.</p>
       <form id="music-form" class="lobby-form" novalidate>
         <div class="field">
-          <label for="music-url-input">Müzik bağlantısı</label>
-          <input id="music-url-input" type="url" placeholder="https://www.youtube.com/watch?v=... veya Spotify / SoundCloud linki" required>
+          <label for="music-url-input">Şarkı adı veya bağlantı</label>
+          <input id="music-url-input" type="text" placeholder="Spotify linki, YouTube linki veya örn. Tarkan Kuzu Kuzu" required>
           <p id="music-url-help" class="field__help" aria-live="polite"></p>
         </div>
         <div class="field">
@@ -380,7 +382,8 @@
         </div>
         <div class="dialog__actions">
           <button type="button" id="btn-music-stop" class="btn btn--quiet">Müziği Durdur</button>
-          <button type="submit" class="btn btn--primary">Odada Çal</button>
+          <button type="button" id="btn-music-queue" class="btn btn--quiet" hidden>Sıraya Ekle</button>
+          <button type="submit" id="btn-music-play" class="btn btn--primary">Odada Çal</button>
         </div>
       </form>
     </div>

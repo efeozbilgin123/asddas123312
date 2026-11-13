@@ -1,11 +1,13 @@
 import { GameSession } from '../../shared/gameSession.js';
 import { createEmptyOrders, KAHVE_MENU_MAP } from '../../shared/menu.js';
-import { parseMusicUrl } from '../../shared/music.js';
+import { buildYouTubeEmbedUrl, parseMusicUrl } from '../../shared/music.js';
 
 export class LocalSingleplayerClient {
   constructor({ playerName, playerAvatar, options, onState }) {
     this.onState = onState;
     this.music = null;
+    this.musicQueue = [];
+    this.musicQueueIndex = 0;
     this.orders = createEmptyOrders();
     this.lastOrder = null;
     this.orderSeq = 0;
@@ -89,13 +91,99 @@ export class LocalSingleplayerClient {
         res = { ok: true };
         break;
       case 'room:musicSet': {
+        const resolved = data?.resolvedPayload;
+        const mode = data?.mode === 'queue' ? 'queue' : 'replace';
+        if (resolved?.ok && resolved.track) {
+          const incoming = Array.isArray(resolved.queue) && resolved.queue.length > 0
+            ? resolved.queue
+            : [resolved.track];
+          if (mode === 'queue' && this.music && this.musicQueue.length > 0) {
+            const cap = Math.max(0, 30 - this.musicQueue.length);
+            this.musicQueue.push(...incoming.slice(0, cap));
+            this.music = {
+              ...this.music,
+              queueIndex: this.musicQueueIndex,
+              queueTotal: this.musicQueue.length,
+              hasNext: this.musicQueueIndex + 1 < this.musicQueue.length
+            };
+          } else {
+            this.musicQueue = incoming.slice(0, 30);
+            this.musicQueueIndex = 0;
+            this.music = {
+              ...this.musicQueue[0],
+              updatedBy: this.playerName,
+              updatedAt: Date.now(),
+              queueIndex: 0,
+              queueTotal: this.musicQueue.length,
+              hasNext: this.musicQueue.length > 1
+            };
+          }
+          this.emitRoomState();
+          res = { ok: true, music: this.music };
+          break;
+        }
+
         const parsed = parseMusicUrl(data?.url, data?.title);
         if (!parsed.ok) {
           res = parsed;
+        } else if (parsed.needsResolution) {
+          res = { ok: false, error: 'Spotify veya şarkı araması için sunucu bağlantısı gerekiyor.' };
         } else {
+          this.musicQueue = [parsed];
+          this.musicQueueIndex = 0;
           this.music = {
             ...parsed,
             updatedBy: this.playerName,
+            updatedAt: Date.now(),
+            queueIndex: 0,
+            queueTotal: 1,
+            hasNext: false
+          };
+          this.emitRoomState();
+          res = { ok: true, music: this.music };
+        }
+        break;
+      }
+      case 'room:musicNext': {
+        const nextIdx = this.musicQueueIndex + 1;
+        if (nextIdx >= this.musicQueue.length) {
+          this.music = null;
+          this.musicQueue = [];
+          this.musicQueueIndex = 0;
+          this.emitRoomState();
+          res = { ok: true, music: null };
+          break;
+        }
+        const nextTrack = data?.resolvedTrack || this.musicQueue[nextIdx];
+        if (!nextTrack?.embedUrl) {
+          res = { ok: false, needsResolveItem: nextTrack, nextIndex: nextIdx };
+          break;
+        }
+        this.musicQueue[nextIdx] = nextTrack;
+        this.musicQueueIndex = nextIdx;
+        this.music = {
+          ...nextTrack,
+          updatedBy: this.playerName,
+          updatedAt: Date.now(),
+          queueIndex: nextIdx,
+          queueTotal: this.musicQueue.length,
+          hasNext: nextIdx + 1 < this.musicQueue.length
+        };
+        this.emitRoomState();
+        res = { ok: true, music: this.music };
+        break;
+      }
+      case 'room:musicFallback': {
+        const fallbacks = Array.isArray(this.music?.fallbackVideoIds) ? [...this.music.fallbackVideoIds] : [];
+        const nextId = fallbacks.shift();
+        if (!nextId) {
+          res = { ok: false, noFallback: true };
+        } else {
+          this.music = {
+            ...this.music,
+            videoId: nextId,
+            fallbackVideoIds: fallbacks,
+            embedUrl: buildYouTubeEmbedUrl(nextId),
             updatedAt: Date.now()
           };
           this.emitRoomState();
@@ -105,6 +193,8 @@ export class LocalSingleplayerClient {
       }
       case 'room:musicStop':
         this.music = null;
+        this.musicQueue = [];
+        this.musicQueueIndex = 0;
         this.emitRoomState();
         res = { ok: true };
         break;

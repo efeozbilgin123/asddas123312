@@ -562,7 +562,7 @@ test('Paired katlamali isolates opening & pair thresholds to opponent team only 
   session.destroy();
 });
 
-test('parseMusicUrl handles YouTube, Spotify, SoundCloud, MP3 audio, web players and rejects unsafe URLs', async () => {
+test('parseMusicUrl handles YouTube, Spotify bot links, song searches, SoundCloud, MP3 audio, web players and rejects unsafe URLs', async () => {
   const { parseMusicUrl } = await import('../shared/music.js');
 
   const yt = parseMusicUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'Test Track');
@@ -574,7 +574,24 @@ test('parseMusicUrl handles YouTube, Spotify, SoundCloud, MP3 audio, web players
   const sp = parseMusicUrl('https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT?si=123');
   assert.equal(sp.ok, true);
   assert.equal(sp.provider, 'spotify');
-  assert.match(sp.embedUrl, /open\.spotify\.com\/embed\/track\/4cOdK2wGLETKBW3PvgPWqT/);
+  assert.equal(sp.kind, 'bot');
+  assert.equal(sp.needsResolution, true);
+  assert.equal(sp.spotifyType, 'track');
+  assert.equal(sp.spotifyId, '4cOdK2wGLETKBW3PvgPWqT');
+  assert.equal(sp.embedUrl, null);
+
+  const spUri = parseMusicUrl('spotify:playlist:37i9dQZF1DXcBWIGoYBM5M');
+  assert.equal(spUri.ok, true);
+  assert.equal(spUri.provider, 'spotify');
+  assert.equal(spUri.spotifyType, 'playlist');
+  assert.equal(spUri.spotifyId, '37i9dQZF1DXcBWIGoYBM5M');
+
+  const search = parseMusicUrl('Tarkan Kuzu Kuzu');
+  assert.equal(search.ok, true);
+  assert.equal(search.provider, 'search');
+  assert.equal(search.kind, 'bot');
+  assert.equal(search.needsResolution, true);
+  assert.equal(search.query, 'Tarkan Kuzu Kuzu');
 
   const sc = parseMusicUrl('https://soundcloud.com/lofi_girl/lofi-hip-hop');
   assert.equal(sc.ok, true);
@@ -942,4 +959,249 @@ test('LocalSingleplayerClient blocks game:nextRound during playing phase and val
   });
   assert.equal(badFloatRes.ok, false);
 });
+
+test('musicResolver extracts Spotify tracks/playlists and resolves YouTube Topic audio cleanly without Spotify player', async () => {
+  const {
+    extractSpotifyTracksFromHtml,
+    extractYouTubeCandidatesFromHtml,
+    resolveMusicInput
+  } = await import('../server/musicResolver.js');
+
+  const playlistHtml = `<!doctype html><html><head></head><body><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+    props: {
+      pageProps: {
+        state: {
+          data: {
+            entity: {
+              trackList: [
+                { title: 'Kuzu Kuzu', subtitle: 'Tarkan' },
+                { title: 'Tükeneceğiz', subtitle: 'Sezen Aksu' }
+              ]
+            }
+          }
+        }
+      }
+    }
+  })}</script></body></html>`;
+
+  const extracted = extractSpotifyTracksFromHtml(playlistHtml, 'playlist');
+  assert.equal(extracted.length, 2);
+  assert.equal(extracted[0].query, 'Tarkan - Kuzu Kuzu');
+  assert.equal(extracted[1].query, 'Sezen Aksu - Tükeneceğiz');
+
+  const ytSearchHtml = `<script>var ytInitialData = ${JSON.stringify({
+    contents: {
+      twoColumnSearchResultsRenderer: {
+        primaryContents: {
+          sectionListRenderer: {
+            contents: [
+              {
+                itemSectionRenderer: {
+                  contents: [
+                    {
+                      videoRenderer: {
+                        videoId: 'cov12345678',
+                        title: { simpleText: 'Tarkan Kuzu Kuzu Acoustic Cover' },
+                        ownerText: { runs: [{ text: 'Random Cover Channel' }] },
+                        lengthText: { simpleText: '3:20' }
+                      }
+                    },
+                    {
+                      videoRenderer: {
+                        videoId: 'top98765432',
+                        title: { simpleText: 'Kuzu Kuzu' },
+                        ownerText: { runs: [{ text: 'Tarkan - Topic' }] },
+                        lengthText: { simpleText: '3:54' }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  })};</script>`;
+
+  const ranked = extractYouTubeCandidatesFromHtml(ytSearchHtml, 'Tarkan - Kuzu Kuzu');
+  assert.equal(ranked[0].videoId, 'top98765432');
+  assert.equal(ranked[1].videoId, 'cov12345678');
+
+  const fakeFetch = async (url) => {
+    if (String(url).includes('open.spotify.com/embed/playlist/')) {
+      return { ok: true, status: 200, text: async () => playlistHtml };
+    }
+    if (String(url).includes('youtube.com/results')) {
+      return { ok: true, status: 200, text: async () => ytSearchHtml };
+    }
+    return { ok: false, status: 404, text: async () => '' };
+  };
+
+  const resolved = await resolveMusicInput(
+    'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M',
+    '',
+    { fetchImpl: fakeFetch }
+  );
+  assert.equal(resolved.ok, true);
+  assert.equal(resolved.track.provider, 'youtube');
+  assert.equal(resolved.track.sourceProvider, 'spotify');
+  assert.equal(resolved.track.kind, 'bot');
+  assert.equal(resolved.track.videoId, 'top98765432');
+  assert.deepEqual(resolved.track.fallbackVideoIds, ['cov12345678']);
+  assert.match(resolved.track.embedUrl, /youtube\.com\/embed\/top98765432/);
+  assert.equal(resolved.track.queueTotal, 2);
+  assert.equal(resolved.track.hasNext, true);
+});
+
+test('RoomManager resolves Spotify playlists, advances queue without duplicates, switches fallback, and stops at queue end', async () => {
+  const { RoomManager } = await import('../server/roomManager.js');
+  const fakeIo = {
+    to: () => ({ emit: () => {} }),
+    emit: () => {}
+  };
+  const rm = new RoomManager(fakeIo);
+  const created = rm.createRoom({ playerId: 'h1', playerName: 'Efe' });
+  const code = created.room.code;
+
+  const playlistHtml = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+    props: {
+      pageProps: {
+        state: {
+          data: {
+            entity: {
+              trackList: [
+                { title: 'Song One', subtitle: 'Artist A' },
+                { title: 'Song Two', subtitle: 'Artist B' }
+              ]
+            }
+          }
+        }
+      }
+    }
+  })}</script>`;
+
+  const mkYtHtml = (id1, id2, title) =>
+    `<script>var ytInitialData = ${JSON.stringify({
+      contents: {
+        section: {
+          items: [
+            { videoRenderer: { videoId: id1, title: { simpleText: title }, ownerText: { runs: [{ text: 'Artist - Topic' }] }, lengthText: { simpleText: '3:10' } } },
+            { videoRenderer: { videoId: id2, title: { simpleText: `${title} Official Audio` }, ownerText: { runs: [{ text: 'Label' }] }, lengthText: { simpleText: '3:12' } } }
+          ]
+        }
+      }
+    })};</script>`;
+
+  const fakeFetch = async (url) => {
+    const u = String(url);
+    if (u.includes('open.spotify.com/embed/playlist/')) {
+      return { ok: true, status: 200, text: async () => playlistHtml };
+    }
+    if (u.includes('Song%20Two')) {
+      return { ok: true, status: 200, text: async () => mkYtHtml('song2main111', 'song2alt2222', 'Song Two') };
+    }
+    return { ok: true, status: 200, text: async () => mkYtHtml('song1main111', 'song1alt2222', 'Song One') };
+  };
+
+  const setRes = await rm.resolveAndSetRoomMusic({
+    roomCode: code,
+    playerId: 'h1',
+    url: 'https://open.spotify.com/playlist/1234567890',
+    fetchImpl: fakeFetch
+  });
+  assert.equal(setRes.ok, true);
+  assert.equal(setRes.music.videoId, 'song1main111');
+  assert.equal(setRes.music.hasNext, true);
+
+  // Fallback swaps to secondary YouTube videoId cleanly
+  const firstKey = `${created.room.music.embedUrl}|${created.room.music.updatedAt}`;
+  const fbRes = rm.switchMusicFallback({ roomCode: code, playerId: 'h1', currentKey: firstKey });
+  assert.equal(fbRes.ok, true);
+  assert.equal(fbRes.music.videoId, 'song1alt2222');
+
+  // Stale key duplicate advance is ignored
+  const staleAdv = await rm.advanceRoomMusic({ roomCode: code, playerId: 'h1', currentKey: firstKey, fetchImpl: fakeFetch });
+  assert.equal(staleAdv.ok, true);
+  assert.equal(staleAdv.skippedDuplicate, true);
+  assert.equal(created.room.music.videoId, 'song1alt2222');
+
+  // Matching key advances to Song Two
+  const updatedKey = `${created.room.music.embedUrl}|${created.room.music.updatedAt}`;
+  const advRes = await rm.advanceRoomMusic({ roomCode: code, playerId: 'h1', currentKey: updatedKey, fetchImpl: fakeFetch });
+  assert.equal(advRes.ok, true);
+  assert.equal(advRes.music.videoId, 'song2main111');
+  assert.equal(advRes.music.queueIndex, 1);
+  assert.equal(advRes.music.hasNext, false);
+
+  // Advancing past end stops playback
+  const endKey = `${created.room.music.embedUrl}|${created.room.music.updatedAt}`;
+  const endRes = await rm.advanceRoomMusic({ roomCode: code, playerId: 'h1', currentKey: endKey, fetchImpl: fakeFetch });
+  assert.equal(endRes.ok, true);
+  assert.equal(endRes.music, null);
+  assert.equal(created.room.music, null);
+});
+
+test('LocalSingleplayerClient supports LunaBot resolved music queue, next, and fallback', (ctx) => {
+  const client = new LocalSingleplayerClient({
+    playerName: 'Efe',
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
+    onState: () => {}
+  });
+  ctx.after(() => client.destroy());
+
+  const payload = {
+    ok: true,
+    track: {
+      ok: true,
+      provider: 'youtube',
+      sourceProvider: 'spotify',
+      kind: 'bot',
+      title: 'Artist - First',
+      videoId: 'vidOne11111',
+      fallbackVideoIds: ['vidOneAlt22'],
+      embedUrl: 'https://www.youtube.com/embed/vidOne11111?autoplay=1&enablejsapi=1'
+    },
+    queue: [
+      {
+        ok: true,
+        provider: 'youtube',
+        sourceProvider: 'spotify',
+        kind: 'bot',
+        title: 'Artist - First',
+        videoId: 'vidOne11111',
+        fallbackVideoIds: ['vidOneAlt22'],
+        embedUrl: 'https://www.youtube.com/embed/vidOne11111?autoplay=1&enablejsapi=1'
+      },
+      {
+        ok: true,
+        provider: 'youtube',
+        sourceProvider: 'spotify',
+        kind: 'bot',
+        title: 'Artist - Second',
+        videoId: 'vidTwo22222',
+        fallbackVideoIds: [],
+        embedUrl: 'https://www.youtube.com/embed/vidTwo22222?autoplay=1&enablejsapi=1'
+      }
+    ]
+  };
+
+  let setRes = null;
+  client.action('room:musicSet', { resolvedPayload: payload }, (r) => { setRes = r; });
+  assert.equal(setRes.ok, true);
+  assert.equal(setRes.music.videoId, 'vidOne11111');
+  assert.equal(setRes.music.hasNext, true);
+
+  let fbRes = null;
+  client.action('room:musicFallback', {}, (r) => { fbRes = r; });
+  assert.equal(fbRes.ok, true);
+  assert.equal(fbRes.music.videoId, 'vidOneAlt22');
+
+  let nextRes = null;
+  client.action('room:musicNext', {}, (r) => { nextRes = r; });
+  assert.equal(nextRes.ok, true);
+  assert.equal(nextRes.music.videoId, 'vidTwo22222');
+  assert.equal(nextRes.music.hasNext, false);
+});
+
 

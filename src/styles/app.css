@@ -980,7 +980,7 @@ body {
   top: calc(var(--space-sm) + 48px);
   left: var(--space-md);
   z-index: var(--z-sticky);
-  width: min(350px, calc(100% - var(--space-lg)));
+  width: min(440px, calc(100% - var(--space-lg)));
   display: grid;
   gap: var(--space-xs);
   padding: var(--space-xs) var(--space-sm);
@@ -1028,7 +1028,7 @@ body {
 }
 
 .music-volume {
-  width: 68px;
+  width: 64px;
   accent-color: var(--color-accent);
   cursor: pointer;
 }
@@ -1056,15 +1056,15 @@ body {
 
 .music-dock.is-minimized {
   width: auto;
-  max-width: min(350px, calc(100% - var(--space-lg)));
+  max-width: min(520px, calc(100% - var(--space-lg)));
 }
 
 .music-dock.is-minimized .music-dock__body {
   position: fixed;
   left: -9999px;
   top: 0;
-  width: 160px;
-  height: 84px;
+  width: 220px;
+  height: 200px;
   opacity: 0.01;
   pointer-events: none;
 }

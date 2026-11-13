@@ -1,11 +1,65 @@
+export function buildYouTubeEmbedUrl(videoId, listId = '', origin = '') {
+  const params = new URLSearchParams({
+    autoplay: '1',
+    enablejsapi: '1',
+    rel: '0',
+    playsinline: '1',
+    iv_load_policy: '3',
+    modestbranding: '1',
+    vq: 'small'
+  });
+  if (listId && /^[A-Za-z0-9_-]+$/.test(listId)) {
+    params.set('list', listId);
+  }
+  if (origin && /^https?:\/\//i.test(origin)) {
+    params.set('origin', origin);
+  }
+  return `https://www.youtube.com/embed/${videoId}?${params.toString()}`;
+}
+
 export function parseMusicUrl(rawUrl, customTitle = '') {
   const trimmed = String(rawUrl || '').trim();
   if (!trimmed) {
-    return { ok: false, error: 'Lütfen bir YouTube, Spotify, SoundCloud veya ses bağlantısı girin.' };
+    return { ok: false, error: 'Lütfen bir Spotify, YouTube, SoundCloud bağlantısı veya şarkı adı girin.' };
+  }
+
+  const cleanTitle = String(customTitle || '').trim().slice(0, 64);
+
+  // Explicit Spotify URI (e.g. spotify:track:4cOdK2wGLETKBW3PvgPWqT)
+  const spotifyUriMatch = trimmed.match(/^spotify:(track|playlist|album|episode|show|artist):([A-Za-z0-9]+)$/i);
+  if (spotifyUriMatch) {
+    const type = spotifyUriMatch[1].toLowerCase();
+    const id = spotifyUriMatch[2];
+    return {
+      ok: true,
+      provider: 'spotify',
+      kind: 'bot',
+      needsResolution: true,
+      spotifyType: type,
+      spotifyId: id,
+      title: cleanTitle || 'Spotify',
+      originalUrl: `https://open.spotify.com/${type}/${id}`,
+      embedUrl: null
+    };
+  }
+
+  // Plain-text song search query (e.g. "Tarkan - Kuzu Kuzu" or "Sezen Aksu")
+  const hasExplicitScheme = /^[a-z][a-z0-9+.-]*:/i.test(trimmed);
+  if (!hasExplicitScheme && (/\s/.test(trimmed) || !trimmed.includes('.'))) {
+    return {
+      ok: true,
+      provider: 'search',
+      kind: 'bot',
+      needsResolution: true,
+      query: trimmed.slice(0, 120),
+      title: cleanTitle || trimmed.slice(0, 64),
+      originalUrl: '',
+      embedUrl: null
+    };
   }
 
   let normalized = trimmed;
-  if (!/^[a-z][a-z0-9+.-]*:/i.test(normalized)) {
+  if (!hasExplicitScheme) {
     normalized = `https://${normalized}`;
   }
 
@@ -13,7 +67,7 @@ export function parseMusicUrl(rawUrl, customTitle = '') {
   try {
     parsed = new URL(normalized);
   } catch {
-    return { ok: false, error: 'Geçerli bir web bağlantısı girin.' };
+    return { ok: false, error: 'Geçerli bir bağlantı veya şarkı adı girin.' };
   }
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
@@ -21,7 +75,6 @@ export function parseMusicUrl(rawUrl, customTitle = '') {
   }
 
   const host = parsed.hostname.toLowerCase();
-  const cleanTitle = String(customTitle || '').trim().slice(0, 64);
 
   // YouTube / YouTube Music
   if (
@@ -42,25 +95,14 @@ export function parseMusicUrl(rawUrl, customTitle = '') {
     }
 
     if (videoId && /^[A-Za-z0-9_-]{6,}$/.test(videoId)) {
-      const params = new URLSearchParams({
-        autoplay: '1',
-        enablejsapi: '1',
-        rel: '0',
-        playsinline: '1',
-        iv_load_policy: '3',
-        modestbranding: '1',
-        vq: 'small'
-      });
-      if (listId && /^[A-Za-z0-9_-]+$/.test(listId)) {
-        params.set('list', listId);
-      }
       return {
         ok: true,
         provider: 'youtube',
         kind: 'iframe',
         title: cleanTitle || 'YouTube',
+        videoId,
         originalUrl: parsed.toString(),
-        embedUrl: `https://www.youtube.com/embed/${videoId}?${params.toString()}`
+        embedUrl: buildYouTubeEmbedUrl(videoId, listId)
       };
     }
 
@@ -76,7 +118,7 @@ export function parseMusicUrl(rawUrl, customTitle = '') {
     }
   }
 
-  // Spotify
+  // Spotify (resolved server-side like a Discord music bot, never opens Spotify player)
   if (host === 'open.spotify.com' || host === 'play.spotify.com') {
     const m = parsed.pathname.match(
       /^\/(?:intl-[a-z-]+\/)?(?:embed\/)?(track|playlist|album|episode|show|artist)\/([A-Za-z0-9]+)/
@@ -85,10 +127,13 @@ export function parseMusicUrl(rawUrl, customTitle = '') {
       return {
         ok: true,
         provider: 'spotify',
-        kind: 'iframe',
+        kind: 'bot',
+        needsResolution: true,
+        spotifyType: m[1],
+        spotifyId: m[2],
         title: cleanTitle || 'Spotify',
-        originalUrl: parsed.toString(),
-        embedUrl: `https://open.spotify.com/embed/${m[1]}/${m[2]}?utm_source=generator&theme=0`
+        originalUrl: `https://open.spotify.com/${m[1]}/${m[2]}`,
+        embedUrl: null
       };
     }
   }
@@ -127,3 +172,4 @@ export function parseMusicUrl(rawUrl, customTitle = '') {
     embedUrl: parsed.toString()
   };
 }
+

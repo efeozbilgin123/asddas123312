@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Server } from 'socket.io';
+import { resolveMusicInput } from './musicResolver.js';
 import { RoomManager } from './roomManager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -11,6 +12,7 @@ const rootDir = path.resolve(__dirname, '..');
 const distDir = path.join(rootDir, 'dist');
 
 const app = express();
+app.use(express.json({ limit: '32kb' }));
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -26,6 +28,18 @@ app.get('/api/health', (_req, res) => {
 
 app.get('/api/rooms', (_req, res) => {
   res.json({ rooms: roomManager.listPublicRooms() });
+});
+
+app.post('/api/music/resolve', async (req, res) => {
+  try {
+    const query = req.body?.url || req.body?.query || '';
+    const title = req.body?.title || '';
+    const resolved = await resolveMusicInput(query, title);
+    res.json(resolved);
+  } catch (err) {
+    console.error('[/api/music/resolve] error:', err);
+    res.status(500).json({ ok: false, error: 'Parça çözümlenirken sunucu hatası oluştu.' });
+  }
 });
 
 if (fs.existsSync(distDir)) {
@@ -74,7 +88,12 @@ io.on('connection', (socket) => {
   function safeOn(eventName, handler) {
     socket.on(eventName, (data, ack) => {
       try {
-        handler(data, ack);
+        Promise.resolve(handler(data, ack)).catch((err) => {
+          console.error(`[socket:${eventName}] async error:`, err);
+          if (typeof ack === 'function') {
+            ack({ ok: false, error: 'Geçersiz istek.' });
+          }
+        });
       } catch (err) {
         console.error(`[socket:${eventName}] error:`, err);
         if (typeof ack === 'function') {
@@ -168,13 +187,34 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack(res);
   });
 
-  safeOn('room:musicSet', (data, ack) => {
+  safeOn('room:musicSet', async (data, ack) => {
     const code = roomManager.playerToRoom.get(playerId);
-    const res = roomManager.setRoomMusic({
+    const res = await roomManager.resolveAndSetRoomMusic({
       roomCode: code,
       playerId,
       url: data?.url,
-      title: data?.title
+      title: data?.title,
+      mode: data?.mode === 'queue' ? 'queue' : 'replace'
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:musicNext', async (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = await roomManager.advanceRoomMusic({
+      roomCode: code,
+      playerId,
+      currentKey: typeof data?.currentKey === 'string' ? data.currentKey : ''
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:musicFallback', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.switchMusicFallback({
+      roomCode: code,
+      playerId,
+      currentKey: typeof data?.currentKey === 'string' ? data.currentKey : ''
     });
     if (typeof ack === 'function') ack(res);
   });

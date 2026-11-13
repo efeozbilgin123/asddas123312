@@ -132,6 +132,8 @@ const els = {
   musicDock: document.getElementById('music-dock'),
   musicProviderBadge: document.getElementById('music-provider-badge'),
   musicTrackTitle: document.getElementById('music-track-title'),
+  musicDockPlayPause: document.getElementById('music-dock-playpause'),
+  musicDockNext: document.getElementById('music-dock-next'),
   musicVolume: document.getElementById('music-volume'),
   musicExternalLink: document.getElementById('music-external-link'),
   musicDockToggle: document.getElementById('music-dock-toggle'),
@@ -144,6 +146,8 @@ const els = {
   musicUrlHelp: document.getElementById('music-url-help'),
   musicTitleInput: document.getElementById('music-title-input'),
   btnMusicStop: document.getElementById('btn-music-stop'),
+  btnMusicQueue: document.getElementById('btn-music-queue'),
+  btnMusicPlay: document.getElementById('btn-music-play'),
 
   dialogOrders: document.getElementById('dialog-orders'),
   orderTarget: document.getElementById('order-target'),
@@ -529,7 +533,8 @@ function refreshRooms() {
 
 const PROVIDER_LABELS = {
   youtube: 'YouTube',
-  spotify: 'Spotify',
+  spotify: 'LunaBot · Spotify',
+  search: 'LunaBot',
   soundcloud: 'SoundCloud',
   audio: 'Ses Akışı',
   web: 'Web Player'
@@ -539,6 +544,20 @@ let activeMusicKey = null;
 let activeMusicData = null;
 let activeAudioEl = null;
 let activeIframeEl = null;
+let isMusicPaused = false;
+let musicAdvancePendingKey = null;
+
+function postYouTubeCommand(func, args = []) {
+  if (!activeIframeEl || activeMusicData?.provider !== 'youtube') return;
+  try {
+    activeIframeEl.contentWindow?.postMessage(
+      JSON.stringify({ event: 'command', func, args }),
+      'https://www.youtube.com'
+    );
+  } catch {
+    // Ignore cross-origin postMessage restrictions
+  }
+}
 
 function applyMusicVolume(volPct) {
   const raw = Number(volPct);
@@ -549,10 +568,7 @@ function applyMusicVolume(volPct) {
   if (activeIframeEl && activeMusicData) {
     try {
       if (activeMusicData.provider === 'youtube') {
-        activeIframeEl.contentWindow?.postMessage(
-          JSON.stringify({ event: 'command', func: 'setVolume', args: [pct] }),
-          'https://www.youtube.com'
-        );
+        postYouTubeCommand('setVolume', [pct]);
       } else if (activeMusicData.provider === 'soundcloud') {
         activeIframeEl.contentWindow?.postMessage(
           JSON.stringify({ method: 'setVolume', value: pct }),
@@ -565,20 +581,82 @@ function applyMusicVolume(volPct) {
   }
 }
 
+function updateMusicPlayPauseLabel() {
+  if (!els.musicDockPlayPause) return;
+  els.musicDockPlayPause.textContent = isMusicPaused ? 'Çal' : 'Duraklat';
+}
+
+async function resolveNextOfflineTrackIfNeeded(item) {
+  if (!item || item.embedUrl || !item.query) return item;
+  try {
+    const resp = await fetch('/api/music/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: item.query, title: item.trackTitle || item.title })
+    });
+    const data = await resp.json();
+    if (data?.ok && data.track) return data.track;
+  } catch {
+    // Ignore offline fetch failures
+  }
+  return null;
+}
+
+function advanceRoomMusic(expectedKey = activeMusicKey) {
+  if (!currentRoom || !activeMusicData) return;
+  if (expectedKey && expectedKey === musicAdvancePendingKey) return;
+  musicAdvancePendingKey = expectedKey || activeMusicKey;
+
+  sendGameAction('room:musicNext', { currentKey: expectedKey || '' }, async (res) => {
+    if (!res?.ok && res?.needsResolveItem && localClient) {
+      const resolvedTrack = await resolveNextOfflineTrackIfNeeded(res.needsResolveItem);
+      if (resolvedTrack) {
+        sendGameAction('room:musicNext', {
+          currentKey: expectedKey || '',
+          resolvedTrack
+        }, (r2) => {
+          if (r2?.ok) applyRoomMusic(r2.music || null);
+        });
+        return;
+      }
+    }
+    if (res?.ok && !res?.skippedDuplicate) {
+      applyRoomMusic(res.music || null);
+    }
+  });
+}
+
+function handleMusicPlaybackError(expectedKey) {
+  if (!currentRoom || !activeMusicData || expectedKey !== activeMusicKey) return;
+  sendGameAction('room:musicFallback', { currentKey: expectedKey }, (res) => {
+    if (res?.ok && res.music) {
+      applyRoomMusic(res.music);
+    } else if (res?.noFallback && activeMusicData?.hasNext) {
+      advanceRoomMusic(expectedKey);
+    }
+  });
+}
+
 function applyRoomMusic(music) {
   if (!music || !music.embedUrl) {
     activeMusicKey = null;
     activeMusicData = null;
     activeAudioEl = null;
     activeIframeEl = null;
+    isMusicPaused = false;
+    musicAdvancePendingKey = null;
     scene3d.setMusicPerformanceMode(false);
     if (els.musicDock) {
       els.musicDock.hidden = true;
-      els.musicDock.classList.remove('is-minimized');
+      els.musicDock.classList.add('is-minimized');
     }
+    if (els.musicDockPlayPause) els.musicDockPlayPause.hidden = true;
+    if (els.musicDockNext) els.musicDockNext.hidden = true;
+    if (els.musicExternalLink) els.musicExternalLink.hidden = true;
     if (els.musicDockToggle) {
-      els.musicDockToggle.textContent = 'Gizle';
-      els.musicDockToggle.setAttribute('aria-expanded', 'true');
+      els.musicDockToggle.hidden = true;
+      els.musicDockToggle.textContent = 'Göster';
+      els.musicDockToggle.setAttribute('aria-expanded', 'false');
     }
     if (els.musicPlayerHost) els.musicPlayerHost.innerHTML = '';
     return;
@@ -586,24 +664,55 @@ function applyRoomMusic(music) {
 
   scene3d.setMusicPerformanceMode(true);
   const key = `${music.embedUrl}|${music.updatedAt || 0}`;
+  const isBotMode = music.kind === 'bot' || music.sourceProvider === 'spotify' || music.sourceProvider === 'search';
+
   if (els.musicDock) els.musicDock.hidden = false;
   if (els.musicProviderBadge) {
-    els.musicProviderBadge.textContent = PROVIDER_LABELS[music.provider] || 'Müzik';
+    const labelKey = music.sourceProvider || music.provider;
+    els.musicProviderBadge.textContent = PROVIDER_LABELS[labelKey] || 'Müzik';
   }
   if (els.musicTrackTitle) {
+    const queueTag = music.queueTotal > 1 ? ` [${(music.queueIndex || 0) + 1}/${music.queueTotal}]` : '';
     const byTag = music.updatedBy ? ` (${music.updatedBy})` : '';
-    els.musicTrackTitle.textContent = `${music.title || 'Oda Müziği'}${byTag}`;
+    els.musicTrackTitle.textContent = `${music.title || 'Oda Müziği'}${queueTag}${byTag}`;
+  }
+  if (els.musicDockNext) {
+    els.musicDockNext.hidden = !music.hasNext;
   }
   if (els.musicExternalLink) {
     els.musicExternalLink.href = music.originalUrl || music.embedUrl;
-    els.musicExternalLink.hidden = false;
+    els.musicExternalLink.hidden = isBotMode;
+  }
+  if (els.musicDockToggle) {
+    const allowToggle = !isBotMode && music.kind !== 'audio';
+    els.musicDockToggle.hidden = !allowToggle;
+  }
+  if (els.musicDockPlayPause) {
+    els.musicDockPlayPause.hidden = !(music.provider === 'youtube' || music.provider === 'soundcloud' || music.kind === 'audio');
   }
 
-  if (key === activeMusicKey) return;
+  if (key === activeMusicKey) {
+    activeMusicData = music;
+    return;
+  }
+
   activeMusicKey = key;
   activeMusicData = music;
   activeAudioEl = null;
   activeIframeEl = null;
+  isMusicPaused = false;
+  musicAdvancePendingKey = null;
+  updateMusicPlayPauseLabel();
+
+  if (els.musicDock) {
+    // Discord LunaBot style: keep player hidden in background for bot/YouTube/Spotify tracks
+    const startMinimized = isBotMode || music.provider === 'youtube' || music.provider === 'soundcloud';
+    els.musicDock.classList.toggle('is-minimized', startMinimized);
+    if (els.musicDockToggle) {
+      els.musicDockToggle.textContent = startMinimized ? 'Göster' : 'Gizle';
+      els.musicDockToggle.setAttribute('aria-expanded', String(!startMinimized));
+    }
+  }
 
   if (!els.musicPlayerHost) return;
   els.musicPlayerHost.innerHTML = '';
@@ -617,12 +726,28 @@ function applyRoomMusic(music) {
     audio.autoplay = true;
     audio.src = music.embedUrl;
     audio.volume = Math.max(0, Math.min(100, resolvedVol)) / 100;
+    audio.addEventListener('play', () => {
+      isMusicPaused = false;
+      updateMusicPlayPauseLabel();
+    });
+    audio.addEventListener('pause', () => {
+      isMusicPaused = true;
+      updateMusicPlayPauseLabel();
+    });
+    audio.addEventListener('ended', () => {
+      advanceRoomMusic(key);
+    });
     els.musicPlayerHost.appendChild(audio);
     activeAudioEl = audio;
     audio.play().catch(() => {});
   } else {
+    let iframeSrc = music.embedUrl;
+    if (music.provider === 'youtube' && !iframeSrc.includes('origin=')) {
+      const sep = iframeSrc.includes('?') ? '&' : '?';
+      iframeSrc = `${iframeSrc}${sep}origin=${encodeURIComponent(window.location.origin)}`;
+    }
     const iframe = document.createElement('iframe');
-    iframe.src = music.embedUrl;
+    iframe.src = iframeSrc;
     if (music.provider === 'web') {
       iframe.sandbox = 'allow-scripts allow-presentation';
     }
@@ -631,12 +756,53 @@ function applyRoomMusic(music) {
     iframe.loading = 'eager';
     iframe.title = music.title || 'Ortak Oda Müziği';
     iframe.addEventListener('load', () => {
+      if (music.provider === 'youtube') {
+        try {
+          iframe.contentWindow?.postMessage(
+            JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }),
+            'https://www.youtube.com'
+          );
+        } catch {
+          // Ignore cross-origin restrictions
+        }
+      }
       applyMusicVolume(els.musicVolume?.value ?? 55);
     });
     els.musicPlayerHost.appendChild(iframe);
     activeIframeEl = iframe;
   }
 }
+
+window.addEventListener('message', (event) => {
+  if (event.origin !== 'https://www.youtube.com') return;
+  if (!activeIframeEl || event.source !== activeIframeEl.contentWindow) return;
+  let payload;
+  try {
+    payload = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+  } catch {
+    return;
+  }
+  if (!payload || typeof payload !== 'object') return;
+
+  if (payload.event === 'onReady') {
+    applyMusicVolume(els.musicVolume?.value ?? 55);
+    postYouTubeCommand('playVideo');
+  } else if (payload.event === 'onStateChange') {
+    if (payload.info === 1) {
+      isMusicPaused = false;
+      updateMusicPlayPauseLabel();
+    } else if (payload.info === 2) {
+      isMusicPaused = true;
+      updateMusicPlayPauseLabel();
+    } else if (payload.info === 0) {
+      advanceRoomMusic(activeMusicKey);
+    }
+  } else if (payload.event === 'onError') {
+    if ([100, 101, 150].includes(Number(payload.info))) {
+      handleMusicPlaybackError(activeMusicKey);
+    }
+  }
+});
 
 function switchView(room) {
   const prevRoom = currentRoom;
@@ -1558,7 +1724,7 @@ els.btnSound.addEventListener('click', () => {
   els.btnSound.querySelector('span').textContent = muted ? 'Ses kapalı' : 'Ses açık';
 });
 
-// Shared Room Music controls
+// Shared Room Music controls (LunaBot style)
 function openMusicDialog() {
   if (!currentRoom) return;
   if (els.musicUrlHelp) els.musicUrlHelp.textContent = '';
@@ -1568,14 +1734,19 @@ function openMusicDialog() {
   if (els.musicTitleInput) {
     els.musicTitleInput.value = activeMusicData?.title || '';
   }
+  if (els.btnMusicQueue) {
+    els.btnMusicQueue.hidden = !activeMusicData;
+  }
   els.dialogMusic?.showModal();
 }
 
 els.btnMusic?.addEventListener('click', openMusicDialog);
 els.btnWaitMusic?.addEventListener('click', openMusicDialog);
 
-els.musicForm?.addEventListener('submit', (e) => {
-  e.preventDefault();
+let musicSubmitting = false;
+
+async function submitRoomMusic(mode = 'replace') {
+  if (musicSubmitting) return;
   const rawUrl = els.musicUrlInput?.value || '';
   const customTitle = els.musicTitleInput?.value || '';
   const preview = parseMusicUrl(rawUrl, customTitle);
@@ -1584,18 +1755,73 @@ els.musicForm?.addEventListener('submit', (e) => {
     els.musicUrlInput?.focus();
     return;
   }
-  if (els.musicUrlHelp) els.musicUrlHelp.textContent = '';
 
-  sendGameAction('room:musicSet', { url: rawUrl, title: customTitle }, (res) => {
-    if (!res?.ok) {
-      if (els.musicUrlHelp) {
-        els.musicUrlHelp.textContent = res?.error || 'Müzik başlatılamadı.';
+  musicSubmitting = true;
+  if (els.btnMusicPlay) els.btnMusicPlay.disabled = true;
+  if (els.btnMusicQueue) els.btnMusicQueue.disabled = true;
+  if (els.musicUrlHelp) {
+    els.musicUrlHelp.textContent = preview.needsResolution
+      ? 'LunaBot parçayı hazırlıyor...'
+      : '';
+  }
+
+  const finishSubmit = () => {
+    musicSubmitting = false;
+    if (els.btnMusicPlay) els.btnMusicPlay.disabled = false;
+    if (els.btnMusicQueue) els.btnMusicQueue.disabled = false;
+  };
+
+  let resolvedPayload = null;
+  if (localClient && preview.needsResolution) {
+    try {
+      const resp = await fetch('/api/music/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: rawUrl, title: customTitle })
+      });
+      const json = await resp.json();
+      if (!json?.ok) {
+        if (els.musicUrlHelp) {
+          els.musicUrlHelp.textContent = json?.error || 'Parça çözümlenemedi.';
+        }
+        finishSubmit();
+        return;
       }
+      resolvedPayload = json;
+    } catch {
+      if (els.musicUrlHelp) {
+        els.musicUrlHelp.textContent = 'Spotify veya şarkı araması için sunucu bağlantısı gerekiyor.';
+      }
+      finishSubmit();
       return;
     }
-    if (res.music) applyRoomMusic(res.music);
-    if (els.dialogMusic?.open) els.dialogMusic.close();
-  });
+  }
+
+  sendGameAction(
+    'room:musicSet',
+    { url: rawUrl, title: customTitle, mode, resolvedPayload },
+    (res) => {
+      finishSubmit();
+      if (!res?.ok) {
+        if (els.musicUrlHelp) {
+          els.musicUrlHelp.textContent = res?.error || 'Müzik başlatılamadı.';
+        }
+        return;
+      }
+      if (els.musicUrlHelp) els.musicUrlHelp.textContent = '';
+      if (res.music) applyRoomMusic(res.music);
+      if (els.dialogMusic?.open) els.dialogMusic.close();
+    }
+  );
+}
+
+els.musicForm?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  submitRoomMusic('replace');
+});
+
+els.btnMusicQueue?.addEventListener('click', () => {
+  submitRoomMusic('queue');
 });
 
 function stopRoomMusic() {
@@ -1609,6 +1835,40 @@ function stopRoomMusic() {
 
 els.btnMusicStop?.addEventListener('click', stopRoomMusic);
 els.musicDockStop?.addEventListener('click', stopRoomMusic);
+
+els.musicDockPlayPause?.addEventListener('click', () => {
+  if (!activeMusicData) return;
+  if (activeAudioEl) {
+    if (activeAudioEl.paused) {
+      activeAudioEl.play().catch(() => {});
+      isMusicPaused = false;
+    } else {
+      activeAudioEl.pause();
+      isMusicPaused = true;
+    }
+    updateMusicPlayPauseLabel();
+    return;
+  }
+
+  isMusicPaused = !isMusicPaused;
+  updateMusicPlayPauseLabel();
+  if (activeMusicData.provider === 'youtube') {
+    postYouTubeCommand(isMusicPaused ? 'pauseVideo' : 'playVideo');
+  } else if (activeMusicData.provider === 'soundcloud' && activeIframeEl) {
+    try {
+      activeIframeEl.contentWindow?.postMessage(
+        JSON.stringify({ method: isMusicPaused ? 'pause' : 'play' }),
+        'https://w.soundcloud.com'
+      );
+    } catch {
+      // Ignore cross-origin postMessage restrictions
+    }
+  }
+});
+
+els.musicDockNext?.addEventListener('click', () => {
+  advanceRoomMusic(activeMusicKey);
+});
 
 els.musicDockToggle?.addEventListener('click', () => {
   if (!els.musicDock) return;

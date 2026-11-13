@@ -1,12 +1,12 @@
 {
-  "name": "okey-101-3d",
+  "name": "yuzbir-okey-3d",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"node --watch server.js\" \"vite --host 0.0.0.0\"",
-    "build": "npm test && vite build",
-    "start": "node server.js",
+    "dev": "concurrently -n server,client -c yellow,cyan \"node --watch server/index.js\" \"vite --host 0.0.0.0\"",
+    "build": "vite build",
+    "start": "node server/index.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {

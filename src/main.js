@@ -1,154 +1,1187 @@
-import './style.css';
-import {createTable3D} from './table3d.js';
-import {io} from 'socket.io-client';
-import {COLORS,validateMeld} from './engine.js';
-import {installDebugUI} from './debug-panel.js';
-const app=document.getElementById('app');
-const socket=io({autoConnect:true,reconnection:true,reconnectionAttempts:Infinity});
-let state=null,selected=new Set(),staged=[],pickedMeld=null,order=[],chat=[];
-let name=localStorage.getItem('club_name')||'';
-let folding=true,teams=true,rounds=5,practice=false;
-let roomCode=localStorage.getItem('club_room')||'',roomToken=localStorage.getItem('club_token')||'';
-let roomInput='',toastTimer=null,leavingRoom=false,flatRackVisible=false,cameraView=0;
-const labels={red:'Kırmızı',yellow:'Sarı',blue:'Mavi',black:'Siyah'};
-const htmlSafe=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function toast(message,error=false){const el=document.getElementById('toast');if(!el)return;el.textContent=message;el.className='toast visible '+(error?'bad':'');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.className='toast',4300)}
-function rpc(event,payload={},cb=()=>{}){socket.timeout(8000).emit(event,payload,(err,res)=>{if(err)return toast('Sunucu yanıt vermedi. Tekrar dene.',true);if(!res?.ok)return toast(res?.error||'İşlem başarısız.',true);cb(res)})}
-const debugUI=installDebugUI(socket,()=>state,message=>toast(message,true));
-function persist(res){roomCode=res.code;roomToken=res.token;localStorage.setItem('club_room',roomCode);localStorage.setItem('club_token',roomToken);localStorage.setItem('club_name',name)}
-function clearLocalRoom(message=''){
- roomCode='';roomToken='';
- localStorage.removeItem('club_room');localStorage.removeItem('club_token');
- state=null;selected.clear();staged=[];pickedMeld=null;order=[];chat=[];
- debugUI.reset();
- if(scene3d){scene3d.destroy();scene3d=null;}
- renderHome();if(message)toast(message,true);
-}
-function leaveRoom(){
- if(leavingRoom)return;
- if(state?.phase!=='lobby'&&!window.confirm('Maç devam ederken ayrılırsan masa kapanacak. Ana menüye dönmek istiyor musun?'))return;
- leavingRoom=true;
- if(!socket.connected){clearLocalRoom();leavingRoom=false;return;}
- socket.timeout(5500).emit('room:leave',{},(err,res)=>{
-  clearLocalRoom(err||!res?.ok?'Ana menüye döndün; sunucuyla çıkış onaylanamadı.':'');
-  leavingRoom=false;
- });
-}
-function reconnect(){if(roomCode&&roomToken)rpc('room:join',{code:roomCode,token:roomToken,name},persist)}
-socket.on('connect',()=>{debugUI.reset();reconnect()});socket.on('replaced',()=>toast('Aynı hesap başka sekmede açıldı.',true));
-socket.on('room:closed',({message}={})=>{clearLocalRoom(message||'Masa kapatıldı.');leavingRoom=false;});
-socket.on('state',s=>{if(leavingRoom)return;const changedRound=state?.round!==s.round||state?.phase==='lobby'&&s.phase==='playing';state=s;if(changedRound){selected.clear();staged=[];pickedMeld=null;order=[]}syncOrder();render()});
-socket.on('chat',m=>{chat.push(m);if(chat.length>30)chat.shift();renderChat()});
-function syncOrder(){if(!state)return;const ids=new Set(state.hand.map(t=>t.id));order=order.filter(id=>ids.has(id));for(const t of state.hand)if(!order.includes(t.id))order.push(t.id);selected=new Set([...selected].filter(id=>ids.has(id)));staged=staged.filter(g=>g.ids.every(id=>ids.has(id)));}
-function tileEl(t){const isOk=t.color===state?.okey?.color&&t.value===state?.okey?.value&&!t.fake;return `<div class="tile ${selected.has(t.id)?'chosen':''} ${isOk?'joker':''}" role="button" tabindex="0" draggable="false" data-id="${t.id}" title="${t.fake?'Sahte okey':isOk?'Okey':labels[t.color]+' '+t.value}"><span class="tile-top">${isOk?'✦':''}</span><strong style="color:var(--tile-${t.fake?'fake':t.color})">${t.fake?'★':t.value}</strong><span class="tile-bottom" style="color:var(--tile-${t.fake?'fake':t.color})">${t.fake?'★':isOk?'✦':'●'}</span></div>`}
-function smallTile(t){const joker=!t.fake&&state?.okey?.color===t.color&&state?.okey?.value===t.value;return `<span class="mini-tile" style="--c:var(--tile-${t.fake?'fake':t.color})">${t.fake?'★':t.value}${joker?'✦':''}</span>`}
-const myPlayer=()=>state?.players.find(p=>p.seat===state.you);
-const isMyTurn=()=>state?.phase==='playing'&&state?.turn===state.you;
-const hasDrawn=()=>isMyTurn()&&state?.drawn;
-function render(){if(!state){renderHome();return;}renderGame();}
-function renderHome(){app.innerHTML=`<main class="landing"><div class="land-noise"></div><nav class="landing-nav"><a class="logo"><span class="logo-mark">✣</span> 101<span>CLUB</span></a><span class="nav-status"><i></i> ONLINE MULTIPLAYER</span></nav><div class="land-content"><section class="hero"><div class="eyebrow"><span class="small-line"></span> TÜRKİYE'NİN YENİ OKEY MASASI</div><h1>MASADA<br><em>YERİN HAZIR.</em></h1><p>Arkadaşlarını topla. Taşlarını diz. Masaya hükmet. Gerçek zamanlı, 3 boyutlu 101 Okey deneyimi.</p><div class="hero-features"><span>◈ 3D OYUN MASASI</span><span>◈ 4 OYUNCU</span><span>◈ EŞLİ & KATLAMALI</span></div></section><section class="entry-card"><div class="card-mini-title">MASAYA HOŞ GELDİN</div><h2>Oyuna başla <span>✳</span></h2><label>OYUNCU ADIN</label><input id="name" maxlength="20" placeholder="İsmin veya rumuzun" value="${htmlSafe(name)}" autocomplete="nickname"/><div class="config-title">MASA AYARLARI <span>SADECE ODA KURARKEN</span></div><div class="opt-row"><div><b>Katlamalı oyun</b><small>Açılış barajı her seferinde yükselir</small></div><button type="button" id="folding" class="toggle ${folding?'on':''}" role="switch" aria-checked="${folding}"><span></span></button></div><div class="opt-row"><div><b>Eşli oyun</b><small>Karşılıklı oturanlar aynı takım</small></div><button type="button" id="teams" class="toggle ${teams?'on':''}" role="switch" aria-checked="${teams}"><span></span></button></div><div class="opt-row"><div><b>Tek kişilik test modu</b><small>Diğer koltukları 3 bot doldurur · sadece sana özel oda</small></div><button type="button" id="practice" class="toggle ${practice?'on':''}" role="switch" aria-checked="${practice}"><span></span></button></div><div class="opt-row"><div><b>El sayısı</b><small>Maç kaç el sürecek?</small></div><select id="rounds"><option value="3" ${rounds===3?'selected':''}>3 el</option><option value="5" ${rounds===5?'selected':''}>5 el</option><option value="11" ${rounds===11?'selected':''}>11 el</option></select></div><button class="btn btn-gold full" id="create">✣ &nbsp; YENİ MASA KUR</button><div class="or"><span>VEYA</span></div><div class="join-row"><input id="roomcode" placeholder="6 HANELİ ODA KODU" maxlength="6" value="${htmlSafe(roomInput)}"/><button class="btn btn-outline" id="join">KATIL ↗</button></div><div class="card-foot">Ücretsiz • İndirme gerekmez • Oda koduyla davet</div></section></div><footer class="landing-footer">101 CLUB <span>♦</span> ARKADAŞLARINLA GERÇEK MASA HEYECANI</footer></main><div id="toast" class="toast"></div>`;
- document.getElementById('folding').onclick=()=>{folding=!folding;renderHome()};document.getElementById('teams').onclick=()=>{teams=!teams;renderHome()};document.getElementById('practice').onclick=()=>{practice=!practice;renderHome()};
- document.getElementById('rounds').onchange=e=>rounds=Number(e.target.value);
- document.getElementById('name').oninput=e=>name=e.target.value;
- document.getElementById('roomcode').oninput=e=>roomInput=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'');
- document.getElementById('create').onclick=()=>{name=document.getElementById('name').value.trim()||'Oyuncu';rpc('room:create',{name,settings:{folding,teams,rounds,practice}},persist)};
- document.getElementById('join').onclick=()=>{name=document.getElementById('name').value.trim()||'Oyuncu';const c=document.getElementById('roomcode').value.trim().toUpperCase();if(c.length!==6)return toast('6 haneli oda kodu gir.',true);rpc('room:join',{code:c,name},persist)};
-}
-function renderPlayers(){return Array.from({length:4},(_,seat)=>{
- const p=state.players.find(p=>p.seat===seat);const rel=(seat-state.you+4)%4;
- const pos=['bottom','left','top','right'][rel];const team=state.settings.teams?`<span class="team-indicator">TAKIM ${seat%2===state.you%2?'A':'B'}</span>`:'';
- return `<div class="seat seat-${pos} ${state.turn===seat&&state.phase==='playing'?'active':''} ${!p?'empty-seat':''}"><div class="avatar">${p?htmlSafe(p.name[0]?.toUpperCase()||'?'):'+'}</div><div class="seat-details"><b>${p?htmlSafe(p.name):'Boş koltuk'}${p?.bot?' 🤖':''}${state.you===seat?' (Sen)':''}</b><small>${p?`${p.count} taş · ${p.total} puan`:'Bekleniyor...'} ${p&&!p.online?'· Çevrimdışı':''}</small>${team}</div>${state.turn===seat&&state.phase==='playing'?'<span class="turn-dot"></span>':''}</div>`}).join('')}
-function renderStaged(){const e=document.getElementById('staged');if(!e)return;
- e.innerHTML=staged.length?staged.map((g,i)=>`<div class="staged-group"><div class="staged-label">${g.kind==='pair'?'ÇİFT':'PER'} ${i+1}</div>${g.ids.map(id=>state.hand.find(t=>t.id===id)).filter(Boolean).map(smallTile).join('')} <button title="Geri al" data-remove="${i}">×</button></div>`).join(''):`<div class="empty-stage">Taş seçip <b>PER HAZIRLA</b> veya <b>ÇİFT HAZIRLA</b> ile açılışını hazırla.</div>`;
- e.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{staged.splice(Number(b.dataset.remove),1);renderGame()});
-}
-function renderRack(){const e=document.getElementById('rack');if(!e)return;
- const handById=Object.fromEntries(state.hand.map(t=>[t.id,t]));
- e.innerHTML=order.map(id=>handById[id]).filter(Boolean).map(tileEl).join('');
- e.querySelectorAll('.tile').forEach(el=>{
-   el.onclick=()=>{const id=el.dataset.id;if(selected.has(id))selected.delete(id);else selected.add(id);updateSelection()};
-   el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();el.click()}};
-   el.ondragstart=e=>e.preventDefault();
-   el.oncontextmenu=e=>e.preventDefault();
- });
-}
-function updateSelection(){document.querySelectorAll('#rack .tile').forEach(el=>el.classList.toggle('chosen',selected.has(el.dataset.id)));scene3d?.setSelected(selected);
- const n=document.getElementById('selection-count');if(n)n.textContent=selected.size?`${selected.size} TAŞ SEÇİLİ`:'TAŞ SEÇ';
-}
-function moveSelected(delta){
- if(selected.size!==1)return toast('Sıralamak için tek taş seç.',true);
- const id=[...selected][0],i=order.indexOf(id),target=i+delta;
- if(i<0||target<0||target>=order.length)return;
- order.splice(i,1);order.splice(target,0,id);
- renderRack();scene3d?.update(state);
-}
-function sortRack(by){const map=Object.fromEntries(state.hand.map(t=>[t.id,t]));if(by==='color')order.sort((a,b)=>(COLORS.indexOf(map[a].color)-COLORS.indexOf(map[b].color))||(map[a].value-map[b].value));else order.sort((a,b)=>(map[a].value-map[b].value)||(COLORS.indexOf(map[a].color)-COLORS.indexOf(map[b].color)));renderRack();scene3d?.update(state)}
-function picked(){return state.hand.filter(t=>selected.has(t.id));}
-function prepare(kind){if(!isMyTurn()||!state.drawn)return toast('Önce sıranın gelmesini ve taş çekmeyi bekle.',true);
- const all=picked();const v=validateMeld(all,state.okey,kind);if(!v)return toast(kind==='pair'?'İki aynı taş seçerek çift oluştur.':'En az üç taşla geçerli seri/per seç.',true);
- if(staged.length&&staged[0].kind!==kind)return toast('Aynı açılışta per ve çift karıştırılamaz.',true);
- const used=new Set(staged.flatMap(g=>g.ids));if(all.some(t=>used.has(t.id)))return toast('Taş zaten açılışa eklendi.',true);
- staged.push({ids:all.map(t=>t.id),kind,score:v.score});selected.clear();renderGame();toast(`${kind==='pair'?'Çift':'Per'} açılışa eklendi.`)
-}
-function openHand(){if(!staged.length)return toast('Önce per veya çift hazırla.',true);
- const kind=staged[0].kind;rpc('game:open',{kind,groups:staged.map(g=>g.ids)},()=>{staged=[];selected.clear()})}
-function discard(){if(selected.size!==1)return toast('Atmak için 1 taş seç.',true);rpc('game:discard',{id:[...selected][0]},()=>{selected.clear()})}
-function addMeld(kind){const all=picked();if(!all.length)return toast('Önce taş seç.',true);rpc('game:meld',{kind,ids:all.map(t=>t.id)},()=>selected.clear())}
-function layoff(){if(selected.size!==1)return toast('İşlemek için tek taş seç.',true);if(!pickedMeld)return toast('Önce masadaki bir peri seç.',true);rpc('game:layoff',{tileId:[...selected][0],meldId:pickedMeld},()=>{selected.clear();pickedMeld=null})}
-function renderGame(){const me=myPlayer();const lobby=state.phase==='lobby';const end=state.phase==='roundEnd'||state.phase==='finished';const yourTurn=isMyTurn();const stagePts=staged.reduce((s,g)=>s+(g.kind==='pair'?1:g.score),0);const stageKind=staged[0]?.kind;const teamLabel=state.settings.teams?'EŞLİ':'TEKLİ';
- app.innerHTML=`<div class="game"><header class="game-header"><div class="logo"><span class="logo-mark">✣</span> 101<span>CLUB</span></div><div class="header-center"><span class="mode-pill">${state.settings.folding?'KATLAMALI':'KATLAMASIZ'}</span><span class="mode-pill">${teamLabel}</span><span class="mode-pill">${state.settings.rounds} EL</span>${state.settings.practice?'<span class="mode-pill">🤖 TEST</span>':''}</div><div class="header-right"><div class="room-code" id="copy-code" title="Oda kodunu kopyala">ODA <b>${state.code}</b> <span>▣</span></div><span class="round-pill">${lobby?'LOBI':`EL ${state.round}/${state.settings.rounds}`}</span><button class="leave-room-btn" id="new-room" title="Ana menüye dön" aria-label="Ana menüye dön">← <span>ANA MENÜ</span></button><button class="icon-btn" id="help" title="Kurallar">?</button></div></header><div class="game-main"><section class="table-zone"><div id="scene"></div><button id="camera-view" class="camera-view" type="button" title="3D kamera açısını değiştir">◈ 3D KAMERA</button><div class="table-top-caption">${lobby?(state.settings.practice?'BOTLU TEST MASASI':'OYUNCULAR BEKLENİYOR'):end?'EL SONU':yourTurn?'SIRA SENDE':`${htmlSafe(state.players[state.turn]?.name||'')} OYNUYOR`}</div>${renderPlayers()}<div class="table-tip">${htmlSafe(state.lastMove)}</div><div class="table-indicator"><span>GÖSTERGE</span>${state.indicator?smallTile(state.indicator):'<b>—</b>'}</div><div class="table-okey"><span>OKEY</span>${state.okey?smallTile(state.okey):'<b>—</b>'}</div>${lobby?`<div class="lobby-panel"><div class="eyebrow">${state.settings.practice?'SOLO PLAYTEST':'ÖZEL MASA'}</div><h2>${state.settings.practice?'Botlara karşı test et':'Arkadaşlarını davet et'}</h2><p>${state.settings.practice?'Tek başına başlat, 3 bot otomatik katılsın.':'Oda kodunu gönder, diğer 3 kişi katılsın.'}</p><div class="big-code" id="big-copy">${state.code} <span>▣</span></div><div class="lobby-summary"><span>${state.settings.folding?'✓ Katlamalı':'Katlamasız'}</span><span>${state.settings.teams?'✓ Eşli':'Tekli'}</span><span>${state.settings.rounds} el</span></div><div class="player-slots">${[0,1,2,3].map(i=>`<div class="player-slot ${state.players[i]?'filled':''}">${state.players[i]?htmlSafe(state.players[i].name):'Oyuncu bekleniyor'}<span>${state.players[i]?'✓':'◌'}</span></div>`).join('')}</div>${state.you===state.hostSeat?`<button class="btn btn-gold full" id="start" ${!state.settings.practice&&(state.players.length!==4||state.players.some(p=>!p.online))?'disabled':''}>${state.settings.practice?'🤖 3 BOTLA TESTE BAŞLA':state.players.length===4?'✣ OYUNU BAŞLAT':`${state.players.length}/4 OYUNCU · BEKLENİYOR`}</button>`:'<div class="waiting-hint">Oda sahibinin oyunu başlatması bekleniyor.</div>'}<button class="btn btn-outline full lobby-leave" data-leave-room>← ANA MENÜYE DÖN</button></div>`:''}${end?`<div class="result-panel"><div class="eyebrow">EL ${state.round} SONU</div><h2>${state.winner===null?'Taşlar tükendi':state.winner===state.you?'Tebrikler, bitirdin!':`${htmlSafe(state.players.find(p=>p.seat===state.winner)?.name)} bitirdi!`}</h2><div class="results">${(state.lastResult?.changes||[]).map(c=>`<div><span>${htmlSafe(c.name)}</span><b class="${c.delta<0?'positive':''}">${c.delta>0?'+':''}${c.delta}</b><strong>${c.total} toplam</strong></div>`).join('')}</div>${state.settings.teams?`<div class="team-score">TAKIM A: ${state.players.filter(p=>p.seat%2===0).reduce((s,p)=>s+p.total,0)} &nbsp; • &nbsp; TAKIM B: ${state.players.filter(p=>p.seat%2===1).reduce((s,p)=>s+p.total,0)}</div>`:''}${state.phase==='finished'?'<div class="waiting-hint">MAÇ TAMAMLANDI</div>':state.you===state.hostSeat?'<button class="btn btn-gold full" id="next">SONRAKİ EL ↗</button>':'<div class="waiting-hint">Oda sahibi sonraki eli başlatacak.</div>'}</div>`:''}</section><section class="dashboard"><div class="dashboard-section-title">OYUN DURUMU <span class="gold">● CANLI</span></div><div class="scoreboard">${state.players.map(p=>`<div class="score-row ${state.you===p.seat?'mine':''}"><span class="player-chip">${htmlSafe(p.name[0]?.toUpperCase()||'?')}</span><div><b>${htmlSafe(p.name)}</b><small>${p.openedKind?`${p.openValue} ${p.openedKind==='pair'?'çift':'puan'} açtı`:'Açmadı'} ${state.settings.teams?`· TAKIM ${p.seat%2===0?'A':'B'}`:''}</small></div><strong>${p.total}</strong></div>`).join('')}</div><div class="dashboard-section-title">MASA BİLGİSİ</div><div class="stats-grid"><div><small>ORTADAKİ TAŞ</small><strong>${state.stockCount}</strong></div><div><small>EL AÇMA</small><strong>${state.minimumNormal || 101}<span>puan</span></strong></div><div><small>ÇİFT AÇMA</small><strong>${state.minimumPair || 5}<span>çift</span></strong></div><div><small>MASADAKİ PER</small><strong>${state.melds?.length||0}</strong></div></div><div class="dashboard-section-title">MASADAKİ PERLER <span>${state.melds?.length||0}</span></div><div id="meld-list" class="meld-list">${state.melds?.length?state.melds.map((m,i)=>`<button class="meld-item ${pickedMeld===m.id?'is-picked':''}" data-meld="${m.id}"><span class="meld-index">${i+1}</span><span>${m.tiles.map(smallTile).join('')}</span><span class="meld-kind">${m.kind==='pair'?'ÇİFT':m.score}</span></button>`).join(''):'<div class="empty-melds">Henüz masaya per açılmadı.</div>'}</div><div class="dashboard-bottom"><div class="chat-header">MASA SOHBETİ <span>◉</span></div><div class="chat-log" id="chat-log"></div><form class="chat-form" id="chat-form"><input id="chat-input" maxlength="140" placeholder="Bir şeyler yaz..." autocomplete="off"/><button aria-label="Gönder">↗</button></form></div></section></div>${lobby?'':`<section class="rack-zone"><div class="rack-head"><div><b>ISTAKAN</b><span id="selection-count">TAŞ SEÇ</span></div><div class="rack-head-right"><span class="turn-state ${yourTurn?'turn-mine':''}">${yourTurn?'✳ SIRA SENDE':'◌ SIRA BEKLENİYOR'}</span><button class="text-btn" id="move-left" type="button" title="Seçili taşı sola kaydır">← TAŞ</button><button class="text-btn" id="move-right" type="button" title="Seçili taşı sağa kaydır">TAŞ →</button><button class="text-btn" id="toggle-flat-rack" type="button" title="Alternatif 2D ıstaka görünümü">2D ISTAKA</button><button class="text-btn" id="sort-color">RENK SIRALA</button><button class="text-btn" id="sort-num">SAYI SIRALA</button></div></div><div class="rack-surface flat-rack" id="flat-rack" hidden><div id="rack" class="rack"></div></div><div class="rack-3d-hint">◈ 3D masadaki taşlarına sol tıkla · Sağ tık ile sürükleme kapalı</div><div class="staging-bar"><div class="stage-head"><span>HAZIRLANAN PERLER</span>${staged.length?`<span class="gold">${stagePts} ${stageKind==='pair'?'ÇİFT':'PUAN'}</span>`:''}</div><div class="staged" id="staged"></div></div><div class="actions"><div class="actions-left"><button class="btn btn-neutral" id="draw" ${!yourTurn||state.drawn?'disabled':''}>↧ ORTADAN ÇEK</button><button class="btn btn-neutral" id="take" ${!yourTurn||state.drawn||!state.discards.length?'disabled':''}>↟ YANDAN AL</button></div><div class="action-divider"></div><div class="actions-middle"><button class="btn btn-dark" id="prep-normal" ${!hasDrawn()||!!me?.openedKind?'disabled':''}>+ PER HAZIRLA</button><button class="btn btn-dark" id="prep-pair" ${!hasDrawn()||!!me?.openedKind?'disabled':''}>+ ÇİFT HAZIRLA</button><button class="btn btn-gold" id="open" ${!hasDrawn()||!!me?.openedKind||!staged.length?'disabled':''}>✣ EL AÇ</button><button class="btn btn-dark" id="new-meld" ${!hasDrawn()||!me?.openedKind||me?.openedKind==='pair'?'disabled':''}>+ PER KOY</button><button class="btn btn-dark" id="new-pair" ${!hasDrawn()||!me?.openedKind?'disabled':''}>+ ÇİFT KOY</button><button class="btn btn-dark" id="layoff" ${!hasDrawn()||!me?.openedKind?'disabled':''}>↗ İŞLE</button></div><div class="actions-right"><button class="btn btn-red" id="discard" ${!hasDrawn()?'disabled':''}>TAŞ AT ↗</button></div></div></section>`}<div id="toast" class="toast"></div><div id="modal" class="modal hidden"></div></div>`;
- document.getElementById('copy-code').onclick=copyCode;
- document.getElementById('big-copy')?.addEventListener('click',copyCode);
- document.getElementById('help').onclick=showHelp;
- document.getElementById('new-room').onclick=leaveRoom;document.querySelectorAll('[data-leave-room]').forEach(el=>el.addEventListener('click',leaveRoom));
- document.getElementById('start')?.addEventListener('click',()=>rpc('room:start'));
- document.getElementById('next')?.addEventListener('click',()=>rpc('game:next'));
- document.querySelectorAll('[data-meld]').forEach(el=>el.onclick=()=>{pickedMeld=pickedMeld===el.dataset.meld?null:el.dataset.meld;document.querySelectorAll('[data-meld]').forEach(x=>x.classList.toggle('is-picked',x.dataset.meld===pickedMeld));scene3d?.highlightMeld(pickedMeld)});
- document.getElementById('sort-color')?.addEventListener('click',()=>sortRack('color'));
- document.getElementById('sort-num')?.addEventListener('click',()=>sortRack('number'));
- document.getElementById('prep-normal')?.addEventListener('click',()=>prepare('normal'));
- document.getElementById('prep-pair')?.addEventListener('click',()=>prepare('pair'));
- document.getElementById('open')?.addEventListener('click',openHand);
- document.getElementById('new-meld')?.addEventListener('click',()=>addMeld('normal'));
- document.getElementById('layoff')?.addEventListener('click',layoff);
- document.getElementById('new-pair')?.addEventListener('click',()=>addMeld('pair'));
- document.getElementById('draw')?.addEventListener('click',()=>rpc('game:draw',{from:'stock'}));
- document.getElementById('take')?.addEventListener('click',()=>rpc('game:draw',{from:'discard'}));
- document.getElementById('discard')?.addEventListener('click',discard);
- document.getElementById('chat-form').onsubmit=e=>{e.preventDefault();const input=document.getElementById('chat-input');const text=input.value.trim();if(!text)return;socket.emit('chat:send',{text});input.value=''};
- const flat=document.getElementById('flat-rack');
- if(flat)flat.hidden=!flatRackVisible;
- document.getElementById('move-left')?.addEventListener('click',()=>moveSelected(-1));
- document.getElementById('move-right')?.addEventListener('click',()=>moveSelected(1));
- document.querySelector('.rack-zone')?.addEventListener('contextmenu',e=>e.preventDefault());
- document.getElementById('toggle-flat-rack')?.addEventListener('click',()=>{
-  flatRackVisible=!flatRackVisible;
-  const rack=document.getElementById('flat-rack');if(rack)rack.hidden=!flatRackVisible;
- });
- document.getElementById('camera-view')?.addEventListener('click',e=>{
-  if(scene3d){cameraView=(cameraView+1)%3;e.currentTarget.textContent='◈ '+scene3d.setView();}
- });
- renderRack();renderStaged();renderChat();initScene();
-}
-function renderChat(){const el=document.getElementById('chat-log');if(!el)return;el.innerHTML=chat.slice(-18).map(m=>`<div><b>${htmlSafe(m.name)}</b> ${htmlSafe(m.text)}</div>`).join('')||'<span class="chat-placeholder">Henüz mesaj yok. Bir selam ver! 👋</span>';el.scrollTop=el.scrollHeight}
-function copyCode(){navigator.clipboard?.writeText(state.code).then(()=>toast('Oda kodu kopyalandı!')).catch(()=>toast(`Oda kodu: ${state.code}`))}
-function showHelp(){const modal=document.getElementById('modal');modal.classList.remove('hidden');modal.innerHTML=`<div class="modal-bg"></div><div class="help-card"><button id="modal-close">×</button><div class="eyebrow">101 CLUB · REHBER</div><h2>Nasıl oynanır?</h2><p><b>1.</b> Sıran gelince ortadan taş çek veya son atılan taşı al. Oyuna başlayan oyuncuda zaten 22 taş bulunur.</p><p><b>2.</b> Istakadan taşları seçip <b>Per Hazırla</b> ile birden fazla seri/grup hazırla. <b>El Aç</b> diyerek 101 puanı (katlamalıysa barajı) geç.</p><p><b>3.</b> Aynı renk ve sayıdan iki taş seçip <b>Çift Hazırla</b> diyerek en az 5 çiftle de açabilirsin.</p><p><b>4.</b> Açtıktan sonra per koyabilir veya masadaki bir per ile elinden bir taşı seçip <b>İşle</b> diyebilirsin.</p><p><b>5.</b> Sıranı bir taş atarak tamamla. Elinde hiç taş kalmazsa eli kazanırsın. Eşli modda karşıdaki oyuncu takım arkadaşın.</p><p class="help-note">Okey joker taşları göstergenin bir sonraki sayısıdır. Perler 1–13 arası düz sıralanır. Yandan çekilen taşla açılmadan sıra bitirilemez.</p></div>`;modal.querySelector('#modal-close').onclick=()=>modal.classList.add('hidden');modal.querySelector('.modal-bg').onclick=()=>modal.classList.add('hidden')}
-let scene3d=null;
-function initScene(){if(scene3d)scene3d.destroy();try{scene3d=createScene(document.getElementById('scene'));scene3d.update(state);scene3d.setSelected(selected);for(let i=0;i<cameraView;i++)scene3d.setView();const button=document.getElementById('camera-view');if(button)button.textContent='◈ '+['3D KAMERA','ÜSTTEN','YAKINDAN'][cameraView]}catch(err){console.error('3D unavailable',err);scene3d=null;const fallback=document.getElementById('flat-rack');if(fallback)fallback.hidden=false;const cam=document.getElementById('camera-view');if(cam)cam.hidden=true;document.getElementById('scene').innerHTML='<div class="webgl-warning">WebGL kullanılamıyor. 2D yedek ıstaka açıldı.</div>'}}
-function createScene(node){
- return createTable3D(node,{
-  getState:()=>state,
-  getOrder:()=>order,
-  getSelected:()=>selected,
-  onSelect:id=>{if(selected.has(id))selected.delete(id);else selected.add(id);updateSelection();},
-  onDraw:()=>{if(isMyTurn()&&!state.drawn)rpc('game:draw',{from:'stock'});},
-  onTake:()=>{if(isMyTurn()&&!state.drawn)rpc('game:draw',{from:'discard'});},
-  onMeld:id=>{
-   pickedMeld=pickedMeld===id?null:id;
-   document.querySelectorAll('[data-meld]').forEach(x=>x.classList.toggle('is-picked',x.dataset.meld===pickedMeld));
-   scene3d?.highlightMeld(pickedMeld);
+import { io } from 'socket.io-client';
+import {
+  autoArrangePairs,
+  autoArrangeRuns,
+  findBestOpening,
+  findPairsInHand,
+  validateGroup,
+  validatePair
+} from '../shared/melds.js';
+import { COLOR_LABELS, formatTileLabel, isOkeyTile } from '../shared/tiles.js';
+import { LocalSingleplayerClient } from './client/localSession.js';
+import { OkeyTable3D } from './client/scene3d.js';
+import { soundFX } from './client/sound.js';
+
+function getOrCreatePlayerId() {
+  let id = localStorage.getItem('yuzbir_player_id');
+  if (!id) {
+    id = `p-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+    localStorage.setItem('yuzbir_player_id', id);
   }
- });
+  return id;
 }
 
-render();
+const playerId = getOrCreatePlayerId();
+const savedName = localStorage.getItem('yuzbir_player_name') || '';
+
+const els = {
+  canvas: document.getElementById('table-canvas'),
+  wordmark: document.querySelector('.wordmark'),
+  connBadge: document.getElementById('connection-badge'),
+  roomPill: document.getElementById('room-pill'),
+  cameraGroup: document.getElementById('camera-group'),
+  btnSound: document.getElementById('btn-sound'),
+  btnRules: document.getElementById('btn-rules'),
+  btnLeave: document.getElementById('btn-leave'),
+
+  viewLobby: document.getElementById('view-lobby'),
+  viewWaiting: document.getElementById('view-waiting'),
+  viewGame: document.getElementById('view-game'),
+
+  playerName: document.getElementById('player-name'),
+  playerNameHelp: document.getElementById('player-name-help'),
+  roomName: document.getElementById('room-name'),
+  optKatlamali: document.getElementById('opt-katlamali'),
+  optIslek: document.getElementById('opt-islek'),
+  optTimer: document.getElementById('opt-timer'),
+  btnQuickPlay: document.getElementById('btn-quick-play'),
+  btnSingleplayer: document.getElementById('btn-singleplayer'),
+  btnCreateRoom: document.getElementById('btn-create-room'),
+
+  joinCodeForm: document.getElementById('join-code-form'),
+  joinCode: document.getElementById('join-code'),
+  joinHelp: document.getElementById('join-help'),
+
+  btnRefreshRooms: document.getElementById('btn-refresh-rooms'),
+  btnRetryRooms: document.getElementById('btn-retry-rooms'),
+  roomsLoading: document.getElementById('rooms-loading'),
+  roomsError: document.getElementById('rooms-error'),
+  roomsEmpty: document.getElementById('rooms-empty'),
+  roomsTableWrap: document.getElementById('rooms-table-wrap'),
+  roomsTbody: document.getElementById('rooms-tbody'),
+
+  waitRoomTitle: document.getElementById('wait-room-title'),
+  waitRoomCode: document.getElementById('wait-room-code'),
+  btnCopyCode: document.getElementById('btn-copy-code'),
+  waitSeatsGrid: document.getElementById('wait-seats-grid'),
+  waitHostControls: document.getElementById('wait-host-controls'),
+  waitKatlamali: document.getElementById('wait-katlamali'),
+  waitIslek: document.getElementById('wait-islek'),
+  waitTimer: document.getElementById('wait-timer'),
+  waitStatusMsg: document.getElementById('wait-status-msg'),
+  btnStartMatch: document.getElementById('btn-start-match'),
+
+  hudRound: document.getElementById('hud-round'),
+  hudDeck: document.getElementById('hud-deck'),
+  hudOkey: document.getElementById('hud-okey'),
+  hudThreshold: document.getElementById('hud-threshold'),
+  hudTimer: document.getElementById('hud-timer'),
+  hudTurnText: document.getElementById('hud-turn-text'),
+
+  stagingBar: document.getElementById('staging-bar'),
+  stagingGroups: document.getElementById('staging-groups'),
+  stagingTotal: document.getElementById('staging-total'),
+  btnCommitOpen: document.getElementById('btn-commit-open'),
+  btnClearStage: document.getElementById('btn-clear-stage'),
+
+  btnSortRuns: document.getElementById('btn-sort-runs'),
+  btnSortPairs: document.getElementById('btn-sort-pairs'),
+  btnAutoStage: document.getElementById('btn-auto-stage'),
+  btnClearSel: document.getElementById('btn-clear-sel'),
+  selectionHint: document.getElementById('selection-hint'),
+
+  btnDrawDeck: document.getElementById('btn-draw-deck'),
+  btnDrawDiscard: document.getElementById('btn-draw-discard'),
+  btnReturnDiscard: document.getElementById('btn-return-discard'),
+  btnStageGroup: document.getElementById('btn-stage-group'),
+  btnLayMeld: document.getElementById('btn-lay-meld'),
+  btnDiscardTile: document.getElementById('btn-discard-tile'),
+
+  dialogRules: document.getElementById('dialog-rules'),
+  dialogRound: document.getElementById('dialog-round'),
+  roundDialogTitle: document.getElementById('round-dialog-title'),
+  roundDialogMsg: document.getElementById('round-dialog-msg'),
+  roundTbody: document.getElementById('round-tbody'),
+  btnNextRound: document.getElementById('btn-next-round'),
+  roundWaitHost: document.getElementById('round-wait-host'),
+
+  dialogSecret: document.getElementById('dialog-secret'),
+  secretLockView: document.getElementById('secret-lock-view'),
+  secretPinInput: document.getElementById('secret-pin-input'),
+  secretPinHelp: document.getElementById('secret-pin-help'),
+  secretPanelView: document.getElementById('secret-panel-view'),
+  secretMyTile: document.getElementById('secret-my-tile'),
+  btnSecretOkey: document.getElementById('btn-secret-okey'),
+  btnSecretRefresh: document.getElementById('btn-secret-refresh'),
+  secretStatus: document.getElementById('secret-status'),
+  secretSources: document.getElementById('secret-sources')
+};
+
+els.playerName.value = savedName;
+const urlRoom = new URLSearchParams(window.location.search).get('room');
+if (urlRoom) {
+  els.joinCode.value = urlRoom.toUpperCase().slice(0, 6);
+}
+
+let currentRoom = null;
+let localClient = null;
+let secretUnlocked = false;
+let stagedGroups = []; // [{ id, mode: 'series'|'pairs', tiles, points }]
+let lastEventIdSeen = 0;
+let lastRoundModalNumber = 0;
+let bannerNotice = '';
+let noticeTimer = null;
+
+const socket = io({
+  auth: { playerId }
+});
+
+function sendGameAction(event, data, ack) {
+  if (localClient) {
+    localClient.action(event, data, ack);
+  } else {
+    socket.emit(event, data, ack);
+  }
+}
+
+const scene3d = new OkeyTable3D(els.canvas, {
+  onDrawDeck: () => handleDrawDeck(),
+  onDrawDiscard: () => handleDrawDiscard(),
+  onDiscardTile: (tileId) => handleDiscardTile(tileId),
+  onLayoffTile: (tileId, meldId) => handleLayoffTile(tileId, meldId),
+  onSelectionChange: () => updateGameControls(),
+  onRackReorder: () => soundFX.playTileClack(1.15)
+});
+
+function showNotice(text, duration = 3500) {
+  bannerNotice = text;
+  updateTurnBanner();
+  if (noticeTimer) clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => {
+    bannerNotice = '';
+    updateTurnBanner();
+  }, duration);
+}
+
+function setConnectionState(kind, label) {
+  els.connBadge.textContent = label;
+  els.connBadge.classList.remove('pill--ok', 'pill--warn');
+  if (kind === 'ok') els.connBadge.classList.add('pill--ok');
+  if (kind === 'warn') els.connBadge.classList.add('pill--warn');
+}
+
+function setRoomsRegionState(mode, rooms = []) {
+  els.roomsLoading.hidden = mode !== 'loading';
+  els.roomsError.hidden = mode !== 'error';
+  els.roomsEmpty.hidden = mode !== 'empty';
+  els.roomsTableWrap.hidden = mode !== 'full';
+
+  if (mode === 'full') {
+    els.roomsTbody.innerHTML = '';
+    for (const r of rooms) {
+      const tr = document.createElement('tr');
+      const ruleText = r.options?.katlamali ? 'Katlamalı' : 'Klasik 101';
+      const statusText = r.status === 'playing' ? 'Oyunda' : 'Bekliyor';
+
+      const tdName = document.createElement('td');
+      tdName.textContent = `${r.name} (${statusText})`;
+
+      const tdCode = document.createElement('td');
+      tdCode.className = 'num';
+      tdCode.textContent = r.code;
+
+      const tdRule = document.createElement('td');
+      tdRule.textContent = ruleText;
+
+      const tdCount = document.createElement('td');
+      tdCount.className = 'num';
+      tdCount.textContent = `${r.humanCount} / 4`;
+
+      const tdAct = document.createElement('td');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn--sm';
+      btn.textContent = 'Katıl';
+      btn.disabled = r.openSeats === 0 && r.status === 'playing';
+      btn.addEventListener('click', () => joinRoomByCode(r.code));
+      tdAct.appendChild(btn);
+
+      tr.append(tdName, tdCode, tdRule, tdCount, tdAct);
+      els.roomsTbody.appendChild(tr);
+    }
+  }
+}
+
+function validatePlayerName() {
+  const val = els.playerName.value.trim();
+  if (!val) {
+    els.playerName.setAttribute('aria-invalid', 'true');
+    els.playerName.setAttribute('aria-describedby', 'player-name-help');
+    els.playerNameHelp.textContent = 'Masaya oturmak için bir oyuncu adı yazın.';
+    els.playerName.focus();
+    return null;
+  }
+  els.playerName.removeAttribute('aria-invalid');
+  els.playerNameHelp.textContent = '';
+  localStorage.setItem('yuzbir_player_name', val);
+  return val;
+}
+
+function startSingleplayer() {
+  const rawName = els.playerName.value.trim();
+  const name = rawName || 'Oyuncu';
+  if (rawName) {
+    els.playerName.removeAttribute('aria-invalid');
+    els.playerNameHelp.textContent = '';
+    localStorage.setItem('yuzbir_player_name', rawName);
+  }
+
+  if (localClient) {
+    localClient.destroy();
+    localClient = null;
+  }
+
+  lastEventIdSeen = 0;
+  lastRoundModalNumber = 0;
+  stagedGroups = [];
+
+  localClient = new LocalSingleplayerClient({
+    playerName: name,
+    options: {
+      katlamali: els.optKatlamali.checked,
+      islekPenalty: els.optIslek.checked,
+      turnSeconds: Number(els.optTimer.value)
+    },
+    onState: (room) => {
+      switchView(room);
+    }
+  });
+  localClient.emitRoomState();
+}
+
+function createRoom(quickStart) {
+  const name = validatePlayerName();
+  if (!name) return;
+
+  const btn = quickStart ? els.btnQuickPlay : els.btnCreateRoom;
+  btn.setAttribute('aria-busy', 'true');
+  btn.disabled = true;
+
+  socket.emit(
+    'room:create',
+    {
+      playerName: name,
+      roomName: els.roomName.value.trim(),
+      quickStart,
+      options: {
+        katlamali: els.optKatlamali.checked,
+        islekPenalty: els.optIslek.checked,
+        turnSeconds: Number(els.optTimer.value)
+      }
+    },
+    (res) => {
+      btn.removeAttribute('aria-busy');
+      btn.disabled = false;
+      if (!res?.ok) {
+        els.playerNameHelp.textContent = res?.error || 'Oda kurulamadı.';
+      }
+    }
+  );
+}
+
+function joinRoomByCode(code) {
+  const name = validatePlayerName();
+  if (!name) return;
+
+  const clean = String(code || '').trim().toUpperCase();
+  if (!clean) {
+    els.joinCode.setAttribute('aria-invalid', 'true');
+    els.joinCode.setAttribute('aria-describedby', 'join-help');
+    els.joinHelp.textContent = 'Katılmak için 4 haneli oda kodunu yazın.';
+    els.joinCode.focus();
+    return;
+  }
+
+  els.joinCode.removeAttribute('aria-invalid');
+  els.joinHelp.textContent = '';
+
+  socket.emit('room:join', { roomCode: clean, playerName: name }, (res) => {
+    if (!res?.ok) {
+      els.joinCode.setAttribute('aria-invalid', 'true');
+      els.joinHelp.textContent = res?.error || 'Odaya katılınamadı.';
+    }
+  });
+}
+
+function refreshRooms() {
+  setRoomsRegionState('loading');
+  socket.emit('rooms:get', (res) => {
+    if (!res?.ok) {
+      setRoomsRegionState('error');
+      return;
+    }
+    if (!res.rooms || res.rooms.length === 0) {
+      setRoomsRegionState('empty');
+    } else {
+      setRoomsRegionState('full', res.rooms);
+    }
+  });
+}
+
+function switchView(room) {
+  currentRoom = room;
+  if (!room) {
+    els.viewLobby.hidden = false;
+    els.viewWaiting.hidden = true;
+    els.viewGame.hidden = true;
+    els.btnLeave.hidden = true;
+    els.roomPill.hidden = true;
+    els.cameraGroup.hidden = true;
+    stagedGroups = [];
+    lastRoundModalNumber = 0;
+    if (els.dialogRound.open) els.dialogRound.close();
+    if (els.dialogSecret.open) els.dialogSecret.close();
+    scene3d.renderGameState(null);
+    return;
+  }
+
+  els.btnLeave.hidden = false;
+  els.roomPill.hidden = false;
+  els.roomPill.textContent = room.isLocal ? 'Tek Kişilik (Yerel)' : `Oda ${room.code}`;
+
+  if (room.status === 'waiting') {
+    els.viewLobby.hidden = true;
+    els.viewWaiting.hidden = false;
+    els.viewGame.hidden = true;
+    els.cameraGroup.hidden = true;
+    renderWaitingRoom(room);
+    scene3d.renderGameState(null);
+  } else {
+    els.viewLobby.hidden = true;
+    els.viewWaiting.hidden = true;
+    els.viewGame.hidden = false;
+    els.cameraGroup.hidden = false;
+    renderGameRoom(room);
+  }
+}
+
+function renderWaitingRoom(room) {
+  els.waitRoomTitle.textContent = room.name;
+  els.waitRoomCode.textContent = room.code;
+  els.waitHostControls.hidden = !room.isHost;
+  els.btnStartMatch.hidden = !room.isHost;
+
+  els.waitKatlamali.checked = Boolean(room.options.katlamali);
+  els.waitIslek.checked = Boolean(room.options.islekPenalty);
+  els.waitTimer.value = String(room.options.turnSeconds || 60);
+
+  els.waitSeatsGrid.innerHTML = '';
+  const seatLabels = ['Güney', 'Doğu', 'Kuzey', 'Batı'];
+
+  room.seats.forEach((seat) => {
+    const card = document.createElement('div');
+    card.className = 'wait-seat';
+
+    const info = document.createElement('div');
+    info.className = 'wait-seat__info';
+
+    const title = document.createElement('strong');
+    title.textContent =
+      seat.type === 'empty' ? `${seatLabels[seat.seatIndex]} koltuğu boş` : seat.name;
+
+    const role = document.createElement('span');
+    role.className = 'wait-seat__role';
+    role.textContent =
+      seat.type === 'human'
+        ? 'Gerçek oyuncu'
+        : seat.type === 'bot'
+          ? 'Yapay zekâ bot'
+          : 'Oyun başlayınca bot atanabilir';
+
+    info.append(title, role);
+    card.appendChild(info);
+
+    if (room.isHost && seat.type !== 'human') {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn--quiet btn--sm';
+      btn.textContent = seat.type === 'bot' ? 'Botu Çıkar' : 'Bot Ekle';
+      btn.addEventListener('click', () => {
+        socket.emit('room:toggleBot', { seatIndex: seat.seatIndex }, (res) => {
+          if (!res?.ok) els.waitStatusMsg.textContent = res?.error || 'Koltuk güncellenemedi.';
+        });
+      });
+      card.appendChild(btn);
+    }
+
+    els.waitSeatsGrid.appendChild(card);
+  });
+}
+
+function renderGameRoom(room) {
+  const game = room.game;
+  if (!game) return;
+
+  // Handle sound effects for newly seen event
+  if (game.lastEvent && game.lastEvent.id > lastEventIdSeen) {
+    lastEventIdSeen = game.lastEvent.id;
+    const ev = game.lastEvent;
+    if (ev.type === 'open_hand' || ev.type === 'round_over') {
+      soundFX.playMeldChime();
+    } else if (['draw_deck', 'draw_discard', 'discard', 'lay_meld', 'layoff'].includes(ev.type)) {
+      soundFX.playTileClack(ev.type === 'discard' ? 0.92 : 1.08);
+    }
+    if (els.dialogSecret.open && !els.secretPanelView.hidden) {
+      sendGameAction('admin:snapshot', {}, (res) => {
+        if (res?.ok && res.snapshot) renderSecretSnapshot(res.snapshot);
+      });
+    }
+  }
+
+  scene3d.renderGameState(game);
+
+  els.hudRound.textContent = String(game.roundNumber);
+  els.hudDeck.textContent = String(game.deckCount);
+  els.hudThreshold.textContent = String(game.openThreshold);
+
+  if (game.okeyTarget) {
+    const colorName = COLOR_LABELS[game.okeyTarget.color] || game.okeyTarget.color;
+    els.hudOkey.textContent = `${colorName} ${game.okeyTarget.number}`;
+    els.hudOkey.className = `okey-chip okey-chip--${game.okeyTarget.color}`;
+  }
+
+  const viewerIdx = game.viewerSeatIndex;
+  for (let rel = 0; rel < 4; rel += 1) {
+    const seatIdx = (viewerIdx + rel) % 4;
+    const seat = game.seats[seatIdx];
+    const card = document.getElementById(`seat-card-${rel}`);
+    if (!card || !seat) continue;
+
+    card.classList.toggle(
+      'is-active',
+      game.phase === 'playing' && game.currentSeat === seatIdx
+    );
+    card.querySelector('.seat-name').textContent =
+      rel === 0 ? `${seat.name} (Siz)` : seat.name;
+    card.querySelector('.seat-score').textContent = `${seat.totalScore} p`;
+    card.querySelector('.seat-tiles').textContent = `${seat.tileCount} taş`;
+
+    const tag = card.querySelector('.seat-open-tag');
+    if (seat.opened) {
+      tag.classList.add('is-opened');
+      tag.textContent = seat.openMode === 'pairs' ? 'Çift açık' : `${seat.openedPoints} açık`;
+    } else {
+      tag.classList.remove('is-opened');
+      tag.textContent = 'Açmadı';
+    }
+  }
+
+  // Filter staged groups to only keep tiles still in hand
+  const handIds = new Set((game.seats[viewerIdx]?.hand || []).map((t) => t.id));
+  stagedGroups = stagedGroups.filter((g) => g.tiles.every((t) => handIds.has(t.id)));
+  if (game.seats[viewerIdx]?.opened) {
+    stagedGroups = [];
+  }
+
+  updateTurnBanner();
+  updateGameControls();
+
+  // Round over modal
+  if (game.phase === 'roundOver' && game.roundSummary && game.roundNumber !== lastRoundModalNumber) {
+    lastRoundModalNumber = game.roundNumber;
+    openRoundSummaryDialog(room, game.roundSummary);
+  } else if (game.phase === 'playing' && els.dialogRound.open) {
+    els.dialogRound.close();
+  }
+}
+
+function updateTurnBanner() {
+  const game = currentRoom?.game;
+  if (!game) return;
+
+  if (bannerNotice) {
+    els.hudTurnText.textContent = bannerNotice;
+    return;
+  }
+
+  if (game.phase === 'roundOver') {
+    els.hudTurnText.textContent = game.roundSummary?.message || 'El tamamlandı.';
+    return;
+  }
+
+  const activeSeat = game.seats[game.currentSeat];
+  const isMe = game.currentSeat === game.viewerSeatIndex;
+  if (isMe) {
+    if (game.turnPhase === 'draw') {
+      els.hudTurnText.textContent = 'Sıra sizde: ortadan taş çekin veya solunuzdaki taşı alın.';
+    } else if (game.pickedDiscardTileId) {
+      els.hudTurnText.textContent = 'Yandan aldığınız taşı açtığınız perlerde kullanın veya geri koyun.';
+    } else {
+      els.hudTurnText.textContent = 'Sıra sizde: taş açın, işleyin veya sağ kenara 1 taş atın.';
+    }
+  } else {
+    els.hudTurnText.textContent = `${activeSeat?.name || 'Oyuncu'} hamle yapıyor.`;
+  }
+}
+
+function updateGameControls() {
+  const game = currentRoom?.game;
+  if (!game) return;
+
+  const viewerIdx = game.viewerSeatIndex;
+  const mySeat = game.seats[viewerIdx];
+  const isMyTurn = game.phase === 'playing' && game.currentSeat === viewerIdx;
+  const isDrawPhase = isMyTurn && game.turnPhase === 'draw';
+  const isPlayPhase = isMyTurn && game.turnPhase === 'play';
+
+  const leftSeatIdx = (viewerIdx + 3) % 4;
+  const leftTopTile = game.discardPiles[leftSeatIdx]?.topTile;
+
+  els.btnDrawDeck.hidden = !isDrawPhase;
+  els.btnDrawDiscard.hidden = !(isDrawPhase && leftTopTile);
+  if (leftTopTile) {
+    els.btnDrawDiscard.textContent = `Yandan Al (${formatTileLabel(leftTopTile)})`;
+  }
+
+  els.btnReturnDiscard.hidden = !(
+    isPlayPhase &&
+    game.pickedDiscardTileId &&
+    !game.committedMeldThisTurn
+  );
+
+  const selected = scene3d.getSelectedTiles();
+  els.btnClearSel.hidden = selected.length === 0;
+
+  // Evaluate selected tiles
+  let selectionMsg = '';
+  let validGroup = null;
+  let validPair = null;
+
+  if (selected.length > 0) {
+    if (selected.length === 1) {
+      selectionMsg = `1 taş seçili (${formatTileLabel(selected[0])})`;
+      if (isPlayPhase && mySeat?.opened) {
+        selectionMsg += ' · Masadaki yeşil gruplara tıklayıp işleyebilirsiniz';
+      }
+    } else if (selected.length === 2) {
+      validPair = validatePair(selected, game.okeyTarget);
+      selectionMsg = validPair.valid
+        ? `Geçerli çift (${validPair.points} sayı)`
+        : `${selected.length} taş seçili`;
+    } else {
+      validGroup = validateGroup(selected, game.okeyTarget);
+      selectionMsg = validGroup.valid
+        ? `Geçerli ${validGroup.type === 'run' ? 'seri' : 'per'} (${validGroup.points} sayı)`
+        : validGroup.reason;
+    }
+  }
+  els.selectionHint.textContent = selectionMsg;
+
+  // Stage / Lay / Discard buttons
+  const canStage =
+    !mySeat?.opened &&
+    ((validGroup && validGroup.valid) || (validPair && validPair.valid));
+
+  els.btnStageGroup.hidden = !canStage;
+  els.btnLayMeld.hidden = !(
+    isPlayPhase &&
+    mySeat?.opened &&
+    ((validGroup && validGroup.valid) || (mySeat.openMode === 'pairs' && validPair?.valid))
+  );
+  els.btnDiscardTile.hidden = !(isPlayPhase && selected.length === 1);
+
+  renderStagingBar(game, mySeat, isPlayPhase);
+}
+
+function renderStagingBar(game, mySeat, isPlayPhase) {
+  if (mySeat?.opened || stagedGroups.length === 0) {
+    els.stagingBar.hidden = true;
+    return;
+  }
+
+  els.stagingBar.hidden = false;
+  els.stagingGroups.innerHTML = '';
+
+  let totalPoints = 0;
+  let pairsCount = 0;
+  const allPairs = stagedGroups.every((g) => g.mode === 'pairs');
+
+  stagedGroups.forEach((g) => {
+    totalPoints += g.points;
+    if (g.mode === 'pairs') pairsCount += 1;
+
+    const chip = document.createElement('span');
+    chip.className = 'staged-chip';
+    const label = g.tiles.map((t) => formatTileLabel(t)).join(', ');
+    const text = document.createElement('span');
+    text.textContent = `${label} (${g.points})`;
+
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.setAttribute('aria-label', 'Grubu çıkar');
+    rm.textContent = '×';
+    rm.addEventListener('click', () => {
+      stagedGroups = stagedGroups.filter((item) => item.id !== g.id);
+      updateGameControls();
+    });
+
+    chip.append(text, rm);
+    els.stagingGroups.appendChild(chip);
+  });
+
+  if (allPairs) {
+    els.stagingTotal.textContent = `Çift: ${pairsCount} / 5`;
+    els.btnCommitOpen.disabled = !(isPlayPhase && pairsCount >= 5);
+  } else {
+    els.stagingTotal.textContent = `Toplam: ${totalPoints} / ${game.openThreshold}`;
+    els.btnCommitOpen.disabled = !(isPlayPhase && totalPoints >= game.openThreshold);
+  }
+}
+
+function openRoundSummaryDialog(room, summary) {
+  els.roundDialogTitle.textContent = `${summary.roundNumber}. El Sonucu`;
+  els.roundDialogMsg.textContent = summary.message || '';
+  els.roundTbody.innerHTML = '';
+
+  summary.rows.forEach((row) => {
+    const tr = document.createElement('tr');
+    const tdName = document.createElement('td');
+    tdName.textContent = row.isWinner ? `${row.name} (Kazandı)` : row.name;
+
+    const tdOpen = document.createElement('td');
+    tdOpen.textContent = row.opened ? 'Açtı' : 'Açmadı';
+
+    const tdHand = document.createElement('td');
+    tdHand.className = 'num';
+    tdHand.textContent = String(row.handValue);
+
+    const tdPen = document.createElement('td');
+    tdPen.className = 'num';
+    tdPen.textContent = String(row.penalties);
+
+    const tdDelta = document.createElement('td');
+    tdDelta.className = 'num';
+    tdDelta.textContent = row.roundDelta > 0 ? `+${row.roundDelta}` : String(row.roundDelta);
+
+    const tdTot = document.createElement('td');
+    tdTot.className = 'num';
+    tdTot.textContent = String(row.totalScore);
+
+    tr.append(tdName, tdOpen, tdHand, tdPen, tdDelta, tdTot);
+    els.roundTbody.appendChild(tr);
+  });
+
+  els.btnNextRound.hidden = !room.isHost;
+  els.roundWaitHost.hidden = room.isHost;
+  if (!els.dialogRound.open) {
+    els.dialogRound.showModal();
+  }
+}
+
+// Game actions
+function handleDrawDeck() {
+  sendGameAction('game:drawDeck', {}, (res) => {
+    if (!res?.ok && res?.error) showNotice(res.error);
+  });
+}
+
+function handleDrawDiscard() {
+  sendGameAction('game:drawDiscard', {}, (res) => {
+    if (!res?.ok && res?.error) showNotice(res.error);
+  });
+}
+
+function handleDiscardTile(tileId) {
+  sendGameAction('game:discard', { tileId }, (res) => {
+    if (!res?.ok && res?.error) {
+      showNotice(res.error);
+    } else {
+      scene3d.clearSelection();
+    }
+  });
+}
+
+function handleLayoffTile(tileId, meldId) {
+  sendGameAction('game:layoffTile', { tileId, meldId }, (res) => {
+    if (!res?.ok && res?.error) {
+      showNotice(res.error);
+    } else {
+      scene3d.clearSelection();
+    }
+  });
+}
+
+// Button Event Wiring
+els.btnQuickPlay.addEventListener('click', () => createRoom(true));
+els.btnSingleplayer?.addEventListener('click', startSingleplayer);
+els.btnCreateRoom.addEventListener('click', () => createRoom(false));
+
+els.joinCodeForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  joinRoomByCode(els.joinCode.value);
+});
+
+els.btnRefreshRooms.addEventListener('click', refreshRooms);
+els.btnRetryRooms.addEventListener('click', refreshRooms);
+
+els.btnLeave.addEventListener('click', () => {
+  if (localClient) {
+    localClient.destroy();
+    localClient = null;
+    switchView(null);
+    return;
+  }
+  socket.emit('room:leave', {}, () => {
+    switchView(null);
+    refreshRooms();
+  });
+});
+
+els.btnCopyCode.addEventListener('click', async () => {
+  if (!currentRoom) return;
+  const inviteUrl = `${window.location.origin}/?room=${currentRoom.code}`;
+  try {
+    await navigator.clipboard.writeText(inviteUrl);
+    els.waitStatusMsg.textContent = `Davet linki panoya kopyalandı: ${inviteUrl}`;
+  } catch {
+    els.waitStatusMsg.textContent = `Oda kodu: ${currentRoom.code}`;
+  }
+});
+
+function syncHostOptions() {
+  socket.emit('room:options', {
+    katlamali: els.waitKatlamali.checked,
+    islekPenalty: els.waitIslek.checked,
+    turnSeconds: Number(els.waitTimer.value)
+  });
+}
+
+els.waitKatlamali.addEventListener('change', syncHostOptions);
+els.waitIslek.addEventListener('change', syncHostOptions);
+els.waitTimer.addEventListener('change', syncHostOptions);
+
+els.btnStartMatch.addEventListener('click', () => {
+  socket.emit('room:start', {}, (res) => {
+    if (!res?.ok) els.waitStatusMsg.textContent = res?.error || 'Oyun başlatılamadı.';
+  });
+});
+
+els.btnNextRound.addEventListener('click', () => {
+  sendGameAction('game:nextRound', {}, (res) => {
+    if (!res?.ok) showNotice(res?.error || 'Yeni el başlatılamadı.');
+  });
+});
+
+els.btnDrawDeck.addEventListener('click', handleDrawDeck);
+els.btnDrawDiscard.addEventListener('click', handleDrawDiscard);
+els.btnReturnDiscard.addEventListener('click', () => {
+  sendGameAction('game:returnDiscard', {}, (res) => {
+    if (!res?.ok && res?.error) showNotice(res.error);
+  });
+});
+
+els.btnClearSel.addEventListener('click', () => {
+  scene3d.clearSelection();
+  updateGameControls();
+});
+
+els.btnSortRuns.addEventListener('click', () => {
+  const game = currentRoom?.game;
+  const hand = game?.seats[game.viewerSeatIndex]?.hand;
+  if (!hand) return;
+  const arranged = autoArrangeRuns(hand, game.okeyTarget);
+  scene3d.arrangeHandOrder(arranged);
+  soundFX.playTileClack(1.1);
+});
+
+els.btnSortPairs.addEventListener('click', () => {
+  const game = currentRoom?.game;
+  const hand = game?.seats[game.viewerSeatIndex]?.hand;
+  if (!hand) return;
+  const arranged = autoArrangePairs(hand, game.okeyTarget);
+  scene3d.arrangeHandOrder(arranged);
+  soundFX.playTileClack(1.1);
+});
+
+els.btnAutoStage.addEventListener('click', () => {
+  const game = currentRoom?.game;
+  const mySeat = game?.seats[game.viewerSeatIndex];
+  if (!game || !mySeat || mySeat.opened) {
+    showNotice('Eliniz açıkken yeni grubu seçip Grubu İndir düğmesini kullanın.');
+    return;
+  }
+
+  const best = findBestOpening(mySeat.hand, game.okeyTarget, game.openThreshold);
+  if (best.groups.length > 0) {
+    stagedGroups = best.groups.map((g, idx) => ({
+      id: `auto-${Date.now()}-${idx}`,
+      mode: 'series',
+      tiles: g.slots.map((s) => s.tile),
+      points: g.points
+    }));
+    scene3d.clearSelection();
+    updateGameControls();
+    if (!best.canOpen) {
+      showNotice(`Bulunan en yüksek toplam ${best.totalPoints} sayı (açılış için ${game.openThreshold} gerekir).`);
+    }
+  } else {
+    const pairs = findPairsInHand(mySeat.hand, game.okeyTarget);
+    if (pairs.length >= 5) {
+      stagedGroups = pairs.map((pair, idx) => ({
+        id: `pair-${Date.now()}-${idx}`,
+        mode: 'pairs',
+        tiles: pair,
+        points: validatePair(pair, game.okeyTarget).points
+      }));
+      scene3d.clearSelection();
+      updateGameControls();
+    } else {
+      showNotice('Istakada otomatik grup bulunamadı.');
+    }
+  }
+});
+
+els.btnStageGroup.addEventListener('click', () => {
+  const game = currentRoom?.game;
+  if (!game) return;
+  const selected = scene3d.getSelectedTiles();
+  const stagedIds = new Set(stagedGroups.flatMap((g) => g.tiles.map((t) => t.id)));
+
+  if (selected.some((t) => stagedIds.has(t.id))) {
+    showNotice('Seçili taşlardan biri zaten hazırlık grubunda.');
+    return;
+  }
+
+  if (selected.length === 2) {
+    const pair = validatePair(selected, game.okeyTarget);
+    if (pair.valid) {
+      stagedGroups.push({
+        id: `st-${Date.now()}`,
+        mode: 'pairs',
+        tiles: [...selected],
+        points: pair.points
+      });
+      scene3d.clearSelection();
+      updateGameControls();
+      return;
+    }
+  }
+
+  const group = validateGroup(selected, game.okeyTarget);
+  if (!group.valid) {
+    showNotice(group.reason);
+    return;
+  }
+
+  // Switching between pairs and series clears incompatible mode
+  if (stagedGroups.some((g) => g.mode === 'pairs')) {
+    stagedGroups = [];
+  }
+
+  stagedGroups.push({
+    id: `st-${Date.now()}`,
+    mode: 'series',
+    tiles: group.slots.map((s) => s.tile),
+    points: group.points
+  });
+  scene3d.clearSelection();
+  updateGameControls();
+});
+
+els.btnClearStage.addEventListener('click', () => {
+  stagedGroups = [];
+  updateGameControls();
+});
+
+els.btnCommitOpen.addEventListener('click', () => {
+  if (stagedGroups.length === 0) return;
+  const mode = stagedGroups.every((g) => g.mode === 'pairs') ? 'pairs' : 'series';
+  const groups = stagedGroups.map((g) => g.tiles.map((t) => t.id));
+  sendGameAction('game:openHand', { groups, mode }, (res) => {
+    if (!res?.ok) {
+      showNotice(res?.error || 'El açılamadı.');
+    } else {
+      stagedGroups = [];
+      scene3d.clearSelection();
+    }
+  });
+});
+
+els.btnLayMeld.addEventListener('click', () => {
+  const selected = scene3d.getSelectedTiles();
+  if (selected.length < 2) return;
+  sendGameAction('game:layMeld', { tileIds: selected.map((t) => t.id) }, (res) => {
+    if (!res?.ok) {
+      showNotice(res?.error || 'Grup indirilemedi.');
+    } else {
+      scene3d.clearSelection();
+    }
+  });
+});
+
+els.btnDiscardTile.addEventListener('click', () => {
+  const selected = scene3d.getSelectedTiles();
+  if (selected.length === 1) {
+    handleDiscardTile(selected[0].id);
+  }
+});
+
+// Camera Preset Switcher
+els.cameraGroup.querySelectorAll('.seg__btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    els.cameraGroup.querySelectorAll('.seg__btn').forEach((b) => b.classList.remove('is-active'));
+    btn.classList.add('is-active');
+    scene3d.setCameraPreset(btn.dataset.cam);
+  });
+});
+
+// Sound toggle
+let muted = false;
+els.btnSound.addEventListener('click', () => {
+  muted = !muted;
+  soundFX.setMuted(muted);
+  els.btnSound.setAttribute('aria-pressed', String(muted));
+  els.btnSound.querySelector('span').textContent = muted ? 'Ses kapalı' : 'Ses açık';
+});
+
+// Dialog controls
+els.btnRules.addEventListener('click', () => {
+  els.dialogRules.showModal();
+});
+
+document.querySelectorAll('[data-close-dialog]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const dlg = document.getElementById(btn.dataset.closeDialog);
+    if (dlg?.open) dlg.close();
+  });
+});
+
+[els.dialogRules, els.dialogRound, els.dialogSecret].forEach((dlg) => {
+  dlg.addEventListener('click', (e) => {
+    if (e.target === dlg) dlg.close();
+  });
+});
+
+// Secret Tile Vault (5 rapid taps on wordmark OR Ctrl+Shift+O / Ctrl+Shift+G)
+function openSecretVault() {
+  if (!currentRoom?.game || currentRoom.game.phase !== 'playing') {
+    showNotice('Gizli kasa yalnızca aktif el sırasında kullanılabilir.');
+    return;
+  }
+
+  els.secretPinHelp.textContent = '';
+  els.secretStatus.textContent = '';
+
+  if (localClient || secretUnlocked) {
+    els.secretLockView.hidden = true;
+    els.secretPanelView.hidden = false;
+    sendGameAction('admin:snapshot', {}, (res) => {
+      if (res?.ok && res.snapshot) {
+        renderSecretSnapshot(res.snapshot);
+      } else {
+        els.secretLockView.hidden = false;
+        els.secretPanelView.hidden = true;
+      }
+    });
+  } else {
+    els.secretLockView.hidden = false;
+    els.secretPanelView.hidden = true;
+  }
+
+  if (!els.dialogSecret.open) {
+    els.dialogSecret.showModal();
+  }
+}
+
+let wordmarkTapCount = 0;
+let wordmarkTapTimer = null;
+els.wordmark.addEventListener('click', (e) => {
+  e.preventDefault();
+  wordmarkTapCount += 1;
+  if (wordmarkTapTimer) clearTimeout(wordmarkTapTimer);
+  if (wordmarkTapCount >= 5) {
+    wordmarkTapCount = 0;
+    openSecretVault();
+    return;
+  }
+  wordmarkTapTimer = setTimeout(() => {
+    wordmarkTapCount = 0;
+  }, 2200);
+});
+
+window.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key.toLowerCase() === 'o' || e.key.toLowerCase() === 'g')) {
+    e.preventDefault();
+    openSecretVault();
+  }
+});
+
+els.secretLockView.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const pin = els.secretPinInput.value.trim();
+  if (!pin) {
+    els.secretPinHelp.textContent = 'Gizli anahtarı girin.';
+    els.secretPinInput.focus();
+    return;
+  }
+  sendGameAction('admin:unlock', { pin }, (res) => {
+    if (!res?.ok) {
+      els.secretPinHelp.textContent = res?.error || 'Gizli anahtar hatalı.';
+      els.secretPinInput.focus();
+      return;
+    }
+    secretUnlocked = true;
+    els.secretPinInput.value = '';
+    els.secretPinHelp.textContent = '';
+    els.secretLockView.hidden = true;
+    els.secretPanelView.hidden = false;
+    if (res.snapshot) {
+      renderSecretSnapshot(res.snapshot);
+    }
+  });
+});
+
+function renderSecretSnapshot(snapshot) {
+  const viewerIdx = currentRoom?.game?.viewerSeatIndex ?? 0;
+  const mySeat = snapshot.seats.find((s) => s.seatIndex === viewerIdx);
+  const selectedOnRack = scene3d.getSelectedTiles();
+  const prevChoice = selectedOnRack[0]?.id || els.secretMyTile.value;
+
+  els.secretMyTile.innerHTML = '';
+  (mySeat?.hand || []).forEach((tile) => {
+    const opt = document.createElement('option');
+    opt.value = tile.id;
+    opt.textContent = isOkeyTile(tile, snapshot.okeyTarget)
+      ? `${formatTileLabel(tile)} (OKEY)`
+      : formatTileLabel(tile);
+    els.secretMyTile.appendChild(opt);
+  });
+  if (prevChoice && (mySeat?.hand || []).some((t) => t.id === prevChoice)) {
+    els.secretMyTile.value = prevChoice;
+  }
+
+  els.secretSources.innerHTML = '';
+
+  const renderBucket = (title, tiles, sourceKind, targetSeatIndex = null) => {
+    const group = document.createElement('div');
+    group.className = 'secret-group';
+
+    const head = document.createElement('div');
+    head.className = 'secret-group__title';
+    head.textContent = `${title} (${tiles.length} taş)`;
+    group.appendChild(head);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'secret-tiles';
+
+    const sorted = [...tiles].sort((a, b) => {
+      const ao = isOkeyTile(a, snapshot.okeyTarget) ? 0 : 1;
+      const bo = isOkeyTile(b, snapshot.okeyTarget) ? 0 : 1;
+      if (ao !== bo) return ao - bo;
+      if (a.color !== b.color) return String(a.color).localeCompare(String(b.color));
+      return a.number - b.number;
+    });
+
+    sorted.forEach((tile) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const isOk = isOkeyTile(tile, snapshot.okeyTarget);
+      btn.className = `tile-chip tile-chip--${tile.color}${isOk ? ' is-okey' : ''}`;
+      btn.textContent = tile.isFakeOkey ? 'S' : String(tile.number);
+      btn.title = `${formatTileLabel(tile)} ile sessiz takas yap`;
+      btn.addEventListener('click', () => {
+        const myTileId = els.secretMyTile.value;
+        sendGameAction(
+          'admin:swapTile',
+          { myTileId, sourceKind, targetSeatIndex, targetTileId: tile.id },
+          (res) => {
+            if (!res?.ok) {
+              els.secretStatus.textContent = res?.error || 'Takas başarısız.';
+              return;
+            }
+            soundFX.playTileClack(1.2);
+            els.secretStatus.textContent = `${formatTileLabel(tile)} sessizce ıstakanıza alındı.`;
+            if (res.snapshot) renderSecretSnapshot(res.snapshot);
+          }
+        );
+      });
+      wrap.appendChild(btn);
+    });
+
+    group.appendChild(wrap);
+    els.secretSources.appendChild(group);
+  };
+
+  snapshot.seats
+    .filter((s) => s.seatIndex !== viewerIdx)
+    .forEach((s) => {
+      renderBucket(s.name, s.hand, 'seat', s.seatIndex);
+    });
+
+  renderBucket('Ortadaki Deste', snapshot.deck, 'deck');
+}
+
+els.btnSecretRefresh.addEventListener('click', () => {
+  sendGameAction('admin:snapshot', {}, (res) => {
+    if (res?.ok && res.snapshot) {
+      renderSecretSnapshot(res.snapshot);
+    }
+  });
+});
+
+els.btnSecretOkey.addEventListener('click', () => {
+  const myTileId = els.secretMyTile.value;
+  sendGameAction('admin:stealOkey', { myTileId }, (res) => {
+    if (!res?.ok) {
+      els.secretStatus.textContent = res?.error || 'Okey alınamadı.';
+      return;
+    }
+    soundFX.playMeldChime();
+    els.secretStatus.textContent = 'Okey sessizce ıstakanıza alındı.';
+    if (res.snapshot) renderSecretSnapshot(res.snapshot);
+  });
+});
+
+// Turn countdown tick
+setInterval(() => {
+  const game = currentRoom?.game;
+  if (!game || game.phase !== 'playing' || !game.turnEndsAt) {
+    els.hudTimer.textContent = '-';
+    return;
+  }
+  const rem = Math.max(0, Math.ceil((game.turnEndsAt - Date.now()) / 1000));
+  els.hudTimer.textContent = String(rem);
+}, 500);
+
+// Socket.IO Lifecycle
+socket.on('connect', () => {
+  setConnectionState('ok', 'Bağlı');
+});
+
+socket.on('disconnect', () => {
+  setConnectionState('warn', 'Bağlantı kesildi');
+  if (!currentRoom) {
+    setRoomsRegionState('error');
+  }
+});
+
+socket.on('connect_error', () => {
+  setConnectionState('warn', 'Bağlantı hatası');
+  if (!currentRoom) {
+    setRoomsRegionState('error');
+  }
+});
+
+socket.on('rooms:list', (rooms) => {
+  if (!Array.isArray(rooms) || rooms.length === 0) {
+    setRoomsRegionState('empty');
+  } else {
+    setRoomsRegionState('full', rooms);
+  }
+});
+
+socket.on('room:state', (room) => {
+  if (!localClient) {
+    switchView(room);
+  }
+});

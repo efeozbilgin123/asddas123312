@@ -1,49 +1,152 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {newTiles,shuffle,jokerFace,face,isJoker,validateMeld,minimumOpen,canOpen,setupRound,settle,stateFor} from '../src/engine.js';
-const c=(color,value,id)=>({id:id??`${color}${value}`,color,value});
-const okey={color:'red',value:8};
-const players=Array.from({length:4},(_,seat)=>({name:`Oyuncu ${seat}`,seat,hand:[],total:0,openedKind:null,openValue:0,roundPenalty:0,socketId:`s${seat}`}));
-test('106 physical tiles with exactly 2 fake jokers',()=>{const a=newTiles();assert.equal(a.length,106);assert.equal(a.filter(t=>t.fake).length,2);assert.equal(new Set(a.map(t=>t.id)).size,106);assert.equal(a.filter(t=>t.color==='red'&&t.value===8).length,2)});
-test('indicator 13 wraps to 1, actual okey is wildcard, fake acts as printed face',()=>{assert.deepEqual(jokerFace(c('yellow',13)),{color:'yellow',value:1});assert.equal(isJoker(c('red',8),okey),true);assert.deepEqual(face({id:'fake',fake:true},okey),okey)});
-test('valid and invalid runs and sets',()=>{
- assert.equal(validateMeld([c('red',2),c('red',3),c('red',4)],okey).score,9);
- assert.equal(validateMeld([c('red',12),c('red',13),c('red',1)],okey),null);
- assert.equal(validateMeld([c('red',4),c('yellow',4),c('blue',4)],okey).score,12);
- assert.equal(validateMeld([c('red',4),c('red',4,'second'),c('blue',4)],okey),null);
- assert.equal(validateMeld([c('red',4),c('red',6),c('red',9)],okey),null);
+import { createDeck, computeOkeyTarget, isOkeyTile } from '../shared/tiles.js';
+import {
+  validateSet,
+  validateRun,
+  validateGroup,
+  validatePair,
+  canLayoffTile,
+  findBestOpening
+} from '../shared/melds.js';
+import { isDiscardPlayableOnTable, computeRoundScores } from '../shared/rules.js';
+
+function t(id, color, number, isFakeOkey = false) {
+  return { id, color, number, copy: 0, isFakeOkey };
+}
+
+test('createDeck produces 106 tiles with 2 false okeys', () => {
+  const deck = createDeck();
+  assert.equal(deck.length, 106);
+  const fakes = deck.filter((x) => x.isFakeOkey);
+  assert.equal(fakes.length, 2);
 });
-test('joker assigned as missing tile for run and set',()=>{
- const m=validateMeld([c('blue',6),c('red',8),c('blue',8)],okey);assert(m);assert.equal(m.score,21);
- const s=validateMeld([c('red',4),c('yellow',4),c('red',8)],okey);assert(s);assert.equal(s.score,12);
+
+test('computeOkeyTarget wraps 13 to 1 of the same color', () => {
+  const okey = computeOkeyTarget(t('g1', 'blue', 13));
+  assert.deepEqual(okey, { color: 'blue', number: 1 });
 });
-test('pairs include real identical stones and a joker, not different colors',()=>{
- assert(validateMeld([c('red',3),c('red',3,'x')],okey,'pair'));
- assert(validateMeld([c('yellow',10),c('red',8)],okey,'pair'));
- assert.equal(validateMeld([c('yellow',10),c('blue',10)],okey,'pair'),null);
+
+test('validateSet checks unique colors and handles Okey wildcard', () => {
+  const okeyTarget = { color: 'red', number: 5 };
+  const valid = validateSet(
+    [t('1', 'red', 9), t('2', 'blue', 9), t('3', 'black', 9)],
+    okeyTarget
+  );
+  assert.equal(valid.valid, true);
+  assert.equal(valid.points, 27);
+
+  const withOkey = validateSet(
+    [t('1', 'blue', 11), t('2', 'black', 11), t('3', 'red', 5)],
+    okeyTarget
+  );
+  assert.equal(withOkey.valid, true);
+  assert.equal(withOkey.points, 33);
+
+  const dupColor = validateSet(
+    [t('1', 'red', 7), t('2', 'red', 7), t('3', 'black', 7)],
+    okeyTarget
+  );
+  assert.equal(dupColor.valid, false);
 });
-test('folding opening threshold including team exemptions',()=>{
- const r={settings:{folding:true,teams:false},players:structuredClone(players)};
- assert.equal(minimumOpen(r,r.players[0]),101);r.players[0].openedKind='normal';r.players[0].openValue=111;
- assert.equal(minimumOpen(r,r.players[2]),112);
- r.settings.teams=true;assert.equal(minimumOpen(r,r.players[2]),101);assert.equal(minimumOpen(r,r.players[1]),112);
- r.players[1].openedKind='pair';r.players[1].openValue=6;assert.equal(minimumOpen(r,r.players[3],'pair'),5);
- assert.equal(minimumOpen(r,r.players[2],'pair'),7);
+
+test('validateRun supports 12-13-1 wraparound and Sahte Okey', () => {
+  const okeyTarget = { color: 'yellow', number: 7 };
+  const wrap = validateRun(
+    [t('1', 'black', 12), t('2', 'black', 13), t('3', 'black', 1)],
+    okeyTarget
+  );
+  assert.equal(wrap.valid, true);
+  assert.equal(wrap.points, 26);
+
+  const withFake = validateRun(
+    [t('1', 'yellow', 6), t('2', 'fake', 0, true), t('3', 'yellow', 8)],
+    okeyTarget
+  );
+  assert.equal(withFake.valid, true);
+  assert.equal(withFake.points, 21);
+
+  const invalidWrap = validateRun(
+    [t('1', 'red', 13), t('2', 'red', 1), t('3', 'red', 2)],
+    okeyTarget
+  );
+  assert.equal(invalidWrap.valid, false);
 });
-test('101 opening with four normal valid melds',()=>{
- const r={okey,settings:{folding:false,teams:false},players:structuredClone(players)};const p=r.players[0];
- p.hand=[...newTiles()].filter(t=> !t.fake&&!isJoker(t,okey));
- const groups=[['red','yellow','blue'].map(x=>p.hand.find(t=>t.color===x&&t.value===13)),['red','yellow','blue'].map(x=>p.hand.find(t=>t.color===x&&t.value===12)),['red','yellow','blue'].map(x=>p.hand.find(t=>t.color===x&&t.value===11))];
- const result=canOpen(r,p,groups.map(g=>g.map(x=>x.id)),'normal');assert(result.ok);assert.equal(result.amount,108);
+
+test('canLayoffTile appends to runs/sets and swaps real tile for Okey', () => {
+  const okeyTarget = { color: 'red', number: 4 };
+  const run = validateRun(
+    [t('1', 'blue', 5), t('o', 'red', 4), t('3', 'blue', 7)],
+    okeyTarget
+  );
+  const meld = { id: 'm-1', type: 'run', ownerSeat: 0, points: run.points, slots: run.slots };
+
+  // Layoff 8 blue
+  const appendRes = canLayoffTile(t('4', 'blue', 8), meld, okeyTarget);
+  assert.equal(appendRes.valid, true);
+  assert.equal(appendRes.mode, 'append');
+  assert.equal(appendRes.updatedMeld.points, 26);
+
+  // Swap real 6 blue for Okey
+  const swapRes = canLayoffTile(t('real6', 'blue', 6), meld, okeyTarget);
+  assert.equal(swapRes.valid, true);
+  assert.equal(swapRes.mode, 'swap_okey');
+  assert.equal(isOkeyTile(swapRes.swappedOkey, okeyTarget), true);
 });
-test('round deals 22/21/21/21, keeps 20 in stock + 1 indicator',()=>{
- const r={round:1,settings:{folding:true,teams:true,rounds:3},players:structuredClone(players),phase:'lobby'};setupRound(r);
- assert.equal(r.players[0].hand.length,22);assert.deepEqual(r.players.slice(1).map(p=>p.hand.length),[21,21,21]);assert.equal(r.stock.length,20);
- const all=[...r.stock,r.indicator,...r.players.flatMap(p=>p.hand)];assert.equal(new Set(all.map(t=>t.id)).size,106);
- const a=stateFor(r,r.players[0]);assert.equal(a.hand.length,22);assert.equal(a.players[1].count,21);assert.equal(JSON.stringify(a).includes(r.players[1].hand[0].id+'-'+r.players[1].hand[0].id),false);
+
+test('findBestOpening detects >= 101 opening sets/runs', () => {
+  const okeyTarget = { color: 'red', number: 1 };
+  const hand = [
+    t('a1', 'red', 11),
+    t('a2', 'red', 12),
+    t('a3', 'red', 13), // 36
+    t('b1', 'blue', 10),
+    t('b2', 'black', 10),
+    t('b3', 'yellow', 10),
+    t('b4', 'red', 10), // 40
+    t('c1', 'blue', 8),
+    t('c2', 'blue', 9),
+    t('c3', 'blue', 10) // wait b1 is blue 10! So use black 8,9,10:
+  ];
+  hand.splice(7, 3, t('c1', 'black', 8), t('c2', 'black', 9), t('c3', 'black', 11)); // not consecutive
+  hand.splice(7, 3, t('c1', 'yellow', 8), t('c2', 'yellow', 9), t('c3', 'yellow', 11));
+  // Add a clear 3-tile run: green/yellow 11-12-13 -> 36
+  hand.splice(7, 3, t('c1', 'yellow', 11), t('c2', 'yellow', 12), t('c3', 'yellow', 13)); // 36 -> total 112
+
+  const best = findBestOpening(hand, okeyTarget, 101);
+  assert.equal(best.canOpen, true);
+  assert.ok(best.totalPoints >= 101);
 });
-test('partner wins as a pair when teammate finishes',()=>{
- const r={round:1,settings:{folding:true,teams:true,rounds:5},players:structuredClone(players),okey,phase:'playing',stock:[]};
- r.players[0].openedKind='normal';r.players[1].openedKind='normal';r.players[1].hand=[c('yellow',1)];r.players[2].hand=[c('blue',13)];settle(r,0,c('blue',10));
- assert.equal(r.players[0].total,-101);assert.equal(r.players[2].total,-101);assert.equal(r.players[1].total,1);assert.equal(r.players[3].total,202);assert.equal(r.phase,'roundEnd');
+
+test('validatePair and isDiscardPlayableOnTable work accurately', () => {
+  const okeyTarget = { color: 'black', number: 3 };
+  const pair = validatePair([t('p1', 'red', 9), t('p2', 'red', 9)], okeyTarget);
+  assert.equal(pair.valid, true);
+
+  const setMeld = validateGroup(
+    [t('s1', 'red', 5), t('s2', 'blue', 5), t('s3', 'yellow', 5)],
+    okeyTarget
+  );
+  const tableMelds = [{ id: 'm-1', type: 'set', slots: setMeld.slots, points: setMeld.points }];
+  assert.equal(isDiscardPlayableOnTable(t('d1', 'black', 5), tableMelds, okeyTarget), true);
+  assert.equal(isDiscardPlayableOnTable(t('d2', 'black', 6), tableMelds, okeyTarget), false);
+});
+
+test('computeRoundScores calculates 202 for unopened and -101 for winner', () => {
+  const okeyTarget = { color: 'red', number: 2 };
+  const rows = computeRoundScores({
+    seats: [
+      { seatIndex: 0, name: 'A', opened: true, openMode: 'series', hand: [], roundPenalties: 0 },
+      { seatIndex: 1, name: 'B', opened: false, openMode: null, hand: [t('1', 'red', 5)], roundPenalties: 0 },
+      { seatIndex: 2, name: 'C', opened: true, openMode: 'series', hand: [t('2', 'blue', 10)], roundPenalties: 101 },
+      { seatIndex: 3, name: 'D', opened: true, openMode: 'pairs', hand: [t('3', 'black', 4)], roundPenalties: 0 }
+    ],
+    winnerSeat: 0,
+    finishedWithOkey: false,
+    okeyTarget
+  });
+  assert.equal(rows[0].roundDelta, -101);
+  assert.equal(rows[1].roundDelta, 202);
+  assert.equal(rows[2].roundDelta, 111);
+  assert.equal(rows[3].roundDelta, 8);
 });

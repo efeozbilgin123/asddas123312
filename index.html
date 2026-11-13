@@ -1,1 +1,381 @@
-<!DOCTYPE html><html lang="tr"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/><meta name="theme-color" content="#0b1315"/><title>101 CLUB — 3D Okey</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"></head><body><div id="app"></div><script type="module" src="/src/main.js"></script></body></html>
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yüzbir 3D: Çok Oyunculu 101 Okey</title>
+  <meta name="description" content="Tarayıcıda gerçek zamanlı, 3 boyutlu çok oyunculu 101 Okey masası.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@500&family=Plus+Jakarta+Sans:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./src/styles/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__brand">
+      <a href="/" class="wordmark" aria-label="Yüzbir 3D ana ekran">Yüzbir 3D</a>
+      <span id="connection-badge" class="pill" role="status">Bağlanıyor</span>
+      <span id="room-pill" class="pill pill--mono" hidden></span>
+    </div>
+
+    <div class="topbar__actions">
+      <div id="camera-group" class="seg" role="group" aria-label="Kamera açısı" hidden>
+        <button type="button" class="seg__btn is-active" data-cam="table">Masa</button>
+        <button type="button" class="seg__btn" data-cam="top">Üstten</button>
+        <button type="button" class="seg__btn" data-cam="rack">Istaka</button>
+      </div>
+      <button type="button" id="btn-sound" class="btn btn--quiet" aria-pressed="false" title="Ses efektleri">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M11 5L6 9H2v6h4l5 4V5z"/>
+          <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+        </svg>
+        <span>Ses açık</span>
+      </button>
+      <button type="button" id="btn-rules" class="btn btn--quiet">Kurallar</button>
+      <button type="button" id="btn-leave" class="btn btn--quiet" hidden>Masadan Ayrıl</button>
+    </div>
+  </header>
+
+  <main class="stage">
+    <canvas id="table-canvas" aria-label="3 boyutlu Yüzbir Okey oyun masası"></canvas>
+
+    <!-- Lobby View -->
+    <section id="view-lobby" class="lobby-shell" aria-label="Oyun lobisi">
+      <div class="lobby-panel">
+        <div class="lobby-panel__head">
+          <h1>101 Okey Masası</h1>
+          <p class="lead">Arkadaşlarınla oda kur ya da botlara karşı hemen oyna.</p>
+        </div>
+
+        <form id="lobby-form" class="lobby-form" novalidate>
+          <div class="field-row">
+            <div class="field">
+              <label for="player-name">Oyuncu adı</label>
+              <input id="player-name" name="playerName" type="text" maxlength="20" autocomplete="nickname" placeholder="Örn. Emre" required>
+              <p id="player-name-help" class="field__help" aria-live="polite"></p>
+            </div>
+            <div class="field">
+              <label for="room-name">Masa adı (kurulumda)</label>
+              <input id="room-name" name="roomName" type="text" maxlength="32" placeholder="Örn. Akşam Masası">
+              <p class="field__help"></p>
+            </div>
+          </div>
+
+          <div class="options-bar">
+            <label class="check">
+              <input id="opt-katlamali" type="checkbox">
+              <span>Katlamalı 101</span>
+            </label>
+            <label class="check">
+              <input id="opt-islek" type="checkbox" checked>
+              <span>İşlek taş cezası (+101)</span>
+            </label>
+            <div class="field field--inline">
+              <label for="opt-timer">Hamle süresi</label>
+              <select id="opt-timer">
+                <option value="45">45 sn</option>
+                <option value="60" selected>60 sn</option>
+                <option value="90">90 sn</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="lobby-actions">
+            <button type="button" id="btn-quick-play" class="btn btn--primary">Hızlı Başlat (Botlarla)</button>
+            <button type="button" id="btn-singleplayer" class="btn">Tek Kişilik Mod (Çevrimdışı Test)</button>
+            <button type="button" id="btn-create-room" class="btn">Çok Oyunculu Oda Kur</button>
+          </div>
+        </form>
+
+        <div class="join-box">
+          <form id="join-code-form" class="join-code-form" novalidate>
+            <div class="field">
+              <label for="join-code">Oda koduyla katıl</label>
+              <div class="join-row">
+                <input id="join-code" name="roomCode" type="text" maxlength="6" placeholder="4K9M" autocomplete="off">
+                <button type="submit" class="btn">Masaya Gir</button>
+              </div>
+              <p id="join-help" class="field__help" aria-live="polite"></p>
+            </div>
+          </form>
+        </div>
+
+        <section class="rooms-region" aria-labelledby="rooms-heading">
+          <div class="rooms-region__head">
+            <h2 id="rooms-heading">Açık Masalar</h2>
+            <button type="button" id="btn-refresh-rooms" class="btn btn--quiet btn--sm">Yenile</button>
+          </div>
+
+          <div id="rooms-loading" class="rooms-state" aria-live="polite">
+            <div class="skeleton-row"></div>
+            <div class="skeleton-row"></div>
+          </div>
+
+          <div id="rooms-error" class="rooms-state" hidden>
+            <p class="state-msg">Sunucuya bağlanılamadı. Bağlantıyı kontrol edip tekrar deneyin.</p>
+            <button type="button" id="btn-retry-rooms" class="btn btn--sm">Tekrar Dene</button>
+          </div>
+
+          <div id="rooms-empty" class="rooms-state" hidden>
+            <p class="state-msg">Şu an bekleyen açık masa yok. İlk masayı sen kurabilirsin.</p>
+          </div>
+
+          <div id="rooms-table-wrap" class="rooms-table-wrap" hidden>
+            <table class="rooms-table">
+              <thead>
+                <tr>
+                  <th scope="col">Masa</th>
+                  <th scope="col">Kod</th>
+                  <th scope="col">Kural</th>
+                  <th scope="col">Oyuncu</th>
+                  <th scope="col">İşlem</th>
+                </tr>
+              </thead>
+              <tbody id="rooms-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- Waiting Room View -->
+    <section id="view-waiting" class="waiting-shell" hidden aria-label="Bekleme odası">
+      <div class="waiting-panel">
+        <div class="waiting-head">
+          <div>
+            <h1 id="wait-room-title">Oda Hazırlığı</h1>
+            <p id="wait-room-subtitle" class="lead">4 koltuk dolduğunda veya bot ekleyerek oyunu başlatabilirsiniz.</p>
+          </div>
+          <div class="code-share">
+            <span id="wait-room-code" class="code-badge num"></span>
+            <button type="button" id="btn-copy-code" class="btn btn--quiet btn--sm">Davet Linki Kopyala</button>
+          </div>
+        </div>
+
+        <div id="wait-seats-grid" class="wait-seats"></div>
+
+        <div id="wait-host-controls" class="wait-controls" hidden>
+          <label class="check">
+            <input id="wait-katlamali" type="checkbox">
+            <span>Katlamalı 101</span>
+          </label>
+          <label class="check">
+            <input id="wait-islek" type="checkbox">
+            <span>İşlek taş cezası</span>
+          </label>
+          <div class="field field--inline">
+            <label for="wait-timer">Hamle süresi</label>
+            <select id="wait-timer">
+              <option value="45">45 sn</option>
+              <option value="60">60 sn</option>
+              <option value="90">90 sn</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="wait-footer">
+          <p id="wait-status-msg" class="field__help" aria-live="polite"></p>
+          <button type="button" id="btn-start-match" class="btn btn--primary" hidden>Oyunu Başlat</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Active 3D Game HUD -->
+    <section id="view-game" class="game-hud" hidden aria-label="Oyun arayüzü">
+      <div class="seat-badges">
+        <article id="seat-card-2" class="seat-card seat-card--north" aria-label="Karşı oyuncu">
+          <div class="seat-card__top">
+            <strong class="seat-name"></strong>
+            <span class="seat-score num"></span>
+          </div>
+          <div class="seat-card__meta">
+            <span class="seat-tiles num"></span>
+            <span class="seat-open-tag"></span>
+          </div>
+        </article>
+
+        <article id="seat-card-3" class="seat-card seat-card--west" aria-label="Sol oyuncu">
+          <div class="seat-card__top">
+            <strong class="seat-name"></strong>
+            <span class="seat-score num"></span>
+          </div>
+          <div class="seat-card__meta">
+            <span class="seat-tiles num"></span>
+            <span class="seat-open-tag"></span>
+          </div>
+        </article>
+
+        <article id="seat-card-1" class="seat-card seat-card--east" aria-label="Sağ oyuncu">
+          <div class="seat-card__top">
+            <strong class="seat-name"></strong>
+            <span class="seat-score num"></span>
+          </div>
+          <div class="seat-card__meta">
+            <span class="seat-tiles num"></span>
+            <span class="seat-open-tag"></span>
+          </div>
+        </article>
+      </div>
+
+      <!-- Center Top Game Info Strip -->
+      <div class="table-status-strip">
+        <div class="status-chip">
+          <span class="status-chip__label">El</span>
+          <strong id="hud-round" class="num">1</strong>
+        </div>
+        <div class="status-chip">
+          <span class="status-chip__label">Deste</span>
+          <strong id="hud-deck" class="num">21</strong>
+        </div>
+        <div class="status-chip">
+          <span class="status-chip__label">Okey</span>
+          <strong id="hud-okey" class="okey-chip">-</strong>
+        </div>
+        <div class="status-chip">
+          <span class="status-chip__label">Açılış</span>
+          <strong id="hud-threshold" class="num">101</strong>
+        </div>
+        <div class="status-chip">
+          <span class="status-chip__label">Süre</span>
+          <strong id="hud-timer" class="num">60</strong>
+        </div>
+      </div>
+
+      <!-- Event / Prompt Banner -->
+      <div id="hud-banner" class="hud-banner" role="status" aria-live="polite">
+        <span id="hud-turn-text">Oyun hazır</span>
+      </div>
+
+      <!-- Bottom Control & Staging Dock above 3D Rack -->
+      <div class="bottom-dock">
+        <div id="staging-bar" class="staging-bar" hidden>
+          <div id="staging-groups" class="staging-groups"></div>
+          <div class="staging-summary">
+            <span id="staging-total" class="num">Toplam: 0 / 101</span>
+            <button type="button" id="btn-commit-open" class="btn btn--primary btn--sm" disabled>Masaya Aç</button>
+            <button type="button" id="btn-clear-stage" class="btn btn--quiet btn--sm">Temizle</button>
+          </div>
+        </div>
+
+        <div class="action-bar">
+          <div class="action-bar__left">
+            <article id="seat-card-0" class="seat-card seat-card--south">
+              <div class="seat-card__top">
+                <strong class="seat-name">Siz</strong>
+                <span class="seat-score num">0 p</span>
+              </div>
+              <div class="seat-card__meta">
+                <span class="seat-tiles num">21 taş</span>
+                <span class="seat-open-tag">Açmadı</span>
+              </div>
+            </article>
+
+            <div class="rack-tools">
+              <button type="button" id="btn-sort-runs" class="btn btn--quiet btn--sm">Seri Diz</button>
+              <button type="button" id="btn-sort-pairs" class="btn btn--quiet btn--sm">Çift Diz</button>
+              <button type="button" id="btn-auto-stage" class="btn btn--quiet btn--sm">Per Bul</button>
+              <button type="button" id="btn-clear-sel" class="btn btn--quiet btn--sm" hidden>Seçimi Bırak</button>
+            </div>
+          </div>
+
+          <div class="action-bar__right">
+            <span id="selection-hint" class="selection-hint" aria-live="polite"></span>
+
+            <button type="button" id="btn-draw-deck" class="btn btn--primary btn--sm" hidden>Ortadan Çek</button>
+            <button type="button" id="btn-draw-discard" class="btn btn--sm" hidden>Yandan Al</button>
+            <button type="button" id="btn-return-discard" class="btn btn--quiet btn--sm" hidden>Yan Taşı Geri Koy</button>
+
+            <button type="button" id="btn-stage-group" class="btn btn--sm" hidden>Gruba Ekle</button>
+            <button type="button" id="btn-lay-meld" class="btn btn--sm" hidden>Grubu İndir</button>
+            <button type="button" id="btn-discard-tile" class="btn btn--accent-3 btn--sm" hidden>Taş At</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Rules Dialog -->
+  <dialog id="dialog-rules" class="dialog">
+    <div class="dialog__head">
+      <h2>101 Okey Kuralları</h2>
+      <button type="button" class="btn btn--quiet btn--sm" data-close-dialog="dialog-rules">Kapat</button>
+    </div>
+    <div class="dialog__body">
+      <ul class="rules-list">
+        <li><strong>Amaç:</strong> Elini açtıktan sonra tüm taşlarını masaya indirip son kalan tek taşı kenara atarak eli bitirmek ve en düşük ceza puanıyla oyunu tamamlamak.</li>
+        <li><strong>El Açma:</strong> En az 101 toplam puanlık geçerli per/seriler (veya en az 5 adet çift) seçip Gruba Ekle ile hazırlayarak Masaya Aç düğmesine basın.</li>
+        <li><strong>Seri ve Perler:</strong> Aynı renkte ardışık en az 3 taş (12-13-1 dahil) seri sayılır. Aynı sayıda farklı renklerde 3 veya 4 taş per sayılır.</li>
+        <li><strong>Yandan Taş Alma:</strong> Solunuzdaki oyuncunun attığı taşı alırsanız o tur içinde mutlaka el açmalı veya masaya taş işlemelisiniz.</li>
+        <li><strong>Okey ve Sahte Okey:</strong> Gösterge taşının bir üst numarası Okeydir ve her taşın yerine geçer. Sahte Okey ise yalnızca Okey taşının gerçek değerini temsil eder.</li>
+        <li><strong>3D Kontroller:</strong> Taşları seçmek için tıklayın, ıstaka üzerinde sürükleyip yer değiştirin, sağ tuşla kamerayı çevirin.</li>
+      </ul>
+    </div>
+  </dialog>
+
+  <!-- Round Over Dialog -->
+  <dialog id="dialog-round" class="dialog">
+    <div class="dialog__head">
+      <h2 id="round-dialog-title">El Sonucu</h2>
+      <button type="button" class="btn btn--quiet btn--sm" data-close-dialog="dialog-round">Kapat</button>
+    </div>
+    <div class="dialog__body">
+      <p id="round-dialog-msg" class="lead"></p>
+      <div class="rooms-table-wrap">
+        <table class="rooms-table">
+          <thead>
+            <tr>
+              <th scope="col">Oyuncu</th>
+              <th scope="col">Durum</th>
+              <th scope="col">Eldeki</th>
+              <th scope="col">Ceza</th>
+              <th scope="col">Tur</th>
+              <th scope="col">Toplam</th>
+            </tr>
+          </thead>
+          <tbody id="round-tbody"></tbody>
+        </table>
+      </div>
+      <div class="dialog__actions">
+        <button type="button" id="btn-next-round" class="btn btn--primary" hidden>Yeni Eli Başlat</button>
+        <p id="round-wait-host" class="field__help" hidden>Masa kurucusunun yeni eli başlatması bekleniyor.</p>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Owner Secret Tile Vault Dialog -->
+  <dialog id="dialog-secret" class="dialog">
+    <div class="dialog__head">
+      <h2>Gizli Taş Kasası</h2>
+      <button type="button" class="btn btn--quiet btn--sm" data-close-dialog="dialog-secret">Kapat</button>
+    </div>
+    <div class="dialog__body">
+      <form id="secret-lock-view" class="secret-lock" novalidate>
+        <div class="field">
+          <label for="secret-pin-input">Gizli anahtar</label>
+          <div class="join-row">
+            <input id="secret-pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Anahtar">
+            <button type="submit" class="btn btn--primary btn--sm">Kilidi Aç</button>
+          </div>
+          <p id="secret-pin-help" class="field__help" aria-live="polite"></p>
+        </div>
+      </form>
+
+      <div id="secret-panel-view" class="secret-panel" hidden>
+        <div class="secret-toolbar">
+          <div class="field">
+            <label for="secret-my-tile">Değiştirilecek taşınız</label>
+            <select id="secret-my-tile"></select>
+          </div>
+          <button type="button" id="btn-secret-okey" class="btn btn--primary btn--sm">Okey Çal</button>
+          <button type="button" id="btn-secret-refresh" class="btn btn--quiet btn--sm">Yenile</button>
+        </div>
+        <p id="secret-status" class="field__help" aria-live="polite"></p>
+
+        <div id="secret-sources" class="secret-sources"></div>
+      </div>
+    </div>
+  </dialog>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

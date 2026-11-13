@@ -997,6 +997,49 @@ export function getWindowAtmosphereTexture(atmosphere = 'rainy') {
   return tex;
 }
 
+const deckBadgeCache = new Map();
+
+export function getDeckCountBadgeTexture(count = 0) {
+  const safeCount = Math.max(0, Math.floor(Number(count) || 0));
+  if (deckBadgeCache.has(safeCount)) return deckBadgeCache.get(safeCount);
+  if (deckBadgeCache.size > 120) {
+    const oldest = deckBadgeCache.keys().next().value;
+    deckBadgeCache.get(oldest)?.dispose();
+    deckBadgeCache.delete(oldest);
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 104;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, 256, 104);
+
+  const isEmpty = safeCount === 0;
+  const isLow = safeCount > 0 && safeCount <= 8;
+
+  ctx.fillStyle = isEmpty ? 'rgba(64, 18, 16, 0.94)' : 'rgba(22, 16, 12, 0.94)';
+  ctx.beginPath();
+  ctx.roundRect(12, 10, 232, 84, 42);
+  ctx.fill();
+
+  ctx.strokeStyle = isEmpty ? '#F87171' : isLow ? '#FBBF24' : '#E5C267';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.roundRect(12, 10, 232, 84, 42);
+  ctx.stroke();
+
+  ctx.fillStyle = isEmpty ? '#FECACA' : isLow ? '#FDE68A' : '#FFF7E0';
+  ctx.font = '800 46px "Plus Jakarta Sans", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`${safeCount} TAŞ`, 128, 54);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  deckBadgeCache.set(safeCount, tex);
+  return tex;
+}
+
 export function getWindowNightTexture() {
   return getWindowAtmosphereTexture('rainy');
 }

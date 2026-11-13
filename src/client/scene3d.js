@@ -11,6 +11,7 @@ import {
   createSpeechBubbleTexture,
   createTvScreenTexture,
   getAvatarTexture,
+  getDeckCountBadgeTexture,
   getDiscardPadTexture,
   getFeltTexture,
   getKahveBackdropTexture,
@@ -313,6 +314,7 @@ export class OkeyTable3D {
     this.colorMatCache = new Map();
     this.headGeomCache = new Map();
     this.nameplateMatCache = new Map();
+    this.deckBadgeMatCache = new Map();
 
     const bustProfile = [
       new THREE.Vector2(0.01, -0.35),
@@ -1807,6 +1809,26 @@ export class OkeyTable3D {
     return mat;
   }
 
+  getDeckCountBadgeMat(count = 0) {
+    const safeCount = Math.max(0, Math.floor(Number(count) || 0));
+    let mat = this.deckBadgeMatCache.get(safeCount);
+    if (!mat) {
+      if (this.deckBadgeMatCache.size >= 120) {
+        const oldestKey = this.deckBadgeMatCache.keys().next().value;
+        const oldest = this.deckBadgeMatCache.get(oldestKey);
+        oldest?.dispose();
+        this.deckBadgeMatCache.delete(oldestKey);
+      }
+      mat = new THREE.SpriteMaterial({
+        map: getDeckCountBadgeTexture(safeCount),
+        transparent: true,
+        depthWrite: false
+      });
+      this.deckBadgeMatCache.set(safeCount, mat);
+    }
+    return mat;
+  }
+
   buildPlayerCharacterModel({ vestColor, teamColor, isActive }) {
     const char = new THREE.Group();
 
@@ -2297,6 +2319,11 @@ export class OkeyTable3D {
       tMesh.position.set(-0.65, 0.085 + i * (TILE_D + 0.004), -3.85);
       this.dynamicGroup.add(tMesh);
     }
+    const demoBadge = new THREE.Sprite(this.getDeckCountBadgeMat(21));
+    demoBadge.position.set(-0.65, 0.085 + 5 * (TILE_D + 0.004) + TILE_D / 2 + 0.34, -3.85);
+    demoBadge.scale.set(0.96, 0.40, 1);
+    demoBadge.renderOrder = 4;
+    this.dynamicGroup.add(demoBadge);
 
     const gostergeMesh = this.createTileMesh(
       { id: 'dg', color: 'red', number: 7 },
@@ -2737,8 +2764,8 @@ export class OkeyTable3D {
     this.renderPlayerHeads(state, viewerIdx);
 
     // 4. Render Center Draw Deck & Gösterge
-    const deckCount = state.deckCount || 0;
-    const stackLayers = Math.max(1, Math.min(8, Math.ceil(deckCount / 6)));
+    const deckCount = Math.max(0, state.deckCount || 0);
+    const stackLayers = deckCount > 0 ? Math.max(1, Math.min(8, Math.ceil(deckCount / 6))) : 0;
     const deckGroup = new THREE.Group();
     deckGroup.position.set(-0.68, 0.02, -3.9);
 
@@ -2764,6 +2791,19 @@ export class OkeyTable3D {
         deckGroup.add(glowRing);
       }
     }
+
+    const deckBadge = new THREE.Sprite(this.getDeckCountBadgeMat(deckCount));
+    const badgeBaseY = deckCount > 0
+      ? 0.075 + (stackLayers - 1) * (TILE_D + 0.004) + TILE_D / 2 + 0.34
+      : 0.28;
+    deckBadge.position.set(0, badgeBaseY, 0);
+    deckBadge.scale.set(0.96, 0.40, 1);
+    deckBadge.renderOrder = 4;
+    if (deckCount > 0) {
+      deckBadge.userData = { kind: 'drawDeck' };
+      this.interactables.push(deckBadge);
+    }
+    deckGroup.add(deckBadge);
     this.dynamicGroup.add(deckGroup);
 
     if (state.gosterge) {
@@ -4142,6 +4182,10 @@ export class OkeyTable3D {
       mat?.dispose();
     }
     this.nameplateMatCache.clear();
+    for (const mat of this.deckBadgeMatCache.values()) {
+      mat?.dispose();
+    }
+    this.deckBadgeMatCache.clear();
     for (const entry of this.headGeomCache.values()) {
       entry?.bezel?.dispose();
       entry?.frontDisc?.dispose();

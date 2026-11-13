@@ -2705,6 +2705,9 @@ function updateGameControls() {
   const leftTopIsOkey = Boolean(leftTopTile && isOkeyTile(leftTopTile, game.okeyTarget));
 
   els.btnDrawDeck.hidden = !isDrawPhase;
+  if (isDrawPhase) {
+    els.btnDrawDeck.textContent = `Taş Çek (${game.deckCount ?? 0})`;
+  }
   els.btnDrawDiscard.hidden = !(isDrawPhase && leftTopTile && !leftTopIsOkey);
   if (leftTopTile && !leftTopIsOkey) {
     els.btnDrawDiscard.textContent = `Yandan Al (${formatTileLabel(leftTopTile)})`;

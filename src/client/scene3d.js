@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CSS3DObject, CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { canLayoffTile } from '../../shared/melds.js';
 import { KAHVE_CATS, RACK_THEMES, TILE_THEMES } from '../../shared/presets.js';
 import { isOkeyTile } from '../../shared/tiles.js';
@@ -78,8 +79,8 @@ function createRoundedTileGeometry(w, h, d, radius = 0.038, bevel = 0.015) {
     bevelEnabled: true,
     bevelThickness: bevel,
     bevelSize: bevel,
-    bevelSegments: 3,
-    curveSegments: 6
+    bevelSegments: 1,
+    curveSegments: 3
   });
 
   // Center along Z around 0 -> [-d/2, +d/2]
@@ -196,12 +197,16 @@ export class OkeyTable3D {
       antialias: true,
       powerPreference: 'high-performance'
     });
-    this.basePixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+    this.basePixelRatio = Math.min(window.devicePixelRatio || 1, 1.35);
+    this.activePixelRatio = this.basePixelRatio;
     this.musicPerfMode = false;
     this.renderer.setPixelRatio(this.basePixelRatio);
     this.renderer.setSize(width, height, false);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.autoUpdate = false;
+    this.renderer.shadowMap.needsUpdate = true;
+    this.shadowFramesPending = 2;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.14;
 
@@ -218,6 +223,17 @@ export class OkeyTable3D {
     this.tvWallCssObj.visible = false;
     this.tvWallVisible = false;
     this.tvWallWorldZ = -25.08;
+    this._css3dMatrixValid = false;
+    this._lastCss3dWorldMatrix = new Float32Array(16);
+    this._lastCss3dProjMatrix = new Float32Array(16);
+    this._lastCss3dDisplay = 'none';
+
+    this._frameCounter = 0;
+    this._lastFrameNow = 0;
+    this._perfSlowFrames = 0;
+    this._perfFastFrames = 0;
+    this._perfTier = 0;
+    this._camOffsetVec = new THREE.Vector3();
 
     this.demoMode = true;
     this.reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false;
@@ -227,6 +243,7 @@ export class OkeyTable3D {
     this.lastHoverCheckTime = 0;
     this.interactables = [];
     this.envInteractables = [];
+    this._hoverTargets = [];
     this.envDisposableGeoms = [];
     this.envDisposableMats = [];
     this.rackSlotMeshes = [];
@@ -240,6 +257,13 @@ export class OkeyTable3D {
     this.dragTargetPos = null;
     this.dragTargetQuat = null;
     this.dragTargetScale = null;
+    this._dragRackPt = new THREE.Vector3();
+    this._dragLocalPt = new THREE.Vector3();
+    this._dragFrontWorld = new THREE.Vector3();
+    this._dragTablePt = new THREE.Vector3();
+    this._dragQuat = new THREE.Quaternion();
+    this._dragEuler = new THREE.Euler(0, 0, 0, 'XYZ');
+    this._lastHighlightedSlotIdx = -1;
     this.rackDragPlane = null;
     this.orbitDrag = null;
     this.activePointerId = null;
@@ -263,6 +287,7 @@ export class OkeyTable3D {
     this.windowMats = [];
     this.rainGroup = null;
     this.rainDrops = [];
+    this._rainDummyMatrix = new THREE.Matrix4();
     this.hearthGroup = null;
     this.hearthLight = null;
     this.hearthEmbers = [];
@@ -375,59 +400,103 @@ export class OkeyTable3D {
     this.animate();
   }
 
+  applyEffectivePixelRatio() {
+    let target = this.basePixelRatio;
+    if (this._perfTier === 1) {
+      target = Math.min(target, 1.0);
+    } else if (this._perfTier >= 2) {
+      target = Math.min(target, 0.85);
+    }
+    if (this.musicPerfMode) {
+      target = Math.min(target, 1.05);
+    }
+    if (Math.abs(target - this.activePixelRatio) > 0.02) {
+      this.activePixelRatio = target;
+      this.renderer.setPixelRatio(target);
+      this.onResize();
+    }
+  }
+
+  requestShadowUpdate(frames = 2) {
+    if (this.shadowFramesPending < frames) {
+      this.shadowFramesPending = frames;
+    }
+  }
+
+  mergeStaticGroup(group, { receiveShadow = false } = {}) {
+    group.updateMatrixWorld(true);
+    const buckets = new Map();
+    const origGeoms = new Set();
+
+    group.traverse((obj) => {
+      if (!obj.isMesh || !obj.geometry || !obj.material) return;
+      origGeoms.add(obj.geometry);
+      const geom = obj.geometry.index ? obj.geometry.toNonIndexed() : obj.geometry.clone();
+      geom.applyMatrix4(obj.matrixWorld);
+      let list = buckets.get(obj.material);
+      if (!list) {
+        list = [];
+        buckets.set(obj.material, list);
+      }
+      list.push(geom);
+    });
+
+    for (const [mat, geoms] of buckets.entries()) {
+      const merged = mergeGeometries(geoms, false);
+      for (const g of geoms) g.dispose();
+      if (!merged) continue;
+      const mesh = new THREE.Mesh(merged, mat);
+      mesh.receiveShadow = receiveShadow;
+      mesh.castShadow = false;
+      this.scene.add(mesh);
+      this.envDisposableGeoms.push(merged);
+    }
+
+    for (const g of origGeoms) g.dispose();
+  }
+
   setMusicPerformanceMode(active) {
     const next = Boolean(active);
     if (this.musicPerfMode === next) return;
     this.musicPerfMode = next;
-    const targetRatio = next
-      ? Math.min(window.devicePixelRatio || 1, 1.15)
-      : this.basePixelRatio;
-    this.renderer.setPixelRatio(targetRatio);
-    this.onResize();
+    this.applyEffectivePixelRatio();
   }
 
   getRackSlots() {
     return this.handSlotData;
   }
 
-  buildPendantLamp(x, y, z, scale = 1, addLight = false) {
+  buildPendantLamp(x, y, z, scale = 1, addLight = false, targetGroup = this.scene, sharedMats = null) {
     const group = new THREE.Group();
     group.position.set(x, y, z);
 
-    const brassMat = new THREE.MeshStandardMaterial({
-      color: '#C79B42',
-      roughness: 0.28,
-      metalness: 0.8
-    });
+    const brassMat = sharedMats?.brassMat || new THREE.MeshLambertMaterial({ color: '#C79B42' });
+    const globeMat = sharedMats?.globeMat || new THREE.MeshBasicMaterial({ color: '#FFE6A8' });
+
     const chainHeight = Math.max(1.2, 13.4 - y);
     const chain = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.035, 0.035, chainHeight, 8),
+      new THREE.CylinderGeometry(0.035, 0.035, chainHeight, 6),
       brassMat
     );
     chain.position.y = chainHeight / 2;
     group.add(chain);
 
     const cap = new THREE.Mesh(
-      new THREE.ConeGeometry(0.48 * scale, 0.4 * scale, 16),
+      new THREE.ConeGeometry(0.48 * scale, 0.4 * scale, 12),
       brassMat
     );
     cap.position.y = 0.24 * scale;
     group.add(cap);
 
     const globe = new THREE.Mesh(
-      new THREE.SphereGeometry(0.45 * scale, 20, 16),
-      new THREE.MeshStandardMaterial({
-        color: '#FFE6A8',
-        emissive: '#FF9F38',
-        emissiveIntensity: 1.75,
-        roughness: 0.2
-      })
+      new THREE.SphereGeometry(0.45 * scale, 12, 10),
+      globeMat
     );
     globe.position.y = -0.18 * scale;
     group.add(globe);
 
     const finial = new THREE.Mesh(
-      new THREE.ConeGeometry(0.14 * scale, 0.28 * scale, 12),
+      new THREE.ConeGeometry(0.14 * scale, 0.28 * scale, 8),
       brassMat
     );
     finial.rotation.x = Math.PI;
@@ -437,10 +506,11 @@ export class OkeyTable3D {
     if (addLight) {
       const pt = new THREE.PointLight('#FFC06E', 24, 28, 1.4);
       pt.position.y = -0.35 * scale;
-      group.add(pt);
+      this.scene.add(pt);
+      pt.position.set(x, y - 0.35 * scale, z);
     }
 
-    this.scene.add(group);
+    targetGroup.add(group);
   }
 
   buildWoodenChair(woodMat, leatherMat) {
@@ -491,35 +561,23 @@ export class OkeyTable3D {
     return chair;
   }
 
-  buildSideKahveTable(x, z, rotY, hasTavla = false) {
+  buildSideKahveTable(x, z, rotY, hasTavla = false, targetGroup = this.scene, shared = null) {
     const group = new THREE.Group();
     group.position.set(x, 0, z);
     group.rotation.y = rotY;
 
-    const woodMat = new THREE.MeshStandardMaterial({
-      map: getWoodTexture(),
-      color: '#75492B',
-      roughness: 0.55
-    });
-    const darkWoodMat = new THREE.MeshStandardMaterial({
-      map: getWoodTexture(),
-      color: '#52311D',
-      roughness: 0.65
-    });
-    const leatherMat = new THREE.MeshStandardMaterial({
-      color: '#2B1B14',
-      roughness: 0.65
-    });
+    const woodMat = shared?.woodMat || new THREE.MeshLambertMaterial({ map: getWoodTexture(), color: '#75492B' });
+    const darkWoodMat = shared?.darkWoodMat || new THREE.MeshLambertMaterial({ map: getWoodTexture(), color: '#52311D' });
+    const leatherMat = shared?.leatherMat || new THREE.MeshLambertMaterial({ color: '#2B1B14' });
+    const sideFeltMat = shared?.sideFeltMat || new THREE.MeshLambertMaterial({ map: getFeltTexture(this.tableTheme) });
+    if (!shared?.sideFeltMat) {
+      this.sideFeltMats.push(sideFeltMat);
+    }
 
     const top = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.24, 4.4), woodMat);
     top.position.y = -0.14;
     group.add(top);
 
-    const sideFeltMat = new THREE.MeshStandardMaterial({
-      map: getFeltTexture(this.tableTheme),
-      roughness: 0.9
-    });
-    this.sideFeltMats.push(sideFeltMat);
     const feltCenter = new THREE.Mesh(
       new THREE.BoxGeometry(3.6, 0.04, 3.6),
       sideFeltMat
@@ -527,11 +585,11 @@ export class OkeyTable3D {
     feltCenter.position.y = -0.01;
     group.add(feltCenter);
 
-    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.55, 2.2, 12), darkWoodMat);
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.55, 2.2, 10), darkWoodMat);
     col.position.y = -1.25;
     group.add(col);
 
-    const baseFoot = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.35, 0.16, 12), darkWoodMat);
+    const baseFoot = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.35, 0.16, 10), darkWoodMat);
     baseFoot.position.y = -2.27;
     group.add(baseFoot);
 
@@ -552,17 +610,17 @@ export class OkeyTable3D {
       });
     }
 
-    const saucerMat = new THREE.MeshStandardMaterial({ color: '#F0EAE0', roughness: 0.25 });
-    const teaMat = new THREE.MeshStandardMaterial({ color: '#8E250B', roughness: 0.15 });
+    const saucerMat = shared?.saucerMat || new THREE.MeshLambertMaterial({ color: '#F0EAE0' });
+    const teaMat = shared?.teaMat || new THREE.MeshLambertMaterial({ color: '#8E250B' });
     for (const [gx, gz] of [
       [-1.4, -1.3],
       [1.45, 1.35]
     ]) {
-      const saucer = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.18, 0.03, 12), saucerMat);
+      const saucer = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.18, 0.03, 10), saucerMat);
       saucer.position.set(gx, 0.03, gz);
       group.add(saucer);
 
-      const tea = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.08, 0.26, 10), teaMat);
+      const tea = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.08, 0.26, 8), teaMat);
       tea.position.set(gx, 0.17, gz);
       group.add(tea);
     }
@@ -580,29 +638,26 @@ export class OkeyTable3D {
       group.add(ch);
     }
 
-    this.scene.add(group);
+    targetGroup.add(group);
   }
 
-  buildPottedPlant(x, z, scale = 1) {
+  buildPottedPlant(x, z, scale = 1, targetGroup = this.scene, shared = null) {
     const group = new THREE.Group();
     group.position.set(x, -2.35, z);
     group.scale.setScalar(scale);
 
-    const pot = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.68, 0.46, 1.15, 12),
-      new THREE.MeshStandardMaterial({ color: '#7D3B22', roughness: 0.78 })
-    );
+    const potMat = shared?.potMat || new THREE.MeshLambertMaterial({ color: '#7D3B22' });
+    const trunkMat = shared?.trunkMat || new THREE.MeshLambertMaterial({ color: '#4A3122' });
+    const leafMat = shared?.leafMat || new THREE.MeshLambertMaterial({ color: '#295732' });
+
+    const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.68, 0.46, 1.15, 10), potMat);
     pot.position.y = 0.58;
     group.add(pot);
 
-    const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.08, 0.12, 1.9, 8),
-      new THREE.MeshStandardMaterial({ color: '#4A3122', roughness: 0.9 })
-    );
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 1.9, 6), trunkMat);
     trunk.position.y = 1.65;
     group.add(trunk);
 
-    const leafMat = new THREE.MeshStandardMaterial({ color: '#295732', roughness: 0.72 });
     const leafClusters = [
       [0, 2.75, 0, 0.65],
       [-0.45, 2.35, 0.3, 0.5],
@@ -616,7 +671,7 @@ export class OkeyTable3D {
       group.add(crown);
     }
 
-    this.scene.add(group);
+    targetGroup.add(group);
   }
 
   buildEnvironment() {
@@ -631,7 +686,7 @@ export class OkeyTable3D {
     const keyLight = new THREE.DirectionalLight('#FFF0D4', 1.25);
     keyLight.position.set(6, 16, 9);
     keyLight.castShadow = true;
-    keyLight.shadow.mapSize.set(1024, 1024);
+    keyLight.shadow.mapSize.set(512, 512);
     keyLight.shadow.camera.near = 2;
     keyLight.shadow.camera.far = 38;
     const d = 13.5;
@@ -648,77 +703,55 @@ export class OkeyTable3D {
 
     this.envLights = { hemi, pendantLight, keyLight, rimLight };
 
+    const staticEnvGroup = new THREE.Group();
+
     // Herringbone/plank walnut parquet floor + ornate central rug
-    const floorMat = new THREE.MeshStandardMaterial({
-      map: getParquetTexture(),
-      roughness: 0.72
-    });
+    const floorMat = new THREE.MeshLambertMaterial({ map: getParquetTexture() });
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(58, 58), floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -2.35;
     floor.receiveShadow = true;
     this.scene.add(floor);
 
-    const rugOuter = new THREE.Mesh(
-      new THREE.BoxGeometry(21.5, 0.04, 21.5),
-      new THREE.MeshStandardMaterial({ color: '#612119', roughness: 0.94 })
-    );
+    const rugOuterMat = new THREE.MeshLambertMaterial({ color: '#612119' });
+    const rugOuter = new THREE.Mesh(new THREE.BoxGeometry(21.5, 0.04, 21.5), rugOuterMat);
     rugOuter.position.y = -2.33;
     rugOuter.receiveShadow = true;
     this.scene.add(rugOuter);
 
-    const rugBorder = new THREE.Mesh(
-      new THREE.BoxGeometry(18.8, 0.045, 18.8),
-      new THREE.MeshStandardMaterial({ color: '#8F642B', roughness: 0.9 })
-    );
+    const rugBorderMat = new THREE.MeshLambertMaterial({ color: '#8F642B' });
+    const rugBorder = new THREE.Mesh(new THREE.BoxGeometry(18.8, 0.045, 18.8), rugBorderMat);
     rugBorder.position.y = -2.326;
-    this.scene.add(rugBorder);
+    staticEnvGroup.add(rugBorder);
 
-    const rugInner = new THREE.Mesh(
-      new THREE.BoxGeometry(17.6, 0.05, 17.6),
-      new THREE.MeshStandardMaterial({ color: '#4E1A15', roughness: 0.95 })
-    );
+    const rugInnerMat = new THREE.MeshLambertMaterial({ color: '#4E1A15' });
+    const rugInner = new THREE.Mesh(new THREE.BoxGeometry(17.6, 0.05, 17.6), rugInnerMat);
     rugInner.position.y = -2.322;
-    this.scene.add(rugInner);
+    staticEnvGroup.add(rugInner);
 
     // Pedestal table leg under main center okey table
-    const legMat = new THREE.MeshStandardMaterial({
-      map: getWoodTexture(),
-      color: '#633D26',
-      roughness: 0.65
-    });
-    const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 2.2, 2.1, 20), legMat);
+    const legMat = new THREE.MeshLambertMaterial({ map: getWoodTexture(), color: '#633D26' });
+    const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 2.2, 2.1, 16), legMat);
     pedestal.position.y = -1.35;
-    this.scene.add(pedestal);
+    staticEnvGroup.add(pedestal);
 
     // 3D Kahvehane Interior Room (Warm Plaster, Walnut Wainscoting, Windows, Pilasters)
-    const wallPlasterMat = new THREE.MeshStandardMaterial({
-      color: '#3B251A',
-      roughness: 0.9
-    });
-    const wainscotMat = new THREE.MeshStandardMaterial({
-      map: getWoodTexture(),
-      color: '#5C3722',
-      roughness: 0.68
-    });
+    const wallPlasterMat = new THREE.MeshLambertMaterial({ color: '#3B251A' });
+    const wainscotMat = new THREE.MeshLambertMaterial({ map: getWoodTexture(), color: '#5C3722' });
     const trimBrassMat = new THREE.MeshStandardMaterial({
       color: '#C79B42',
       roughness: 0.34,
       metalness: 0.68
     });
-    const artMat0 = new THREE.MeshStandardMaterial({ map: getWallArtTexture(0), roughness: 0.6 });
-    const artMat1 = new THREE.MeshStandardMaterial({ map: getWallArtTexture(1), roughness: 0.72 });
-    const menuMat = new THREE.MeshStandardMaterial({ map: getMenuBoardTexture(), roughness: 0.75 });
+    const artMat0 = new THREE.MeshLambertMaterial({ map: getWallArtTexture(0) });
+    const artMat1 = new THREE.MeshLambertMaterial({ map: getWallArtTexture(1) });
+    const menuMat = new THREE.MeshLambertMaterial({ map: getMenuBoardTexture() });
     this.clockUpdater = createLiveClockTexture();
     const clockMat = new THREE.MeshBasicMaterial({ map: this.clockUpdater.texture });
     const windowMat = new THREE.MeshBasicMaterial({ map: getWindowAtmosphereTexture(this.roomAtmosphere) });
     this.windowMats = [windowMat];
-    const photoMat = new THREE.MeshStandardMaterial({ map: getKahveBackdropTexture(), roughness: 0.65 });
-    const sconceMat = new THREE.MeshStandardMaterial({
-      color: '#FFE4A3',
-      emissive: '#FF9E3D',
-      emissiveIntensity: 1.55
-    });
+    const photoMat = new THREE.MeshLambertMaterial({ map: getKahveBackdropTexture() });
+    const sconceMat = new THREE.MeshBasicMaterial({ color: '#FFD88A' });
 
     const roomHalf = 25.5;
     const wallSpecs = [
@@ -772,24 +805,24 @@ export class OkeyTable3D {
       });
 
       [-10, 10].forEach((sx) => {
-        const sconce = new THREE.Mesh(new THREE.SphereGeometry(0.32, 10, 8), sconceMat);
+        const sconce = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 6), sconceMat);
         sconce.position.set(sx, 2.2, 0.45);
         wallGroup.add(sconce);
       });
 
-      this.scene.add(wallGroup);
+      staticEnvGroup.add(wallGroup);
     });
 
     // Ticking Round Wall Clock on North back wall (left bay, clear of center TV)
     const clockGroup = new THREE.Group();
     clockGroup.position.set(-12.2, 10.6, -roomHalf + 0.24);
     const clockCase = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.22, 1.3, 0.26, 24),
+      new THREE.CylinderGeometry(1.22, 1.3, 0.26, 20),
       wainscotMat
     );
     clockCase.rotation.x = Math.PI / 2;
     clockGroup.add(clockCase);
-    const clockFace = new THREE.Mesh(new THREE.CircleGeometry(1.06, 24), clockMat);
+    const clockFace = new THREE.Mesh(new THREE.CircleGeometry(1.06, 20), clockMat);
     clockFace.position.z = 0.15;
     clockGroup.add(clockFace);
     this.scene.add(clockGroup);
@@ -798,7 +831,7 @@ export class OkeyTable3D {
     this.tvUpdater = createTvScreenTexture();
     const tvGroup = new THREE.Group();
     tvGroup.position.set(0, 8.5, -roomHalf + 0.32);
-    const tvChassisMat = new THREE.MeshStandardMaterial({ color: '#181412', roughness: 0.45, metalness: 0.25 });
+    const tvChassisMat = new THREE.MeshLambertMaterial({ color: '#181412' });
     const tvBezel = new THREE.Mesh(new THREE.BoxGeometry(15.7, 9.05, 0.26), tvChassisMat);
     tvGroup.add(tvBezel);
     const tvShelfTrim = new THREE.Mesh(new THREE.BoxGeometry(15.86, 0.14, 0.32), trimBrassMat);
@@ -811,7 +844,24 @@ export class OkeyTable3D {
     tvGroup.add(tvScreen);
     this.tvScreenMesh = tvScreen;
     this.envInteractables.push(tvScreen);
-    this.envDisposableMats.push(clockMat, tvChassisMat, tvScreenMat);
+    this.envDisposableMats.push(
+      floorMat,
+      rugOuterMat,
+      rugBorderMat,
+      rugInnerMat,
+      legMat,
+      wallPlasterMat,
+      wainscotMat,
+      trimBrassMat,
+      artMat0,
+      artMat1,
+      menuMat,
+      photoMat,
+      sconceMat,
+      clockMat,
+      tvChassisMat,
+      tvScreenMat
+    );
     this.scene.add(tvGroup);
 
     this.tvWallWorldZ = -roomHalf + 0.48;
@@ -821,14 +871,16 @@ export class OkeyTable3D {
       this.css3dScene.add(this.tvWallCssObj);
     }
 
-    // Atmosphere Windows on East & West walls with velvet drapes
-    const curtainMat = new THREE.MeshStandardMaterial({ color: '#53191B', roughness: 0.88 });
-    const rainGroup = new THREE.Group();
+    // Atmosphere Windows on East & West walls with velvet drapes + single-draw InstancedMesh rain
+    const curtainMat = new THREE.MeshLambertMaterial({ color: '#53191B' });
     const rainGeo = new THREE.BoxGeometry(0.03, 0.36, 0.03);
     const rainMat = new THREE.MeshBasicMaterial({ color: '#B7D5FF', transparent: true, opacity: 0.35 });
+    const rainInstanced = new THREE.InstancedMesh(rainGeo, rainMat, 40);
+    rainInstanced.frustumCulled = false;
     this.envDisposableGeoms.push(rainGeo);
-    this.envDisposableMats.push(windowMat, rainMat);
+    this.envDisposableMats.push(curtainMat, windowMat, rainMat);
     this.rainDrops = [];
+    let rainIdx = 0;
 
     [-1, 1].forEach((side) => {
       [-5.5, 5.5].forEach((wz) => {
@@ -855,39 +907,39 @@ export class OkeyTable3D {
         }
 
         for (const cx of [-2.45, 2.45]) {
-          const drape = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.4, 6.4, 10), curtainMat);
+          const drape = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.4, 6.4, 8), curtainMat);
           drape.position.set(cx, 0, 0.16);
           winGroup.add(drape);
         }
 
         for (let r = 0; r < 10; r += 1) {
-          const drop = new THREE.Mesh(rainGeo, rainMat);
           const localX = ((r * 37) % 40) / 10 - 2.0;
           const baseY = ((r * 19) % 48) / 10 - 2.4;
-          drop.position.set(
-            side * (roomHalf - 0.3),
-            2.1 + baseY,
-            wz + (side === -1 ? -localX : localX)
-          );
-          rainGroup.add(drop);
-          this.rainDrops.push({ mesh: drop, minY: -0.4, maxY: 4.6, speed: 4.5 + (r % 3) * 1.4 });
+          const dx = side * (roomHalf - 0.3);
+          const dy = 2.1 + baseY;
+          const dz = wz + (side === -1 ? -localX : localX);
+          this._rainDummyMatrix.makeTranslation(dx, dy, dz);
+          rainInstanced.setMatrixAt(rainIdx, this._rainDummyMatrix);
+          this.rainDrops.push({ x: dx, y: dy, z: dz, minY: -0.4, maxY: 4.6, speed: 4.5 + (r % 3) * 1.4 });
+          rainIdx += 1;
         }
 
-        this.scene.add(winGroup);
+        staticEnvGroup.add(winGroup);
       });
     });
-    this.rainGroup = rainGroup;
-    this.scene.add(rainGroup);
+    rainInstanced.instanceMatrix.needsUpdate = true;
+    this.rainGroup = rainInstanced;
+    this.scene.add(rainInstanced);
 
     // Cozy Kuzine / Fireplace in Back-Left Corner (activated prominently in midnight/rainy)
     const hearthGroup = new THREE.Group();
     hearthGroup.position.set(-21.2, -2.35, -19.2);
     hearthGroup.rotation.y = Math.PI / 4;
-    const stoveMat = new THREE.MeshStandardMaterial({ color: '#1B1918', roughness: 0.48, metalness: 0.55 });
+    const stoveMat = new THREE.MeshLambertMaterial({ color: '#1B1918' });
     const stoveBody = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.9, 1.5), stoveMat);
     stoveBody.position.y = 1.45;
     hearthGroup.add(stoveBody);
-    const stovePipe = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 12.2, 12), stoveMat);
+    const stovePipe = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 12.2, 10), stoveMat);
     stovePipe.position.set(0, 8.2, -0.2);
     hearthGroup.add(stovePipe);
     const emberMat = new THREE.MeshBasicMaterial({ color: '#FF6A1A' });
@@ -906,18 +958,16 @@ export class OkeyTable3D {
     this.scene.add(hearthGroup);
 
     // Ceiling & Exposed Timber Beams
-    const ceiling = new THREE.Mesh(
-      new THREE.PlaneGeometry(54, 54),
-      new THREE.MeshStandardMaterial({ color: '#1F130D', roughness: 0.95 })
-    );
+    const ceilingMat = new THREE.MeshLambertMaterial({ color: '#1F130D' });
+    const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(54, 54), ceilingMat);
     ceiling.rotation.x = Math.PI / 2;
     ceiling.position.y = 13.4;
-    this.scene.add(ceiling);
+    staticEnvGroup.add(ceiling);
 
     [-18, -9, 0, 9, 18].forEach((bz) => {
       const beam = new THREE.Mesh(new THREE.BoxGeometry(52, 0.58, 0.72), wainscotMat);
       beam.position.set(0, 13.1, bz);
-      this.scene.add(beam);
+      staticEnvGroup.add(beam);
     });
 
     // Kahvehane Ocakbaşı (Tea Counter + Copper/Brass Çay Kazanı & Demlik + Tea Glass Shelves)
@@ -927,10 +977,8 @@ export class OkeyTable3D {
     counter.position.y = 1.38;
     barGroup.add(counter);
 
-    const counterTop = new THREE.Mesh(
-      new THREE.BoxGeometry(12.6, 0.2, 2.65),
-      new THREE.MeshStandardMaterial({ color: '#945F37', roughness: 0.35 })
-    );
+    const counterTopMat = new THREE.MeshLambertMaterial({ color: '#945F37' });
+    const counterTop = new THREE.Mesh(new THREE.BoxGeometry(12.6, 0.2, 2.65), counterTopMat);
     counterTop.position.y = 2.84;
     barGroup.add(counterTop);
 
@@ -947,7 +995,7 @@ export class OkeyTable3D {
     kazanRim.position.set(-2.4, 4.65, 0);
     barGroup.add(kazanRim);
 
-    const demlik = new THREE.Mesh(new THREE.SphereGeometry(0.46, 14, 10), trimBrassMat);
+    const demlik = new THREE.Mesh(new THREE.SphereGeometry(0.46, 10, 8), trimBrassMat);
     demlik.scale.set(1.05, 0.88, 1.05);
     demlik.position.set(-2.4, 5.1, 0);
     barGroup.add(demlik);
@@ -957,35 +1005,74 @@ export class OkeyTable3D {
       shelf.position.set(1.0, sy, -1.7);
       barGroup.add(shelf);
     }
-    const barGlassMat = new THREE.MeshStandardMaterial({ color: '#DCE8EB', transparent: true, opacity: 0.6, roughness: 0.1 });
+    const barGlassMat = new THREE.MeshLambertMaterial({ color: '#DCE8EB', transparent: true, opacity: 0.6 });
     for (let i = 0; i < 8; i += 1) {
-      const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.11, 0.34, 10), barGlassMat);
+      const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.11, 0.34, 8), barGlassMat);
       glass.position.set(-1.6 + i * 0.72, 5.05, -1.7);
       barGroup.add(glass);
     }
-    this.scene.add(barGroup);
+    staticEnvGroup.add(barGroup);
+
+    // Shared materials for batched decorative corner tables, chairs, plants & lamps
+    const sideTableShared = {
+      woodMat: new THREE.MeshLambertMaterial({ map: getWoodTexture(), color: '#75492B' }),
+      darkWoodMat: new THREE.MeshLambertMaterial({ map: getWoodTexture(), color: '#52311D' }),
+      leatherMat: new THREE.MeshLambertMaterial({ color: '#2B1B14' }),
+      sideFeltMat: new THREE.MeshLambertMaterial({ map: getFeltTexture(this.tableTheme) }),
+      saucerMat: new THREE.MeshLambertMaterial({ color: '#F0EAE0' }),
+      teaMat: new THREE.MeshLambertMaterial({ color: '#8E250B' })
+    };
+    this.sideFeltMats.push(sideTableShared.sideFeltMat);
 
     // 4 Cozy Ambient Side Kahvehane Tables around the room
-    this.buildSideKahveTable(-16.2, -15.2, 0.18, false);
-    this.buildSideKahveTable(16.2, -15.2, -0.22, true);
-    this.buildSideKahveTable(-17.4, 10.2, -0.15, true);
-    this.buildSideKahveTable(17.4, 10.2, 0.2, false);
+    this.buildSideKahveTable(-16.2, -15.2, 0.18, false, staticEnvGroup, sideTableShared);
+    this.buildSideKahveTable(16.2, -15.2, -0.22, true, staticEnvGroup, sideTableShared);
+    this.buildSideKahveTable(-17.4, 10.2, -0.15, true, staticEnvGroup, sideTableShared);
+    this.buildSideKahveTable(17.4, 10.2, 0.2, false, staticEnvGroup, sideTableShared);
 
     // 3 Real Kahvehane Cats (Yumak, Fırtına, Kömür) on Cozy Cushions with Real-Photo Portraits
     this.buildKahvehaneCats(wainscotMat, trimBrassMat);
 
-    // Potted Kahvehane Ficus Plants in Room Corners
-    this.buildPottedPlant(-23.2, -23.2, 1.15);
-    this.buildPottedPlant(23.2, -23.2, 1.1);
-    this.buildPottedPlant(-23.2, 22.8, 1.05);
-    this.buildPottedPlant(23.2, 22.8, 1.1);
+    // Potted Kahvehane Ficus Plants in Room Corners (shared materials, batched)
+    const plantShared = {
+      potMat: new THREE.MeshLambertMaterial({ color: '#7D3B22' }),
+      trunkMat: new THREE.MeshLambertMaterial({ color: '#4A3122' }),
+      leafMat: new THREE.MeshLambertMaterial({ color: '#295732' })
+    };
+    this.buildPottedPlant(-23.2, -23.2, 1.15, staticEnvGroup, plantShared);
+    this.buildPottedPlant(23.2, -23.2, 1.1, staticEnvGroup, plantShared);
+    this.buildPottedPlant(-23.2, 22.8, 1.05, staticEnvGroup, plantShared);
+    this.buildPottedPlant(23.2, 22.8, 1.1, staticEnvGroup, plantShared);
 
     // Hanging Brass Mosaic Pendant Lamps over center & corner tables
-    this.buildPendantLamp(0, 10.4, 0, 1.25, false);
-    this.buildPendantLamp(-16.2, 7.2, -15.2, 1.05, false);
-    this.buildPendantLamp(16.2, 7.2, -15.2, 1.05, false);
-    this.buildPendantLamp(-17.4, 7.2, 10.2, 1.0, false);
-    this.buildPendantLamp(17.4, 7.2, 10.2, 1.0, false);
+    const lampShared = {
+      brassMat: trimBrassMat,
+      globeMat: new THREE.MeshBasicMaterial({ color: '#FFE6A8' })
+    };
+    this.buildPendantLamp(0, 10.4, 0, 1.25, false, staticEnvGroup, lampShared);
+    this.buildPendantLamp(-16.2, 7.2, -15.2, 1.05, false, staticEnvGroup, lampShared);
+    this.buildPendantLamp(16.2, 7.2, -15.2, 1.05, false, staticEnvGroup, lampShared);
+    this.buildPendantLamp(-17.4, 7.2, 10.2, 1.0, false, staticEnvGroup, lampShared);
+    this.buildPendantLamp(17.4, 7.2, 10.2, 1.0, false, staticEnvGroup, lampShared);
+
+    this.envDisposableMats.push(
+      ceilingMat,
+      counterTopMat,
+      copperMat,
+      barGlassMat,
+      sideTableShared.woodMat,
+      sideTableShared.darkWoodMat,
+      sideTableShared.leatherMat,
+      sideTableShared.sideFeltMat,
+      sideTableShared.saucerMat,
+      sideTableShared.teaMat,
+      plantShared.potMat,
+      plantShared.trunkMat,
+      plantShared.leafMat,
+      lampShared.globeMat
+    );
+
+    this.mergeStaticGroup(staticEnvGroup, { receiveShadow: false });
 
     this.setRoomAtmosphere(this.roomAtmosphere);
   }
@@ -1396,7 +1483,10 @@ export class OkeyTable3D {
     return row * RACK_COLS + col;
   }
 
-  createTileMesh(tile, { faceUp = true, okeyTarget = null, selected = false, mustUse = false } = {}) {
+  createTileMesh(
+    tile,
+    { faceUp = true, okeyTarget = null, selected = false, mustUse = false, castShadow = true } = {}
+  ) {
     let faceMat = this.backTileMat;
     if (faceUp) {
       const isOkey = isOkeyTile(tile, okeyTarget);
@@ -1418,7 +1508,7 @@ export class OkeyTable3D {
     // Group 0: front, Group 1: back, Group 2: bevel & sides
     const materials = [faceMat, this.backTileMat, this.sideTileMat];
     const mesh = new THREE.Mesh(this.tileGeom, materials);
-    mesh.castShadow = true;
+    mesh.castShadow = castShadow;
     mesh.receiveShadow = true;
     return mesh;
   }
@@ -1925,6 +2015,7 @@ export class OkeyTable3D {
         this.orderGroup.add(mesh);
       }
     }
+    this.requestShadowUpdate(2);
   }
 
   buildDemoSetup() {
@@ -1954,16 +2045,23 @@ export class OkeyTable3D {
     });
 
     for (let i = 0; i < 6; i += 1) {
-      const tMesh = this.createTileMesh({ id: `ds-${i}`, color: 'red', number: 1 }, { faceUp: false });
+      const tMesh = this.createTileMesh(
+        { id: `ds-${i}`, color: 'red', number: 1 },
+        { faceUp: false, castShadow: i === 5 }
+      );
       tMesh.rotation.x = -Math.PI / 2;
       tMesh.position.set(-0.65, 0.085 + i * (TILE_D + 0.004), -3.85);
       this.dynamicGroup.add(tMesh);
     }
 
-    const gostergeMesh = this.createTileMesh({ id: 'dg', color: 'red', number: 7 }, { faceUp: true, okeyTarget: demoOkey });
+    const gostergeMesh = this.createTileMesh(
+      { id: 'dg', color: 'red', number: 7 },
+      { faceUp: true, okeyTarget: demoOkey, castShadow: false }
+    );
     gostergeMesh.rotation.x = -Math.PI / 2;
     gostergeMesh.position.set(0.65, 0.17, -3.85);
     this.dynamicGroup.add(gostergeMesh);
+    this.requestShadowUpdate(2);
   }
 
   cancelActiveInteractions() {
@@ -1990,9 +2088,10 @@ export class OkeyTable3D {
     this.dragTargetScale = null;
     this.canvas.style.cursor = 'default';
     this.setRightDiscardHighlight(false, false);
-    this.rackSlotMeshes.forEach((m) => {
-      m.material.opacity = 0;
-    });
+    if (this._lastHighlightedSlotIdx >= 0 && this.rackSlotMeshes[this._lastHighlightedSlotIdx]) {
+      this.rackSlotMeshes[this._lastHighlightedSlotIdx].material.opacity = 0;
+    }
+    this._lastHighlightedSlotIdx = -1;
   }
 
   clearDynamic({ preserveInteraction = false } = {}) {
@@ -2395,7 +2494,7 @@ export class OkeyTable3D {
       for (let i = 0; i < stackLayers; i += 1) {
         const layer = this.createTileMesh(
           { id: `deck-${i}`, color: 'black', number: 1 },
-          { faceUp: false }
+          { faceUp: false, castShadow: i === stackLayers - 1 }
         );
         layer.rotation.x = -Math.PI / 2;
         layer.position.y = 0.075 + i * (TILE_D + 0.004);
@@ -2423,7 +2522,8 @@ export class OkeyTable3D {
 
       const gMesh = this.createTileMesh(state.gosterge, {
         faceUp: true,
-        okeyTarget: state.okeyTarget
+        okeyTarget: state.okeyTarget,
+        castShadow: false
       });
       gMesh.rotation.x = -Math.PI / 2;
       gMesh.position.set(0.68, 0.21, -3.9);
@@ -2452,7 +2552,8 @@ export class OkeyTable3D {
           const isTop = i === layers - 1;
           const tMesh = this.createTileMesh(pileInfo.topTile, {
             faceUp: isTop,
-            okeyTarget: state.okeyTarget
+            okeyTarget: state.okeyTarget,
+            castShadow: isTop
           });
           tMesh.rotation.x = -Math.PI / 2;
           tMesh.position.set(baseCoord.x, 0.095 + i * (TILE_D + 0.004), baseCoord.z);
@@ -2498,6 +2599,7 @@ export class OkeyTable3D {
 
     // 6. Render Opened Table Melds
     this.renderTableMelds(state, mySeat, isMyTurn, snapshot, viewerIdx);
+    this.requestShadowUpdate(2);
   }
 
   renderTableMelds(state, mySeat, isMyTurn, snapshot = null, viewerIdx = 0) {
@@ -2551,7 +2653,8 @@ export class OkeyTable3D {
         nextTableTileIds.add(slot.tile.id);
         const mesh = this.createTileMesh(slot.tile, {
           faceUp: true,
-          okeyTarget: state.okeyTarget
+          okeyTarget: state.okeyTarget,
+          castShadow: false
         });
         mesh.scale.setScalar(meldTileScale);
         mesh.rotation.x = -Math.PI / 2;
@@ -2785,51 +2888,61 @@ export class OkeyTable3D {
           this.raycaster.setFromCamera(this.pointer, this.camera);
 
           const slotHits = this.raycaster.intersectObjects(this.rackSlotMeshes, false);
-          this.rackSlotMeshes.forEach((m) => {
-            m.material.opacity = 0;
-          });
 
           const isFlipped = this.flippedTileIds.has(this.dragState.tile.id);
-          const rackPt = new THREE.Vector3();
+          const rackPt = this._dragRackPt;
           const hasRackHit =
             this.rackDragPlane &&
             this.southRackGroup &&
             this.raycaster.ray.intersectPlane(this.rackDragPlane, rackPt);
 
           let overRackPlane = false;
-          let hoverSlotIdx = slotHits.length > 0 ? slotHits[0].object.userData.slotIdx : null;
+          let hoverSlotIdx = slotHits.length > 0 ? slotHits[0].object.userData.slotIdx : -1;
           if (hasRackHit) {
-            const localPt = this.southRackGroup.worldToLocal(rackPt.clone());
+            const localPt = this._dragLocalPt.copy(rackPt);
+            this.southRackGroup.worldToLocal(localPt);
             if (
               slotHits.length > 0 ||
               (Math.abs(localPt.x) <= 5.15 && localPt.y >= -0.2 && localPt.y <= 2.7)
             ) {
               overRackPlane = true;
-              if (hoverSlotIdx == null) {
+              if (hoverSlotIdx < 0) {
                 hoverSlotIdx = this.findNearestRackSlot(localPt);
               }
-              const frontWorld = new THREE.Vector3(
-                THREE.MathUtils.clamp(localPt.x, -4.95, 4.95),
-                THREE.MathUtils.clamp(localPt.y, 0.25, 2.35),
-                0.36
-              ).applyMatrix4(this.southRackGroup.matrixWorld);
+              const frontWorld = this._dragFrontWorld
+                .set(
+                  THREE.MathUtils.clamp(localPt.x, -4.95, 4.95),
+                  THREE.MathUtils.clamp(localPt.y, 0.25, 2.35),
+                  0.36
+                )
+                .applyMatrix4(this.southRackGroup.matrixWorld);
               if (!this.dragTargetPos) this.dragTargetPos = new THREE.Vector3();
               this.dragTargetPos.copy(frontWorld);
-              this.dragTargetQuat = new THREE.Quaternion().setFromEuler(
-                new THREE.Euler(-0.32, isFlipped ? Math.PI : 0, 0, 'XYZ')
-              );
+              this._dragEuler.set(-0.32, isFlipped ? Math.PI : 0, 0, 'XYZ');
+              if (!this.dragTargetQuat) this.dragTargetQuat = new THREE.Quaternion();
+              this.dragTargetQuat.setFromEuler(this._dragEuler);
             }
           } else if (slotHits.length > 0) {
             overRackPlane = true;
           }
 
-          if (overRackPlane && hoverSlotIdx != null && this.rackSlotMeshes[hoverSlotIdx]) {
-            this.rackSlotMeshes[hoverSlotIdx].material.opacity = 0.45;
+          const nextHighlightIdx =
+            overRackPlane && hoverSlotIdx >= 0 && this.rackSlotMeshes[hoverSlotIdx]
+              ? hoverSlotIdx
+              : -1;
+          if (this._lastHighlightedSlotIdx !== nextHighlightIdx) {
+            if (this._lastHighlightedSlotIdx >= 0 && this.rackSlotMeshes[this._lastHighlightedSlotIdx]) {
+              this.rackSlotMeshes[this._lastHighlightedSlotIdx].material.opacity = 0;
+            }
+            if (nextHighlightIdx >= 0 && this.rackSlotMeshes[nextHighlightIdx]) {
+              this.rackSlotMeshes[nextHighlightIdx].material.opacity = 0.45;
+            }
+            this._lastHighlightedSlotIdx = nextHighlightIdx;
           }
 
           let dragTablePt = null;
           if (!overRackPlane) {
-            const dragPt = new THREE.Vector3();
+            const dragPt = this._dragTablePt;
             if (this.raycaster.ray.intersectPlane(this.tableDragPlane, dragPt)) {
               dragTablePt = dragPt;
               const clampedX = THREE.MathUtils.clamp(dragPt.x, -8.2, 8.2);
@@ -2841,9 +2954,9 @@ export class OkeyTable3D {
                 overRackFootprint ? Math.max(2.6, dragPt.y) : Math.max(0.95, dragPt.y),
                 clampedZ
               );
-              this.dragTargetQuat = new THREE.Quaternion().setFromEuler(
-                new THREE.Euler(-0.82, isFlipped ? Math.PI : 0, 0, 'XYZ')
-              );
+              this._dragEuler.set(-0.82, isFlipped ? Math.PI : 0, 0, 'XYZ');
+              if (!this.dragTargetQuat) this.dragTargetQuat = new THREE.Quaternion();
+              this.dragTargetQuat.setFromEuler(this._dragEuler);
             }
           }
 
@@ -2855,17 +2968,23 @@ export class OkeyTable3D {
 
       if (this.demoMode) return;
       const now = performance.now();
-      if (now - this.lastHoverCheckTime < 40) return;
+      if (now - this.lastHoverCheckTime < 65) return;
       this.lastHoverCheckTime = now;
+      if (document.querySelector('dialog[open]')) return;
 
       this.updatePointer(e.clientX, e.clientY);
       this.raycaster.setFromCamera(this.pointer, this.camera);
-      const hoverTargets = [
-        ...this.interactables,
-        ...(this.myDrinkHitMesh ? [this.myDrinkHitMesh] : []),
-        ...this.envInteractables
-      ];
-      const hits = this.raycaster.intersectObjects(hoverTargets, false);
+      this._hoverTargets.length = 0;
+      for (let i = 0; i < this.interactables.length; i += 1) {
+        this._hoverTargets.push(this.interactables[i]);
+      }
+      if (this.myDrinkHitMesh) {
+        this._hoverTargets.push(this.myDrinkHitMesh);
+      }
+      for (let i = 0; i < this.envInteractables.length; i += 1) {
+        this._hoverTargets.push(this.envInteractables[i]);
+      }
+      const hits = this.raycaster.intersectObjects(this._hoverTargets, false);
       this.canvas.style.cursor = hits.length > 0 ? 'pointer' : 'default';
     };
 
@@ -2885,9 +3004,11 @@ export class OkeyTable3D {
       this.dragTargetScale = null;
       this.canvas.style.cursor = 'default';
       this.setRightDiscardHighlight(false, false);
-      this.rackSlotMeshes.forEach((m) => {
-        m.material.opacity = 0;
-      });
+      if (this._lastHighlightedSlotIdx >= 0 && this.rackSlotMeshes[this._lastHighlightedSlotIdx]) {
+        this.rackSlotMeshes[this._lastHighlightedSlotIdx].material.opacity = 0;
+      }
+      this._lastHighlightedSlotIdx = -1;
+      this.requestShadowUpdate(2);
       if (drag.floatingMesh) {
         drag.floatingMesh.updateMatrixWorld(true);
         const pos = new THREE.Vector3();
@@ -3050,6 +3171,7 @@ export class OkeyTable3D {
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(w, h, false);
       this.css3dRenderer?.setSize(w, h);
+      this._css3dMatrixValid = false;
     };
 
     this.canvas.addEventListener('pointerdown', this.onPointerDown);
@@ -3074,6 +3196,7 @@ export class OkeyTable3D {
       mat.map = tex;
       mat.needsUpdate = true;
     }
+    this.requestShadowUpdate(2);
   }
 
   triggerCatReaction(catIndex = 0) {
@@ -3096,11 +3219,14 @@ export class OkeyTable3D {
     const next = Boolean(visible);
     if (this.tvWallVisible === next) return;
     this.tvWallVisible = next;
+    this._css3dMatrixValid = false;
     if (this.tvWallCssObj) {
       this.tvWallCssObj.visible = next;
     }
+    const nextDisplay = next ? '' : 'none';
+    this._lastCss3dDisplay = nextDisplay;
     if (this.css3dRenderer?.domElement) {
-      this.css3dRenderer.domElement.style.display = next ? '' : 'none';
+      this.css3dRenderer.domElement.style.display = nextDisplay;
     }
   }
 
@@ -3185,6 +3311,7 @@ export class OkeyTable3D {
         this.hearthLight.intensity = 8;
       }
     }
+    this.requestShadowUpdate(2);
   }
 
   setRackTheme(themeId = 'walnut') {
@@ -3199,6 +3326,7 @@ export class OkeyTable3D {
       this.coverWoodMat.color.set(preset.color);
       this.coverWoodMat.needsUpdate = true;
     }
+    this.requestShadowUpdate(2);
   }
 
   setTileTheme(themeId = 'ivory') {
@@ -3221,6 +3349,8 @@ export class OkeyTable3D {
       this.buildDemoSetup();
     } else if (this.currentState) {
       this.renderGameState(this.currentState, { skipSlotSync: true, instant: true });
+    } else {
+      this.requestShadowUpdate(2);
     }
   }
 
@@ -3313,30 +3443,63 @@ export class OkeyTable3D {
 
   animate() {
     this.rafId = requestAnimationFrame(this.animate);
+    const frameNow = performance.now();
+    const rawDt = this._lastFrameNow ? frameNow - this._lastFrameNow : 16.6;
+    this._lastFrameNow = frameNow;
+    this._frameCounter += 1;
+
+    if (rawDt > 26 && rawDt < 250) {
+      this._perfSlowFrames += 1;
+      this._perfFastFrames = 0;
+      if (this._perfSlowFrames >= 25 && this._perfTier < 2) {
+        this._perfTier += 1;
+        this._perfSlowFrames = 0;
+        this.applyEffectivePixelRatio();
+      }
+    } else if (rawDt < 19) {
+      this._perfFastFrames += 1;
+      this._perfSlowFrames = 0;
+      if (this._perfFastFrames >= 120 && this._perfTier > 0) {
+        this._perfTier -= 1;
+        this._perfFastFrames = 0;
+        this.applyEffectivePixelRatio();
+      }
+    } else {
+      this._perfSlowFrames = Math.max(0, this._perfSlowFrames - 1);
+    }
+
     const dt = Math.min(this.clock.getDelta(), 0.05);
 
     if (this.demoMode && !this.reducedMotion) {
       this.targetSpherical.theta += dt * 0.08;
     }
 
-    // Live ticking wall clock (updates once per second)
+    // Live ticking wall clock (updates once per second without per-frame Date allocations)
     if (this.clockUpdater) {
-      const nowDate = new Date();
-      const sec = nowDate.getSeconds();
-      if (sec !== this.lastClockSec) {
-        this.lastClockSec = sec;
-        this.clockUpdater.update(nowDate);
+      const secNow = (Date.now() / 1000) | 0;
+      if (secNow !== this.lastClockSec) {
+        this.lastClockSec = secNow;
+        this.clockUpdater.update(new Date());
       }
     }
 
-    // Gentle window raindrops when atmosphere is rainy
-    if (!this.reducedMotion && this.roomAtmosphere === 'rainy' && this.rainDrops.length > 0) {
-      for (const r of this.rainDrops) {
-        r.mesh.position.y -= r.speed * dt;
-        if (r.mesh.position.y < r.minY) {
-          r.mesh.position.y = r.maxY;
+    // Gentle window raindrops via single InstancedMesh draw call
+    if (
+      !this.reducedMotion &&
+      this.roomAtmosphere === 'rainy' &&
+      this.rainGroup &&
+      this.rainDrops.length > 0
+    ) {
+      for (let i = 0; i < this.rainDrops.length; i += 1) {
+        const r = this.rainDrops[i];
+        r.y -= r.speed * dt;
+        if (r.y < r.minY) {
+          r.y = r.maxY;
         }
+        this._rainDummyMatrix.makeTranslation(r.x, r.y, r.z);
+        this.rainGroup.setMatrixAt(i, this._rainDummyMatrix);
       }
+      this.rainGroup.instanceMatrix.needsUpdate = true;
     }
 
     // Subtle kuzine hearth flicker
@@ -3346,7 +3509,7 @@ export class OkeyTable3D {
         : this.roomAtmosphere === 'afternoon'
           ? 3.5
           : 8;
-      const t = performance.now() * 0.006;
+      const t = frameNow * 0.006;
       this.hearthLight.intensity = baseHearth + Math.sin(t * 2.1) * 1.4 + Math.cos(t * 3.7) * 0.9;
       for (const em of this.hearthEmbers) {
         em.scale.setScalar(0.95 + Math.sin(t * 2.9) * 0.06);
@@ -3473,8 +3636,8 @@ export class OkeyTable3D {
       this.camera.updateProjectionMatrix();
     }
 
-    const offset = new THREE.Vector3().setFromSpherical(this.camSpherical);
-    this.camera.position.copy(this.camTarget).add(offset);
+    this._camOffsetVec.setFromSpherical(this.camSpherical);
+    this.camera.position.copy(this.camTarget).add(this._camOffsetVec);
     if (this.nudgeShake && !this.reducedMotion) {
       this.nudgeShake.elapsed += dt;
       if (this.nudgeShake.elapsed >= this.nudgeShake.duration) {
@@ -3488,6 +3651,13 @@ export class OkeyTable3D {
     }
     this.camera.lookAt(this.camTarget);
 
+    if (this.shadowFramesPending > 0) {
+      this.shadowFramesPending -= 1;
+      this.renderer.shadowMap.needsUpdate = true;
+    } else if ((this.tileAnimations.length > 0 || this.dragState?.moved) && this._frameCounter % 3 === 0) {
+      this.renderer.shadowMap.needsUpdate = true;
+    }
+
     this.renderer.render(this.scene, this.camera);
     if (this.tvWallVisible && this.css3dRenderer && this.tvWallCssObj) {
       const camDir = this._tvTmpDir || (this._tvTmpDir = new THREE.Vector3());
@@ -3495,9 +3665,34 @@ export class OkeyTable3D {
       this.camera.getWorldDirection(camDir);
       toTv.subVectors(this.tvWallCssObj.position, this.camera.position);
       const inFrontOfWall = this.camera.position.z > (this.tvWallWorldZ + 0.8) && camDir.dot(toTv) > 0;
-      this.css3dRenderer.domElement.style.display = inFrontOfWall ? '' : 'none';
+      const nextDisplay = inFrontOfWall ? '' : 'none';
+      if (this._lastCss3dDisplay !== nextDisplay) {
+        this._lastCss3dDisplay = nextDisplay;
+        this.css3dRenderer.domElement.style.display = nextDisplay;
+        this._css3dMatrixValid = false;
+      }
       if (inFrontOfWall) {
-        this.css3dRenderer.render(this.css3dScene, this.camera);
+        this.camera.updateMatrixWorld();
+        const worldEl = this.camera.matrixWorldInverse.elements;
+        const projEl = this.camera.projectionMatrix.elements;
+        let changed = !this._css3dMatrixValid;
+        if (!changed) {
+          for (let i = 0; i < 16; i += 1) {
+            if (
+              Math.abs(worldEl[i] - this._lastCss3dWorldMatrix[i]) > 1e-5 ||
+              Math.abs(projEl[i] - this._lastCss3dProjMatrix[i]) > 1e-5
+            ) {
+              changed = true;
+              break;
+            }
+          }
+        }
+        if (changed) {
+          this._lastCss3dWorldMatrix.set(worldEl);
+          this._lastCss3dProjMatrix.set(projEl);
+          this._css3dMatrixValid = true;
+          this.css3dRenderer.render(this.css3dScene, this.camera);
+        }
       }
     }
   }
@@ -3505,6 +3700,7 @@ export class OkeyTable3D {
   destroy() {
     if (this.rafId) cancelAnimationFrame(this.rafId);
     this.cancelActiveInteractions();
+    this.rainGroup?.dispose?.();
     this.css3dRenderer?.domElement?.remove();
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
     window.removeEventListener('pointermove', this.onPointerMove);

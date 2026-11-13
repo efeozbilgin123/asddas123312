@@ -89,10 +89,10 @@ export function getFeltTexture(theme = 'green') {
   ctx.fillRect(0, 0, 768, 768);
 
   // Fine woven baize felt texture
-  for (let i = 0; i < 14000; i += 1) {
+  for (let i = 0; i < 4500; i += 1) {
     const x = Math.random() * 768;
     const y = Math.random() * 768;
-    ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.045)';
+    ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.05)';
     ctx.fillRect(x, y, 2, 2);
   }
 

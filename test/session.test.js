@@ -877,3 +877,69 @@ test('GameSession timeout returns left discard for unopened player and discards 
 
   session.destroy();
 });
+
+test('GameSession.executeBotTurn recovers cleanly if converted from human holding unusable pickedDiscardTileId', (ctx) => {
+  const session = new GameSession({
+    roomCode: 'BOTREC',
+    seatsConfig: [
+      { playerId: 'p0', name: 'Efe', isBot: false },
+      { playerId: 'p1', name: 'Bot 1', isBot: true },
+      { playerId: 'p2', name: 'Bot 2', isBot: true },
+      { playerId: 'p3', name: 'Bot 3', isBot: true }
+    ],
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
+    onStateChange: () => {}
+  });
+  ctx.after(() => session.destroy());
+
+  session.startRound();
+  session.okeyTarget = { color: 'yellow', number: 1 };
+  session.currentSeat = 0;
+  session.turnPhase = 'draw';
+  session.seats[0].opened = false;
+
+  const leftTile = tile('left-r2', 'red', 2);
+  session.seats[0].hand = [tile('h1', 'black', 5), tile('h2', 'blue', 9)];
+  session.discardPiles[3] = [leftTile];
+
+  // Human draws unusable left discard, then disconnects/leaves -> converted to bot
+  const pickRes = session.drawFromDiscard(0);
+  assert.equal(pickRes.ok, true);
+  assert.equal(session.pickedDiscardTileId, leftTile.id);
+
+  session.seats[0].isBot = true;
+  session.executeBotTurn(0);
+
+  // Immediately, unusable picked discard should be returned to seat 3 and replaced with deck draw
+  assert.equal(session.pickedDiscardTileId, null);
+  assert.equal(session.discardPiles[3][session.discardPiles[3].length - 1].id, leftTile.id);
+  assert.equal(session.seats[0].hand.length, 3);
+});
+
+test('LocalSingleplayerClient blocks game:nextRound during playing phase and validates orderTreat target', (ctx) => {
+  const client = new LocalSingleplayerClient({
+    playerName: '  Efe  ',
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
+    onState: () => {}
+  });
+  ctx.after(() => client.destroy());
+
+  let nextRes = null;
+  client.action('game:nextRound', {}, (res) => {
+    nextRes = res;
+  });
+  assert.equal(nextRes.ok, false);
+
+  let badTargetRes = null;
+  client.action('room:orderTreat', { itemId: 'cay', target: 'abc' }, (res) => {
+    badTargetRes = res;
+  });
+  assert.equal(badTargetRes.ok, false);
+
+  let badFloatRes = null;
+  client.action('room:orderTreat', { itemId: 'cay', target: 1.5 }, (res) => {
+    badFloatRes = res;
+  });
+  assert.equal(badFloatRes.ok, false);
+});
+

@@ -348,3 +348,112 @@ test('analyzeHandLive respects requiredTileId (picked left discard) so Tek Ac ne
   assert.equal(liveDead.seriesUsesRequired, false);
 });
 
+test('chooseBotDrawSource refuses left discard if opening uses all 22 tiles without leaving a discard', async () => {
+  const { chooseBotDrawSource } = await import('../shared/botAI.js');
+  const okeyTarget = { color: 'yellow', number: 1 };
+  // 21 tiles in hand + 1 leftDiscardTop = 22 tiles, where the only 101+ opening consumes all 22 tiles!
+  // Groups:
+  // g1: red 2..10 (9 tiles, 54 pts) — wait 2+3+4+5+6+7+8+9+10 = 54
+  // g2: blue 2..10 (9 tiles, 54 pts) -> total 108 pts across 18 tiles; plus 4-tile set black/yellow/red/blue 1? Wait: make exact 22-tile cover:
+  // Group A (7 tiles): black 1..7 = 28
+  // Group B (7 tiles): blue 1..7 = 28
+  // Group C (8 tiles): red 1..8 = 36 -> 28+28+36 = 92; bump numbers so >= 101 AND no sub-run < 101?
+  // Wait: findBestOpening takes sub-runs! Wait: if hand ONLY has 4-tile sets/runs? No, sub-runs of length 3 have fewer points!
+  // Let's make 6 tiles + 4 tiles + 4 tiles + 4 tiles + 4 tiles = 22 tiles? Sub-runs still exist!
+  // Wait: what if opening requires >= 101 and using ALL 4 groups (4+4+4+4+6 or 3+3+3+3+10? No, 10-tile run has sub-runs!):
+  // Actually: 3+3+3+3+3+3+4 = 22 tiles with NO sub-runs on the 3-tile sets!
+  // Check sums of 6 sets of 3 + 1 set of 4 = 22 tiles:
+  // Wait: 10 + 10 + 10 (30? no, sets are max 4!)
+  // Let's make exact 22 tiles that have NO sub-runs/sub-sets >= 101 without using ALL 22 tiles:
+  // - black 2,3,4 (9) + blue 2,3,4 (9) + red 2,3,4 (9) + yellow 2,3,4 (9) -> 12 tiles = 36 pts (no sub-runs!)
+  // - red 5,6,7 (18) + blue 5,6,7 (18) -> 18 tiles = 72 pts
+  // - black 8,9,10,11 (38) -> wait 8,9,10 (27): 72 + 27 = 99 < 101! With black 11 (leftDiscardTop), black 8..11 = 38 -> 72 + 38 = 110 >= 101, using ALL 22 tiles!
+  // Verify NO subset of 21 tiles reaches 101: max is 72 + 29? Wait: black 9,10,11 = 30 -> 72 + 30 = 102!
+  // Haha good catch! So put leftDiscardTop = black 5 (in 3-tile set? No, let all 3-tile sets be sets of same number? No, runs of length 3 have no sub-runs!).
+  // Use 6 runs of length 3 + 1 set of length 4:
+  // Wait: set of 4 tens = 40 (subset of 3 tens = 30).
+  // What if we have FIVE 3-tile runs + ONE 4-tile set + ONE 3-tile run:
+  // Wait: 6*3 + 4 = 22.
+  // To make 22 tiles REQUIRED: removing any 1 tile from ANY group reduces points below 101!
+  // If we use 3-tile runs/sets only? 7*3 = 21 tiles (1 left over).
+  // To force 22 tiles: 4-tile set of 3s (12 pts; dropping 1 -> 9 pts, delta 3) + ... no, openThreshold is 101!
+  // Look: set openThreshold = 105 (katlamali!).
+  // 22 tiles = six 3-tile groups + one 4-tile group:
+  // Say:
+  // 1) red 4,5,6 (15)
+  // 2) blue 4,5,6 (15)
+  // 3) black 4,5,6 (15)
+  // 4) yellow 4,5,6 (15)
+  // 5) red 7,8,9 (24)  -> Wait black/blue/etc. Make sure no cross-color sets of 4/5/6! Wait: red 4 + blue 4 + black 4 + yellow 4 = 16! So vary the numbers!
+  // Easy! Use distinct numbers per color:
+  // 1) red 2,3,4 (9)
+  // 2) blue 3,4,5 (12)
+  // 3) black 4,5,6 (15)
+  // 4) yellow 5,6,7 (18)
+  // 5) red 8,9,10 (27)
+  // 6) blue 7,8,9 (24) -> sum = 9+12+15+18+27+24 = 105! Wait that's 18 tiles!
+  // We want 22 tiles required for threshold 105:
+  // Adjust threshold = 108!Wait: max points of 7 runs of 3 = 21 tiles. With katlamali openThreshold = 114:
+  // 1) red 1,2,3 (6)
+  // 2) blue 2,3,4 (9)
+  // 3) black 3,4,5 (12)
+  // 4) yellow 4,5,6 (15)
+  // 5) red 6,7,8 (21)
+  // 6) blue 7,8,9 (24) -> 18 tiles, 87 pts
+  // 7) 4-tile set of 7s? No, colors overlap with 7s -> 4-tile set of 10s (40 pts) -> 87+40 = 127 (3 tens = 30 -> 117 >= 114, still works).
+  // Set openThreshold = 126! Then 87 + 30 = 117 < 126, MUST use all 4 tens (87 + 40 = 127 >= 126) using ALL 22 tiles!
+  const hand = [
+    t('r1', 'red', 1), t('r2', 'red', 2), t('r3', 'red', 3),
+    t('b2', 'blue', 2), t('b3', 'blue', 3), t('b4', 'blue', 4),
+    t('k3', 'black', 3), t('k4', 'black', 4), t('k5', 'black', 5),
+    t('y4', 'yellow', 4), t('y5', 'yellow', 5), t('y6', 'yellow', 6),
+    t('r6', 'red', 6), t('r7', 'red', 7), t('r8', 'red', 8),
+    t('b7', 'blue', 7), t('b8', 'blue', 8), t('b9', 'blue', 9),
+    t('t1', 'red', 10), t('t2', 'blue', 10), t('t3', 'black', 10)
+  ];
+  const leftDiscardTop = t('t4', 'yellow', 10);
+  const src = chooseBotDrawSource({
+    seat: { seatIndex: 1, opened: false, hand },
+    leftDiscardTop,
+    state: {
+      okeyTarget,
+      openThreshold: 126,
+      pairThreshold: 5,
+      tableMelds: [],
+      seats: [],
+      options: { katlamali: true }
+    }
+  });
+  assert.equal(src, 'deck');
+});
+
+test('computeBotTurnActions does not emit invalid sim-* layoffTile ids', async () => {
+  const { computeBotTurnActions } = await import('../shared/botAI.js');
+  const okeyTarget = { color: 'black', number: 1 };
+  // Step 2 lays [r13, b13, y13] as sim-0; without fix, Step 3 emits layoffTile { meldId: 'sim-0' } for w1.
+  const hand = [
+    t('r13', 'red', 13), t('b13', 'blue', 13), t('y13', 'yellow', 13),
+    t('w1', 'black', 1), t('d1', 'yellow', 4)
+  ];
+  const actions = computeBotTurnActions({
+    seat: { seatIndex: 0, opened: true, openMode: 'series', hand },
+    state: {
+      okeyTarget,
+      openThreshold: 101,
+      pairThreshold: 5,
+      tableMelds: [],
+      seats: [{ seatIndex: 0, opened: true, openMode: 'series' }],
+      pickedDiscardTileId: null,
+      pickedDiscardFromSeat: null,
+      options: { katlamali: false }
+    }
+  });
+
+  const simLayoffs = actions.filter(
+    (a) => a.type === 'layoffTile' && String(a.meldId).startsWith('sim-')
+  );
+  assert.equal(simLayoffs.length, 0);
+  assert.equal(actions.some((a) => a.type === 'discardTile'), true);
+});
+
+

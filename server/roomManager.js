@@ -63,9 +63,10 @@ export class RoomManager {
     this.leaveCurrentRoom(playerId);
 
     const code = generateRoomCode(this.rooms);
-    const cleanName = (playerName || '').trim().slice(0, 20) || 'Oyuncu 1';
+    const cleanName = (typeof playerName === 'string' ? playerName.trim().slice(0, 20) : '') || 'Oyuncu 1';
     const cleanRoomName =
-      (roomName || '').trim().slice(0, 32) || `${cleanName} Masası`;
+      (typeof roomName === 'string' ? roomName.trim().slice(0, 32) : '') || `${cleanName} Masası`;
+    const opts = options && typeof options === 'object' ? options : {};
 
     const room = {
       code,
@@ -73,19 +74,20 @@ export class RoomManager {
       hostPlayerId: playerId,
       status: 'waiting', // 'waiting' | 'playing'
       createdAt: Date.now(),
+      cleanupTimer: null,
       music: null,
       orders: createEmptyOrders(),
       lastOrder: null,
       orderSeq: 0,
       options: {
-        katlamali: Boolean(options.katlamali),
-        teamMode: options.teamMode === 'paired' ? 'paired' : 'solo',
-        maxRounds: [0, 3, 5, 7, 9].includes(Number(options.maxRounds))
-          ? Number(options.maxRounds)
+        katlamali: Boolean(opts.katlamali),
+        teamMode: opts.teamMode === 'paired' ? 'paired' : 'solo',
+        maxRounds: [0, 3, 5, 7, 9].includes(Number(opts.maxRounds))
+          ? Number(opts.maxRounds)
           : 5,
-        islekPenalty: options.islekPenalty !== false,
-        turnSeconds: [45, 60, 90].includes(Number(options.turnSeconds))
-          ? Number(options.turnSeconds)
+        islekPenalty: opts.islekPenalty !== false,
+        turnSeconds: [45, 60, 90].includes(Number(opts.turnSeconds))
+          ? Number(opts.turnSeconds)
           : 60
       },
       seats: [
@@ -115,13 +117,17 @@ export class RoomManager {
       return { ok: false, error: 'Bu kodla bir masa bulunamadı.' };
     }
 
-    const cleanName = (playerName || '').trim().slice(0, 20) || 'Oyuncu';
+    const cleanName = (typeof playerName === 'string' ? playerName.trim().slice(0, 20) : '') || 'Oyuncu';
 
     // Check if player is reconnecting to an existing seat in this room
     const existingSeat = room.seats.find(
       (s) => s.type === 'human' && s.playerId === playerId
     );
     if (existingSeat) {
+      if (room.cleanupTimer) {
+        clearTimeout(room.cleanupTimer);
+        room.cleanupTimer = null;
+      }
       existingSeat.connected = true;
       existingSeat.name = cleanName;
       if (playerAvatar) existingSeat.avatar = normalizeAvatar(playerAvatar, existingSeat.seatIndex);
@@ -133,6 +139,7 @@ export class RoomManager {
           connected: true
         });
       }
+      this.broadcastRoomState(room);
       return { ok: true, room, seatIndex: existingSeat.seatIndex };
     }
 
@@ -144,6 +151,17 @@ export class RoomManager {
       );
       if (!openSeat) {
         return { ok: false, error: 'Bu masa dolu ve oyun devam ediyor.' };
+      }
+      if (room.cleanupTimer) {
+        clearTimeout(room.cleanupTimer);
+        room.cleanupTimer = null;
+      }
+      const prevPlayerId = openSeat.playerId;
+      if (prevPlayerId) {
+        this.playerToRoom.delete(prevPlayerId);
+        if (room.hostPlayerId === prevPlayerId) {
+          room.hostPlayerId = playerId;
+        }
       }
       openSeat.type = 'human';
       openSeat.playerId = playerId;
@@ -206,6 +224,23 @@ export class RoomManager {
       if (room.session) {
         room.session.updateSeatConnection(seat.seatIndex, { connected: false });
       }
+      const anyConnectedHuman = room.seats.some((s) => s.type === 'human' && s.connected);
+      if (!anyConnectedHuman && !room.cleanupTimer) {
+        room.cleanupTimer = setTimeout(() => {
+          room.cleanupTimer = null;
+          const stillDisconnected = room.seats.every((s) => s.type !== 'human' || !s.connected);
+          if (!stillDisconnected) return;
+          if (room.session) room.session.destroy();
+          for (const s of room.seats) {
+            if (s.type === 'human' && s.playerId) {
+              this.playerToRoom.delete(s.playerId);
+            }
+          }
+          this.rooms.delete(code);
+          this.broadcastRoomsList();
+        }, 120000);
+        room.cleanupTimer.unref?.();
+      }
       this.broadcastRoomState(room);
       return room;
     }
@@ -216,6 +251,7 @@ export class RoomManager {
       seat.type = 'empty';
       seat.playerId = null;
       seat.name = null;
+      seat.avatar = `avatar-${(seat.seatIndex % 6) + 1}`;
       seat.connected = false;
     } else {
       // Convert leaving player's seat to a bot so remaining players can finish
@@ -238,7 +274,16 @@ export class RoomManager {
     );
 
     if (activeHumans.length === 0) {
+      if (room.cleanupTimer) {
+        clearTimeout(room.cleanupTimer);
+        room.cleanupTimer = null;
+      }
       if (room.session) room.session.destroy();
+      for (const s of room.seats) {
+        if (s.type === 'human' && s.playerId) {
+          this.playerToRoom.delete(s.playerId);
+        }
+      }
       this.rooms.delete(code);
       this.broadcastRoomsList();
       return null;
@@ -276,6 +321,7 @@ export class RoomManager {
       seat.type = 'empty';
       seat.playerId = null;
       seat.name = null;
+      seat.avatar = `avatar-${(seat.seatIndex % 6) + 1}`;
       seat.connected = false;
     }
 
@@ -378,6 +424,9 @@ export class RoomManager {
     if (room.status !== 'waiting') {
       return { ok: false, error: 'Oyun devam ederken kurallar değiştirilemez.' };
     }
+    if (!options || typeof options !== 'object') {
+      return { ok: false, error: 'Geçersiz ayar verisi.' };
+    }
 
     if (options.katlamali !== undefined) {
       room.options.katlamali = Boolean(options.katlamali);
@@ -405,6 +454,13 @@ export class RoomManager {
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
     if (room.hostPlayerId !== hostPlayerId) {
       return { ok: false, error: 'Oyunu yalnızca masa kurucusu başlatabilir.' };
+    }
+    if (room.status !== 'waiting') {
+      return { ok: false, error: 'Oyun zaten başlamış.' };
+    }
+    if (room.cleanupTimer) {
+      clearTimeout(room.cleanupTimer);
+      room.cleanupTimer = null;
     }
 
     // Fill empty seats with bots
@@ -497,7 +553,7 @@ export class RoomManager {
       targetIndices.push(sender.seatIndex);
     } else {
       const idx = Number(target);
-      const tSeat = room.seats[idx];
+      const tSeat = Number.isInteger(idx) ? room.seats[idx] : null;
       if (!tSeat || tSeat.type === 'empty') {
         return { ok: false, error: 'Seçilen koltukta kimse oturmuyor.' };
       }
@@ -553,6 +609,9 @@ export class RoomManager {
 
     if (!Array.isArray(room.orders)) room.orders = createEmptyOrders();
     if (target === 'all') {
+      if (room.hostPlayerId !== playerId) {
+        return { ok: false, error: 'Tüm masanın siparişlerini yalnızca kurucu temizleyebilir.' };
+      }
       room.orders = createEmptyOrders();
     } else {
       room.orders[sender.seatIndex] = { drink: null, food: null };
@@ -580,7 +639,6 @@ export class RoomManager {
       code: room.code,
       name: room.name,
       status: room.status,
-      hostPlayerId: room.hostPlayerId,
       isHost: room.hostPlayerId === playerId,
       music: room.music || null,
       orders: room.orders || createEmptyOrders(),

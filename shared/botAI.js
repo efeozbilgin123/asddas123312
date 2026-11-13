@@ -34,13 +34,23 @@ export function chooseBotDrawSource({ seat, leftDiscardTop, state }) {
         const usesTile = openTry.groups.some((g) =>
           g.slots.some((s) => s.tile.id === leftDiscardTop.id)
         );
-        if (usesTile) return 'discard';
+        const usedCount = openTry.groups.reduce((n, g) => n + g.slots.length, 0);
+        if (usesTile && withTile.length - usedCount >= 1) return 'discard';
       }
     } else {
       const withTile = [...seat.hand, leftDiscardTop];
       const pairList = findPairsInHand(withTile, state.okeyTarget, leftDiscardTop.id);
-      if (pairList.length >= pairTarget) {
-        const usesTile = pairList.some((pair) => pair.some((t) => t.id === leftDiscardTop.id));
+      let usablePairs = pairList;
+      if (withTile.length - usablePairs.length * 2 < 1 && usablePairs.length > pairTarget) {
+        usablePairs = [...pairList];
+        for (let i = usablePairs.length - 1; i >= 0 && withTile.length - usablePairs.length * 2 < 1 && usablePairs.length > pairTarget; i -= 1) {
+          if (!usablePairs[i].some((t) => t.id === leftDiscardTop.id)) {
+            usablePairs.splice(i, 1);
+          }
+        }
+      }
+      if (usablePairs.length >= pairTarget && withTile.length - usablePairs.length * 2 >= 1) {
+        const usesTile = usablePairs.some((pair) => pair.some((t) => t.id === leftDiscardTop.id));
         if (usesTile) return 'discard';
       }
     }
@@ -76,14 +86,23 @@ export function computeBotTurnActions({ seat, state }) {
   if (!opened) {
     const opening = findBestOpening(workingHand, state.okeyTarget, openTarget, mustUseId);
     const pairList = findPairsInHand(workingHand, state.okeyTarget, mustUseId);
-    const canOpenPairs = pairList.length >= pairTarget;
+    let selectedPairs = pairList;
+    if (workingHand.length - selectedPairs.length * 2 < 1 && selectedPairs.length > pairTarget) {
+      selectedPairs = [...pairList];
+      for (let i = selectedPairs.length - 1; i >= 0 && workingHand.length - selectedPairs.length * 2 < 1 && selectedPairs.length > pairTarget; i -= 1) {
+        if (!mustUseId || !selectedPairs[i].some((t) => t.id === mustUseId)) {
+          selectedPairs.splice(i, 1);
+        }
+      }
+    }
+    const canOpenPairs = selectedPairs.length >= pairTarget;
 
     const openingUsesMust =
       !mustUseId ||
       opening.groups.some((g) => g.slots.some((s) => s.tile.id === mustUseId));
     const pairsUseMust =
       !mustUseId ||
-      pairList.some((pair) => pair.some((t) => t.id === mustUseId));
+      selectedPairs.some((pair) => pair.some((t) => t.id === mustUseId));
 
     if (
       !katlamaliSeriesBlocked &&
@@ -109,14 +128,15 @@ export function computeBotTurnActions({ seat, state }) {
       for (const g of opening.groups) {
         workingMelds.push({
           id: `sim-${workingMelds.length}`,
+          isSimulated: true,
           type: g.type,
           ownerSeat: seat.seatIndex,
           points: g.points,
           slots: g.slots
         });
       }
-    } else if (canOpenPairs && pairsUseMust && workingHand.length - pairList.length * 2 >= 1) {
-      const pairTileIds = pairList.map((p) => p.map((t) => t.id));
+    } else if (canOpenPairs && pairsUseMust && workingHand.length - selectedPairs.length * 2 >= 1) {
+      const pairTileIds = selectedPairs.map((p) => p.map((t) => t.id));
       const usedIds = new Set(pairTileIds.flat());
       actions.push({
         type: 'openHand',
@@ -136,6 +156,7 @@ export function computeBotTurnActions({ seat, state }) {
     if (mustIdx !== -1) {
       const mustTile = workingHand[mustIdx];
       for (let mIdx = 0; mIdx < workingMelds.length; mIdx += 1) {
+        if (workingMelds[mIdx].isSimulated) continue;
         const res = canLayoffTile(mustTile, workingMelds[mIdx], state.okeyTarget);
         if (res.valid && !res.swappedOkey) {
           actions.push({
@@ -180,6 +201,7 @@ export function computeBotTurnActions({ seat, state }) {
         workingHand = workingHand.filter((t) => !idSet.has(t.id));
         workingMelds.push({
           id: `sim-${workingMelds.length}`,
+          isSimulated: true,
           type: group.type,
           ownerSeat: seat.seatIndex,
           points: group.points,
@@ -220,6 +242,7 @@ export function computeBotTurnActions({ seat, state }) {
 
         for (let mIdx = 0; mIdx < workingMelds.length; mIdx += 1) {
           const meld = workingMelds[mIdx];
+          if (meld.isSimulated) continue;
           const res = canLayoffTile(tile, meld, state.okeyTarget);
           if (res.valid && !res.swappedOkey) {
             actions.push({

@@ -36,11 +36,15 @@ if (fs.existsSync(distDir)) {
 }
 
 io.on('connection', (socket) => {
-  const playerId = String(socket.handshake.auth?.playerId || socket.id);
+  const rawPid = typeof socket.handshake.auth?.playerId === 'string'
+    ? socket.handshake.auth.playerId.trim().slice(0, 64)
+    : '';
+  const playerId = rawPid || socket.id;
   socket.join(`player:${playerId}`);
   socket.emit('rooms:list', roomManager.listPublicRooms());
 
-  // Re-sync if this playerId was already in a room
+  // Re-sync if this playerId was already in a room, otherwise clear stale client state
+  let syncedSeat = false;
   const existingCode = roomManager.playerToRoom.get(playerId);
   if (existingCode) {
     const room = roomManager.getRoom(existingCode);
@@ -49,13 +53,35 @@ io.on('connection', (socket) => {
         (s) => s.type === 'human' && s.playerId === playerId
       );
       if (seat) {
+        if (room.cleanupTimer) {
+          clearTimeout(room.cleanupTimer);
+          room.cleanupTimer = null;
+        }
         seat.connected = true;
         if (room.session) {
           room.session.updateSeatConnection(seat.seatIndex, { connected: true });
         }
         roomManager.broadcastRoomState(room);
+        syncedSeat = true;
       }
     }
+  }
+  if (!syncedSeat) {
+    roomManager.playerToRoom.delete(playerId);
+    socket.emit('room:state', null);
+  }
+
+  function safeOn(eventName, handler) {
+    socket.on(eventName, (data, ack) => {
+      try {
+        handler(data, ack);
+      } catch (err) {
+        console.error(`[socket:${eventName}] error:`, err);
+        if (typeof ack === 'function') {
+          ack({ ok: false, error: 'Geçersiz istek.' });
+        }
+      }
+    });
   }
 
   socket.on('rooms:get', (ack) => {
@@ -64,7 +90,8 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('room:create', (data, ack) => {
+  safeOn('room:create', (data, ack) => {
+    socket.data.isAdmin = false;
     const res = roomManager.createRoom({
       playerId,
       playerName: data?.playerName,
@@ -82,7 +109,8 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('room:join', (data, ack) => {
+  safeOn('room:join', (data, ack) => {
+    socket.data.isAdmin = false;
     const res = roomManager.joinRoom({
       roomCode: data?.roomCode,
       playerId,
@@ -98,12 +126,13 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('room:leave', (_data, ack) => {
+  safeOn('room:leave', (_data, ack) => {
+    socket.data.isAdmin = false;
     roomManager.leaveCurrentRoom(playerId, { disconnectOnly: false });
     if (typeof ack === 'function') ack({ ok: true });
   });
 
-  socket.on('room:toggleBot', (data, ack) => {
+  safeOn('room:toggleBot', (data, ack) => {
     const code = roomManager.playerToRoom.get(playerId);
     const res = roomManager.toggleBotSeat({
       roomCode: code,
@@ -113,7 +142,7 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack(res);
   });
 
-  socket.on('room:switchSeat', (data, ack) => {
+  safeOn('room:switchSeat', (data, ack) => {
     const code = roomManager.playerToRoom.get(playerId);
     const res = roomManager.switchSeat({
       roomCode: code,
@@ -123,7 +152,7 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack(res);
   });
 
-  socket.on('room:options', (data, ack) => {
+  safeOn('room:options', (data, ack) => {
     const code = roomManager.playerToRoom.get(playerId);
     const res = roomManager.updateOptions({
       roomCode: code,
@@ -133,13 +162,13 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack(res);
   });
 
-  socket.on('room:start', (_data, ack) => {
+  safeOn('room:start', (_data, ack) => {
     const code = roomManager.playerToRoom.get(playerId);
     const res = roomManager.startGame(code, playerId);
     if (typeof ack === 'function') ack(res);
   });
 
-  socket.on('room:musicSet', (data, ack) => {
+  safeOn('room:musicSet', (data, ack) => {
     const code = roomManager.playerToRoom.get(playerId);
     const res = roomManager.setRoomMusic({
       roomCode: code,
@@ -150,7 +179,7 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack(res);
   });
 
-  socket.on('room:musicStop', (_data, ack) => {
+  safeOn('room:musicStop', (_data, ack) => {
     const code = roomManager.playerToRoom.get(playerId);
     const res = roomManager.stopRoomMusic({
       roomCode: code,
@@ -159,7 +188,7 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack(res);
   });
 
-  socket.on('room:orderTreat', (data, ack) => {
+  safeOn('room:orderTreat', (data, ack) => {
     const code = roomManager.playerToRoom.get(playerId);
     const res = roomManager.orderTreat({
       roomCode: code,
@@ -170,7 +199,7 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack(res);
   });
 
-  socket.on('room:orderClear', (data, ack) => {
+  safeOn('room:orderClear', (data, ack) => {
     const code = roomManager.playerToRoom.get(playerId);
     const res = roomManager.clearSeatOrder({
       roomCode: code,
@@ -195,50 +224,50 @@ io.on('connection', (socket) => {
     return fn(room, room.session, seat.seatIndex);
   }
 
-  socket.on('game:drawDeck', (_data, ack) => {
+  safeOn('game:drawDeck', (_data, ack) => {
     const res = withSession((_r, s, seatIdx) => s.drawFromDeck(seatIdx));
     if (typeof ack === 'function') ack(res);
   });
 
-  socket.on('game:drawDiscard', (_data, ack) => {
+  safeOn('game:drawDiscard', (_data, ack) => {
     const res = withSession((_r, s, seatIdx) => s.drawFromDiscard(seatIdx));
     if (typeof ack === 'function') ack(res);
   });
 
-  socket.on('game:returnDiscard', (_data, ack) => {
+  safeOn('game:returnDiscard', (_data, ack) => {
     const res = withSession((_r, s, seatIdx) => s.returnPickedDiscard(seatIdx));
     if (typeof ack === 'function') ack(res);
   });
 
-  socket.on('game:openHand', (data, ack) => {
+  safeOn('game:openHand', (data, ack) => {
     const res = withSession((_r, s, seatIdx) =>
       s.openHand(seatIdx, data?.groups, data?.mode)
     );
     if (typeof ack === 'function') ack(res);
   });
 
-  socket.on('game:layMeld', (data, ack) => {
+  safeOn('game:layMeld', (data, ack) => {
     const res = withSession((_r, s, seatIdx) =>
       s.layMeld(seatIdx, data?.tileIds)
     );
     if (typeof ack === 'function') ack(res);
   });
 
-  socket.on('game:layoffTile', (data, ack) => {
+  safeOn('game:layoffTile', (data, ack) => {
     const res = withSession((_r, s, seatIdx) =>
       s.layoffTile(seatIdx, data?.tileId, data?.meldId)
     );
     if (typeof ack === 'function') ack(res);
   });
 
-  socket.on('game:discard', (data, ack) => {
+  safeOn('game:discard', (data, ack) => {
     const res = withSession((_r, s, seatIdx) =>
       s.discardTile(seatIdx, data?.tileId)
     );
     if (typeof ack === 'function') ack(res);
   });
 
-  socket.on('game:nextRound', (_data, ack) => {
+  safeOn('game:nextRound', (_data, ack) => {
     const res = withSession((room, s) => {
       if (room.hostPlayerId !== playerId) {
         return { ok: false, error: 'Yeni eli yalnızca masa kurucusu başlatabilir.' };
@@ -253,10 +282,22 @@ io.on('connection', (socket) => {
   });
 
   const ADMIN_PIN = String(process.env.ADMIN_PIN || '101101').trim();
+  const adminAttempts = [];
 
-  socket.on('admin:unlock', (data, ack) => {
+  safeOn('admin:unlock', (data, ack) => {
+    const now = Date.now();
+    while (adminAttempts.length > 0 && now - adminAttempts[0] > 60000) {
+      adminAttempts.shift();
+    }
+    if (adminAttempts.length >= 8) {
+      if (typeof ack === 'function') {
+        ack({ ok: false, error: 'Çok fazla deneme yapıldı. Lütfen 1 dakika bekleyin.' });
+      }
+      return;
+    }
     const pin = String(data?.pin || '').trim();
     if (!pin || pin !== ADMIN_PIN) {
+      adminAttempts.push(now);
       if (typeof ack === 'function') ack({ ok: false, error: 'Gizli anahtar hatalı.' });
       return;
     }
@@ -267,7 +308,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('admin:snapshot', (_data, ack) => {
+  safeOn('admin:snapshot', (_data, ack) => {
     if (!socket.data.isAdmin) {
       if (typeof ack === 'function') ack({ ok: false, error: 'Yetkisiz erişim.' });
       return;
@@ -276,7 +317,7 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack(res);
   });
 
-  socket.on('admin:swapTile', (data, ack) => {
+  safeOn('admin:swapTile', (data, ack) => {
     if (!socket.data.isAdmin) {
       if (typeof ack === 'function') ack({ ok: false, error: 'Yetkisiz erişim.' });
       return;
@@ -295,7 +336,7 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack(res);
   });
 
-  socket.on('admin:stealOkey', (data, ack) => {
+  safeOn('admin:stealOkey', (data, ack) => {
     if (!socket.data.isAdmin) {
       if (typeof ack === 'function') ack({ ok: false, error: 'Yetkisiz erişim.' });
       return;
@@ -309,7 +350,10 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    roomManager.leaveCurrentRoom(playerId, { disconnectOnly: true });
+    const remaining = io.sockets.adapter.rooms.get(`player:${playerId}`)?.size || 0;
+    if (remaining === 0) {
+      roomManager.leaveCurrentRoom(playerId, { disconnectOnly: true });
+    }
   });
 });
 

@@ -229,7 +229,8 @@ body {
   inset: 0;
   z-index: var(--z-raised);
   display: grid;
-  place-items: center;
+  justify-items: center;
+  align-items: start;
   padding: calc(var(--space-2xl) + var(--space-xs)) var(--space-lg) var(--space-lg);
   background: var(--color-backdrop);
   overflow-y: auto;
@@ -239,6 +240,7 @@ body {
 .waiting-panel {
   width: 100%;
   max-width: 800px;
+  margin-block: auto;
   padding: var(--space-xl);
   border-radius: var(--radius-card);
   background: var(--grain), var(--fibre), var(--color-paper);
@@ -585,9 +587,14 @@ body {
   flex-shrink: 0;
 }
 
+.avatar-upload-row:has(#avatar-upload:focus-visible) .avatar-upload-label {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
 .game-alert-toast {
   position: absolute;
-  top: calc(var(--nav-h) + var(--space-sm));
+  top: calc(var(--space-sm) + 52px);
   left: 50%;
   translate: -50% 0;
   max-width: min(560px, calc(100% - var(--space-lg)));
@@ -599,13 +606,13 @@ body {
   font-size: var(--text-sm);
   font-weight: 700;
   text-align: center;
-  box-shadow: var(--shadow-dialog);
+  box-shadow: var(--shadow-card);
   pointer-events: none;
   z-index: calc(var(--z-raised) + 2);
 }
 
 .game-alert-toast.is-okey {
-  border-color: var(--color-danger);
+  border-color: var(--color-error);
   color: #FFE4DE;
   background: #3A1614;
 }
@@ -818,6 +825,8 @@ body {
 .dialog {
   width: min(660px, calc(100% - var(--space-lg)));
   max-height: min(84dvh, 44rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--space-lg);
   border: 1px solid var(--color-rule);
   border-radius: var(--radius-card);
@@ -1151,7 +1160,7 @@ body {
     right: var(--space-xs);
   }
   .music-dock {
-    top: calc(var(--space-xs) + 54px);
+    top: calc(var(--space-xs) + 92px);
     left: var(--space-xs);
     width: calc(100% - var(--space-md));
   }

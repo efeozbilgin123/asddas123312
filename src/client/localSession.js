@@ -9,7 +9,7 @@ export class LocalSingleplayerClient {
     this.orders = createEmptyOrders();
     this.lastOrder = null;
     this.orderSeq = 0;
-    this.playerName = playerName || 'Oyuncu';
+    this.playerName = (typeof playerName === 'string' ? playerName.trim().slice(0, 20) : '') || 'Oyuncu';
     this.session = new GameSession({
       roomCode: 'TEK1',
       seatsConfig: [
@@ -81,6 +81,10 @@ export class LocalSingleplayerClient {
         res = this.session.discardTile(0, data?.tileId);
         break;
       case 'game:nextRound':
+        if (this.session.phase !== 'roundOver') {
+          res = { ok: false, error: 'Mevcut el henüz bitmedi.' };
+          break;
+        }
         this.session.startRound();
         res = { ok: true };
         break;
@@ -111,12 +115,19 @@ export class LocalSingleplayerClient {
           break;
         }
         const target = data?.target || 'self';
-        const targetIndices =
-          target === 'all'
-            ? [0, 1, 2, 3]
-            : target === 'self'
-              ? [0]
-              : [Math.max(0, Math.min(3, Number(target) || 0))];
+        let targetIndices;
+        if (target === 'all') {
+          targetIndices = [0, 1, 2, 3];
+        } else if (target === 'self') {
+          targetIndices = [0];
+        } else {
+          const idx = Number(target);
+          if (!Number.isInteger(idx) || !this.session.seats[idx]) {
+            res = { ok: false, error: 'Seçilen koltukta kimse oturmuyor.' };
+            break;
+          }
+          targetIndices = [idx];
+        }
         const servedAt = Date.now();
         this.orderSeq += 1;
         for (const seatIdx of targetIndices) {

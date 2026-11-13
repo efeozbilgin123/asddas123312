@@ -220,6 +220,7 @@ export class OkeyTable3D {
     this.dragTargetScale = null;
     this.rackDragPlane = null;
     this.orbitDrag = null;
+    this.activePointerId = null;
     this.tileAnimations = [];
     this.trackedMeshes = new Map();
     this.discardTopMeshes = new Map();
@@ -242,6 +243,9 @@ export class OkeyTable3D {
     });
     this.tileFaceMatCache = new Map();
     this.avatarMatCache = new Map();
+    this.colorMatCache = new Map();
+    this.headGeomCache = new Map();
+    this.nameplateMatCache = new Map();
 
     const bustProfile = [
       new THREE.Vector2(0.01, -0.35),
@@ -289,6 +293,12 @@ export class OkeyTable3D {
       emissive: '#1F6B47',
       roughness: 0.85
     });
+    this.deckGlowRingGeom = new THREE.RingGeometry(0.6, 0.74, 24);
+    this.deckGlowRingMat = new THREE.MeshBasicMaterial({ color: '#F3CF42', side: THREE.DoubleSide });
+    this.leftDiscardRingGeom = new THREE.RingGeometry(0.62, 0.78, 24);
+    this.leftDiscardRingMat = new THREE.MeshBasicMaterial({ color: '#4ADE80', side: THREE.DoubleSide });
+    this.turnRingGeom = new THREE.RingGeometry(1.18, 1.32, 24);
+    this.steamPuffGeom = new THREE.SphereGeometry(0.075, 10, 8);
 
     this.dynamicGroup = new THREE.Group();
     this.scene.add(this.dynamicGroup);
@@ -941,12 +951,12 @@ export class OkeyTable3D {
         this.rightDiscardRing = ring;
         this.scene.add(ring);
 
-        // Tall invisible 3D hit column so First-Person drag drops never miss the pad
+        // Tall invisible 3D hit column so First-Person drag drops never miss the pad (clear of rack x <= 4.99)
         this.rightDiscardHitBox = new THREE.Mesh(
-          new THREE.BoxGeometry(2.1, 1.4, 2.3),
+          new THREE.BoxGeometry(1.6, 1.4, 2.2),
           new THREE.MeshBasicMaterial({ visible: false })
         );
-        this.rightDiscardHitBox.position.set(pos.x + 0.08, 0.62, pos.z);
+        this.rightDiscardHitBox.position.set(pos.x + 0.15, 0.62, pos.z);
         this.scene.add(this.rightDiscardHitBox);
       } else {
         const pad = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.03, 1.38), otherPadMat);
@@ -1093,14 +1103,66 @@ export class OkeyTable3D {
     return mesh;
   }
 
+  getCachedMat(key, factory) {
+    let mat = this.colorMatCache.get(key);
+    if (!mat) {
+      mat = factory();
+      this.colorMatCache.set(key, mat);
+    }
+    return mat;
+  }
+
+  getHeadGeoms(medRadius) {
+    const key = String(medRadius);
+    let entry = this.headGeomCache.get(key);
+    if (!entry) {
+      entry = {
+        bezel: new THREE.CylinderGeometry(medRadius + 0.09, medRadius + 0.09, 0.22, 28),
+        frontDisc: new THREE.CircleGeometry(medRadius, 28),
+        rearDisc: new THREE.CircleGeometry(medRadius + 0.01, 28),
+        halo: new THREE.RingGeometry(medRadius + 0.13, medRadius + 0.21, 28)
+      };
+      this.headGeomCache.set(key, entry);
+    }
+    return entry;
+  }
+
+  getNameplateMat(seat, isActive, teamMode) {
+    const key = `${seat.name || ''}|${isActive}|${Boolean(seat.opened)}|${seat.teamIndex ?? 0}|${teamMode}`;
+    let mat = this.nameplateMatCache.get(key);
+    if (!mat) {
+      if (this.nameplateMatCache.size >= 40) {
+        const oldestKey = this.nameplateMatCache.keys().next().value;
+        const oldest = this.nameplateMatCache.get(oldestKey);
+        oldest?.map?.dispose();
+        oldest?.dispose();
+        this.nameplateMatCache.delete(oldestKey);
+      }
+      mat = new THREE.SpriteMaterial({
+        map: createNameplateTexture(seat.name, {
+          isActive,
+          opened: seat.opened,
+          teamIndex: seat.teamIndex,
+          teamMode
+        }),
+        transparent: true,
+        depthTest: false
+      });
+      this.nameplateMatCache.set(key, mat);
+    }
+    return mat;
+  }
+
   buildPlayerCharacterModel({ vestColor, teamColor, isActive }) {
     const char = new THREE.Group();
 
-    const bustMat = new THREE.MeshStandardMaterial({
-      color: vestColor,
-      roughness: 0.56,
-      metalness: 0.08
-    });
+    const bustMat = this.getCachedMat(`bust-${vestColor}`, () =>
+      new THREE.MeshStandardMaterial({
+        color: vestColor,
+        roughness: 0.56,
+        metalness: 0.08
+      })
+    );
 
     const bust = new THREE.Mesh(this.bustGeom, bustMat);
     bust.scale.set(1.26, 1.0, 0.58);
@@ -1109,8 +1171,7 @@ export class OkeyTable3D {
     char.add(bust);
 
     if (isActive) {
-      const turnRing = new THREE.Mesh(
-        new THREE.RingGeometry(1.18, 1.32, 24),
+      const turnMat = this.getCachedMat(`turn-${teamColor}`, () =>
         new THREE.MeshBasicMaterial({
           color: teamColor,
           transparent: true,
@@ -1118,6 +1179,7 @@ export class OkeyTable3D {
           side: THREE.DoubleSide
         })
       );
+      const turnRing = new THREE.Mesh(this.turnRingGeom, turnMat);
       turnRing.rotation.x = -Math.PI / 2;
       turnRing.position.set(0, -0.33, 0);
       char.add(turnRing);
@@ -1168,23 +1230,23 @@ export class OkeyTable3D {
 
       const headY = cfg.headY;
       const medRadius = cfg.medRadius;
+      const headGeoms = this.getHeadGeoms(medRadius);
       const headGroup = new THREE.Group();
       headGroup.position.set(0, headY, 0);
       holder.add(headGroup);
       headGroup.updateMatrixWorld(true);
       headGroup.lookAt(0, headY, 0);
 
-      const ringMat = new THREE.MeshStandardMaterial({
-        color: isActive ? '#F4C44E' : teamColor,
-        emissive: isActive ? '#9A6F14' : '#000000',
-        roughness: 0.28,
-        metalness: 0.72
-      });
-
-      const bezel = new THREE.Mesh(
-        new THREE.CylinderGeometry(medRadius + 0.09, medRadius + 0.09, 0.22, 28),
-        ringMat
+      const ringMat = this.getCachedMat(`bezel-${isActive}-${teamColor}`, () =>
+        new THREE.MeshStandardMaterial({
+          color: isActive ? '#F4C44E' : teamColor,
+          emissive: isActive ? '#9A6F14' : '#000000',
+          roughness: 0.28,
+          metalness: 0.72
+        })
       );
+
+      const bezel = new THREE.Mesh(headGeoms.bezel, ringMat);
       bezel.rotation.x = Math.PI / 2;
       bezel.castShadow = true;
       headGroup.add(bezel);
@@ -1197,34 +1259,30 @@ export class OkeyTable3D {
         });
         this.avatarMatCache.set(avatarKey, avatarMat);
       }
-      const frontDisc = new THREE.Mesh(new THREE.CircleGeometry(medRadius, 28), avatarMat);
+      const frontDisc = new THREE.Mesh(headGeoms.frontDisc, avatarMat);
       frontDisc.position.z = 0.115;
       headGroup.add(frontDisc);
 
-      const rearDisc = new THREE.Mesh(new THREE.CircleGeometry(medRadius + 0.01, 28), this.rearCapMat);
+      const rearDisc = new THREE.Mesh(headGeoms.rearDisc, this.rearCapMat);
       rearDisc.rotation.y = Math.PI;
       rearDisc.position.z = -0.114;
       headGroup.add(rearDisc);
 
       if (isActive) {
-        const halo = new THREE.Mesh(
-          new THREE.RingGeometry(medRadius + 0.13, medRadius + 0.21, 28),
-          new THREE.MeshBasicMaterial({ color: '#FFE082', transparent: true, opacity: 0.85, side: THREE.DoubleSide })
+        const haloMat = this.getCachedMat('active-halo', () =>
+          new THREE.MeshBasicMaterial({
+            color: '#FFE082',
+            transparent: true,
+            opacity: 0.85,
+            side: THREE.DoubleSide
+          })
         );
+        const halo = new THREE.Mesh(headGeoms.halo, haloMat);
         halo.position.z = 0.04;
         headGroup.add(halo);
       }
 
-      const spriteMat = new THREE.SpriteMaterial({
-        map: createNameplateTexture(seat.name, {
-          isActive,
-          opened: seat.opened,
-          teamIndex: seat.teamIndex,
-          teamMode
-        }),
-        transparent: true,
-        depthTest: false
-      });
+      const spriteMat = this.getNameplateMat(seat, isActive, teamMode);
       const nameplate = new THREE.Sprite(spriteMat);
       nameplate.position.set(0, headY + medRadius + 0.62, 0);
       nameplate.scale.set(3.25, 0.8, 1);
@@ -1240,14 +1298,14 @@ export class OkeyTable3D {
   }
 
   addSteamEffect(parentGroup, baseY = 0.48) {
-    const puffMat = new THREE.MeshBasicMaterial({
-      color: '#FFF8EC',
-      transparent: true,
-      opacity: 0.32,
-      depthWrite: false
-    });
     for (let i = 0; i < 3; i += 1) {
-      const puff = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), puffMat.clone());
+      const puffMat = new THREE.MeshBasicMaterial({
+        color: '#FFF8EC',
+        transparent: true,
+        opacity: 0.32,
+        depthWrite: false
+      });
+      const puff = new THREE.Mesh(this.steamPuffGeom, puffMat);
       puff.position.set((i - 1) * 0.04, baseY + i * 0.16, 0);
       parentGroup.add(puff);
       this.steamParticles.push({
@@ -1475,10 +1533,25 @@ export class OkeyTable3D {
     return g;
   }
 
+  disposeOrderObject(root) {
+    root.traverse((obj) => {
+      if (obj.geometry && obj.geometry !== this.steamPuffGeom) {
+        obj.geometry.dispose();
+      }
+      if (obj.material) {
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const m of mats) {
+          m?.dispose?.();
+        }
+      }
+    });
+  }
+
   renderTableOrders() {
     while (this.orderGroup.children.length > 0) {
       const child = this.orderGroup.children.pop();
       this.orderGroup.remove(child);
+      this.disposeOrderObject(child);
     }
     this.steamParticles = [];
 
@@ -1549,11 +1622,37 @@ export class OkeyTable3D {
     this.dynamicGroup.add(gostergeMesh);
   }
 
-  clearDynamic() {
+  cancelActiveInteractions() {
+    if (this.activePointerId != null) {
+      try {
+        if (this.canvas.hasPointerCapture?.(this.activePointerId)) {
+          this.canvas.releasePointerCapture(this.activePointerId);
+        }
+      } catch {
+        // Ignore pointer capture release errors
+      }
+      this.activePointerId = null;
+    }
+    this.orbitDrag = null;
     if (this.dragState?.floatingMesh) {
       this.scene.remove(this.dragState.floatingMesh);
     }
+    if (this.dragState?.mesh) {
+      this.dragState.mesh.visible = true;
+    }
     this.dragState = null;
+    this.dragTargetPos = null;
+    this.dragTargetQuat = null;
+    this.dragTargetScale = null;
+    this.canvas.style.cursor = 'default';
+    this.setRightDiscardHighlight(false, false);
+    this.rackSlotMeshes.forEach((m) => {
+      m.material.opacity = 0;
+    });
+  }
+
+  clearDynamic() {
+    this.cancelActiveInteractions();
 
     while (this.dynamicGroup.children.length > 0) {
       const child = this.dynamicGroup.children.pop();
@@ -1769,7 +1868,11 @@ export class OkeyTable3D {
 
     if (!sameRound) {
       this.flippedTileIds.clear();
+      this.selectedTileIds.clear();
       this.lastTileTap = null;
+      if (!skipSlotSync) {
+        this.handSlotData.fill(null);
+      }
     }
 
     const wasDemo = this.demoMode;
@@ -1778,6 +1881,8 @@ export class OkeyTable3D {
     this.clearDynamic();
 
     if (!state) {
+      this.demoMode = true;
+      this.handSlotData.fill(null);
       this.lastRenderedRound = null;
       this.lastHandIds = new Set();
       this.lastTableTileIds = new Set();
@@ -1936,10 +2041,7 @@ export class OkeyTable3D {
       }
 
       if (isMyTurn && state.turnPhase === 'draw') {
-        const glowRing = new THREE.Mesh(
-          new THREE.RingGeometry(0.6, 0.74, 24),
-          new THREE.MeshBasicMaterial({ color: '#F3CF42', side: THREE.DoubleSide })
-        );
+        const glowRing = new THREE.Mesh(this.deckGlowRingGeom, this.deckGlowRingMat);
         glowRing.rotation.x = -Math.PI / 2;
         glowRing.position.y = 0.02;
         deckGroup.add(glowRing);
@@ -1998,10 +2100,7 @@ export class OkeyTable3D {
             tMesh.userData = { kind: 'leftDiscard' };
             this.interactables.push(tMesh);
 
-            const ring = new THREE.Mesh(
-              new THREE.RingGeometry(0.62, 0.78, 24),
-              new THREE.MeshBasicMaterial({ color: '#4ADE80', side: THREE.DoubleSide })
-            );
+            const ring = new THREE.Mesh(this.leftDiscardRingGeom, this.leftDiscardRingMat);
             ring.rotation.x = -Math.PI / 2;
             ring.position.set(baseCoord.x, 0.05, baseCoord.z);
             this.dynamicGroup.add(ring);
@@ -2214,12 +2313,32 @@ export class OkeyTable3D {
   }
 
   bindEvents() {
+    const releaseActivePointer = () => {
+      if (this.activePointerId != null) {
+        try {
+          if (this.canvas.hasPointerCapture?.(this.activePointerId)) {
+            this.canvas.releasePointerCapture(this.activePointerId);
+          }
+        } catch {
+          // Ignore pointer capture release errors
+        }
+        this.activePointerId = null;
+      }
+    };
+
     this.onPointerDown = (e) => {
       if (this.demoMode) return;
       this.updatePointer(e.clientX, e.clientY);
 
       if (e.button === 2 || e.button === 1) {
+        this.cancelActiveInteractions();
         this.orbitDrag = { x: e.clientX, y: e.clientY };
+        try {
+          this.canvas.setPointerCapture?.(e.pointerId);
+          this.activePointerId = e.pointerId;
+        } catch {
+          // Ignore pointer capture errors
+        }
         return;
       }
 
@@ -2231,6 +2350,7 @@ export class OkeyTable3D {
       const data = hit.userData;
 
       if (data.kind === 'handTile') {
+        this.cancelActiveInteractions();
         this.dragState = {
           tile: data.tile,
           fromSlotIdx: data.slotIdx,
@@ -2240,6 +2360,12 @@ export class OkeyTable3D {
           startY: e.clientY,
           moved: false
         };
+        try {
+          this.canvas.setPointerCapture?.(e.pointerId);
+          this.activePointerId = e.pointerId;
+        } catch {
+          // Ignore pointer capture errors
+        }
       } else if (data.kind === 'drawDeck') {
         this.callbacks.onDrawDeck?.();
       } else if (data.kind === 'leftDiscard') {
@@ -2248,7 +2374,6 @@ export class OkeyTable3D {
         const selected = this.getSelectedTiles();
         if (selected.length === 1) {
           this.callbacks.onLayoffTile?.(selected[0].id, data.meldId);
-          this.selectedTileIds.clear();
         }
       }
     };
@@ -2357,10 +2482,12 @@ export class OkeyTable3D {
     this.onPointerUp = (e) => {
       if (this.orbitDrag) {
         this.orbitDrag = null;
+        releaseActivePointer();
         return;
       }
 
       if (!this.dragState) return;
+      releaseActivePointer();
       const drag = this.dragState;
       this.dragState = null;
       this.dragTargetPos = null;
@@ -2434,9 +2561,45 @@ export class OkeyTable3D {
         return;
       }
 
-      // Check drop targets: Right Discard Tray, Valid Table Meld Layoff, or Rack Slot
+      // Check drop targets: Rack Plane / Slot first, then Right Discard Tray or Valid Table Meld Layoff
       this.updatePointer(e.clientX, e.clientY);
       this.raycaster.setFromCamera(this.pointer, this.camera);
+
+      const slotHits = this.raycaster.intersectObjects(this.rackSlotMeshes, false);
+      const rackPt = new THREE.Vector3();
+      const hasRackHit =
+        this.rackDragPlane &&
+        this.southRackGroup &&
+        this.raycaster.ray.intersectPlane(this.rackDragPlane, rackPt);
+
+      let overRackPlane = false;
+      if (hasRackHit) {
+        const localPt = this.southRackGroup.worldToLocal(rackPt.clone());
+        if (
+          slotHits.length > 0 ||
+          (Math.abs(localPt.x) <= 5.1 && localPt.y >= -0.15 && localPt.y <= 2.65)
+        ) {
+          overRackPlane = true;
+        }
+      } else if (slotHits.length > 0) {
+        overRackPlane = true;
+      }
+
+      if (overRackPlane) {
+        if (slotHits.length > 0) {
+          const targetSlotIdx = slotHits[0].object.userData.slotIdx;
+          if (targetSlotIdx !== drag.fromSlotIdx) {
+            const targetTile = this.handSlotData[targetSlotIdx];
+            this.handSlotData[targetSlotIdx] = drag.tile;
+            this.handSlotData[drag.fromSlotIdx] = targetTile;
+            this.callbacks.onRackReorder?.();
+          }
+        }
+        if (this.currentState) {
+          this.renderGameState(this.currentState, { skipSlotSync: true });
+        }
+        return;
+      }
 
       const viewerIdx = this.currentState?.viewerSeatIndex ?? 0;
       const mySeat = this.currentState?.seats?.[viewerIdx];
@@ -2446,7 +2609,6 @@ export class OkeyTable3D {
         const dragPt = new THREE.Vector3();
         const hasDragPt = this.raycaster.ray.intersectPlane(this.tableDragPlane, dragPt);
         if (this.isOverRightDiscardZone(hasDragPt ? dragPt : null)) {
-          this.selectedTileIds.delete(drag.tile.id);
           this.callbacks.onDiscardTile?.(drag.tile.id);
           return;
         }
@@ -2461,27 +2623,19 @@ export class OkeyTable3D {
           const meldId = meldHits[0].object.userData.meldId;
           const meld = (this.currentState.tableMelds || []).find((m) => m.id === meldId);
           if (meld && canLayoffTile(drag.tile, meld, this.currentState.okeyTarget).valid) {
-            this.selectedTileIds.delete(drag.tile.id);
             this.callbacks.onLayoffTile?.(drag.tile.id, meldId);
             return;
           }
         }
       }
 
-      const slotHits = this.raycaster.intersectObjects(this.rackSlotMeshes, false);
-      if (slotHits.length > 0) {
-        const targetSlotIdx = slotHits[0].object.userData.slotIdx;
-        if (targetSlotIdx !== drag.fromSlotIdx) {
-          const targetTile = this.handSlotData[targetSlotIdx];
-          this.handSlotData[targetSlotIdx] = drag.tile;
-          this.handSlotData[drag.fromSlotIdx] = targetTile;
-          this.callbacks.onRackReorder?.();
-        }
-      }
-
       if (this.currentState) {
         this.renderGameState(this.currentState, { skipSlotSync: true });
       }
+    };
+
+    this.onPointerCancel = () => {
+      this.cancelActiveInteractions();
     };
 
     this.onWheel = (e) => {
@@ -2507,6 +2661,8 @@ export class OkeyTable3D {
     this.canvas.addEventListener('pointerdown', this.onPointerDown);
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
+    window.addEventListener('pointercancel', this.onPointerCancel);
+    window.addEventListener('blur', this.onPointerCancel);
     this.canvas.addEventListener('wheel', this.onWheel, { passive: true });
     this.canvas.addEventListener('contextmenu', this.onContextMenu);
     window.addEventListener('resize', this.onResize);
@@ -2585,12 +2741,66 @@ export class OkeyTable3D {
 
   destroy() {
     if (this.rafId) cancelAnimationFrame(this.rafId);
+    this.cancelActiveInteractions();
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
+    window.removeEventListener('pointercancel', this.onPointerCancel);
+    window.removeEventListener('blur', this.onPointerCancel);
     this.canvas.removeEventListener('wheel', this.onWheel);
     this.canvas.removeEventListener('contextmenu', this.onContextMenu);
     window.removeEventListener('resize', this.onResize);
+
+    const staticGeoms = [
+      this.tileGeom,
+      this.bustGeom,
+      this.oppShieldGeom,
+      this.oppTrimGeom,
+      this.gStandGeom,
+      this.meldTrayGeomUnit,
+      this.deckGlowRingGeom,
+      this.leftDiscardRingGeom,
+      this.turnRingGeom,
+      this.steamPuffGeom
+    ];
+    for (const g of staticGeoms) g?.dispose();
+
+    const staticMats = [
+      this.sideTileMat,
+      this.backTileMat,
+      this.rearCapMat,
+      this.coverWoodMat,
+      this.coverBrassMat,
+      this.gStandMat,
+      this.meldTrayMatDefault,
+      this.meldTrayMatLayoff,
+      this.deckGlowRingMat,
+      this.leftDiscardRingMat,
+      this.discardPadMatIdle,
+      this.discardPadMatActive,
+      this.rightDiscardRingMat
+    ];
+    for (const m of staticMats) m?.dispose();
+
+    for (const mat of this.tileFaceMatCache.values()) mat?.dispose();
+    this.tileFaceMatCache.clear();
+    for (const mat of this.avatarMatCache.values()) mat?.dispose();
+    this.avatarMatCache.clear();
+    for (const mat of this.colorMatCache.values()) mat?.dispose();
+    this.colorMatCache.clear();
+    for (const mat of this.nameplateMatCache.values()) {
+      mat?.map?.dispose();
+      mat?.dispose();
+    }
+    this.nameplateMatCache.clear();
+    for (const entry of this.headGeomCache.values()) {
+      entry?.bezel?.dispose();
+      entry?.frontDisc?.dispose();
+      entry?.rearDisc?.dispose();
+      entry?.halo?.dispose();
+    }
+    this.headGeomCache.clear();
+
     this.renderer.dispose();
   }
 }

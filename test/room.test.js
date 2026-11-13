@@ -122,3 +122,62 @@ test('RoomManager.switchSeat allows moving to empty/bot seats and host human swa
   assert.equal(created.room.seats[3].playerId, 'host-1');
   assert.equal(created.room.seats[0].playerId, 'p2');
 });
+
+test('RoomManager handles malformed inputs, double startGame, disconnected takeover, and hides hostPlayerId', (ctx) => {
+  const io = createMockIo();
+  const rm = new RoomManager(io);
+  let created = null;
+  ctx.after(() => {
+    created?.room?.session?.destroy();
+  });
+
+  // Non-string playerName / null options must not throw TypeError
+  created = rm.createRoom({
+    playerId: 'host-1',
+    playerName: 12345,
+    roomName: { bad: true },
+    options: null
+  });
+  assert.equal(created.ok, true);
+  assert.equal(created.room.seats[0].name, 'Oyuncu 1');
+
+  const code = created.room.code;
+
+  // Non-string join playerName must not throw
+  const joined = rm.joinRoom({
+    roomCode: code,
+    playerId: 'p2',
+    playerName: ['array']
+  });
+  assert.equal(joined.ok, true);
+  assert.equal(joined.room.seats[1].name, 'Oyuncu');
+
+  // getRoomPayloadForPlayer must not expose hostPlayerId to clients
+  const p2Payload = rm.getRoomPayloadForPlayer(created.room, 'p2');
+  assert.equal('hostPlayerId' in p2Payload, false);
+  assert.equal(p2Payload.isHost, false);
+
+  // Double startGame while playing must fail cleanly without replacing active session
+  const start1 = rm.startGame(code, 'host-1');
+  assert.equal(start1.ok, true);
+  const firstSession = created.room.session;
+  const start2 = rm.startGame(code, 'host-1');
+  assert.equal(start2.ok, false);
+  assert.equal(created.room.session, firstSession);
+
+  // Disconnected host seat replaced by p3 cleans up host-1 from playerToRoom & transfers host
+  rm.leaveCurrentRoom('host-1', { disconnectOnly: true });
+  assert.equal(created.room.seats[0].connected, false);
+  const joinP3 = rm.joinRoom({ roomCode: code, playerId: 'p3', playerName: 'Yeni' });
+  assert.equal(joinP3.ok, true);
+  assert.equal(rm.playerToRoom.has('host-1'), false);
+  assert.equal(created.room.hostPlayerId, 'p3');
+
+  // If p2 disconnects and p3 leaves, room closes and clears p2's stale playerToRoom entry
+  rm.leaveCurrentRoom('p2', { disconnectOnly: true });
+  rm.leaveCurrentRoom('p3', { disconnectOnly: false });
+  assert.equal(rm.getRoom(code), null);
+  assert.equal(rm.playerToRoom.has('p2'), false);
+  assert.equal(rm.playerToRoom.has('p3'), false);
+});
+

@@ -30,7 +30,9 @@ export class GameSession {
         ? Number(options.maxRounds)
         : 5,
       islekPenalty: options?.islekPenalty !== false,
-      turnSeconds: Number(options?.turnSeconds) || 60
+      turnSeconds: [45, 60, 90].includes(Number(options?.turnSeconds))
+        ? Number(options.turnSeconds)
+        : 60
     };
     this.onStateChange = onStateChange;
 
@@ -280,8 +282,27 @@ export class GameSession {
 
     if (this.phase !== 'playing' || this.currentSeat !== seatIndex) return;
 
-    // Step 2: Play melds & discard with small natural pacing
-    const actions = computeBotTurnActions({ seat, state: this });
+    // Step 2: If converted from human holding an unusable left discard, return it and draw from deck
+    let actions = computeBotTurnActions({ seat, state: this });
+    if (this.turnPhase === 'play' && this.pickedDiscardTileId) {
+      const pickedId = this.pickedDiscardTileId;
+      const usesPicked = actions.some(
+        (act) =>
+          (act.type === 'openHand' && act.groups?.some((g) => g.includes(pickedId))) ||
+          (act.type === 'layMeld' && act.tileIds?.includes(pickedId)) ||
+          (act.type === 'layoffTile' && act.tileId === pickedId)
+      );
+      if (!usesPicked) {
+        const ret = this.returnPickedDiscard(seatIndex, true);
+        if (ret.ok && this.turnPhase === 'draw') {
+          this.drawFromDeck(seatIndex, true);
+          if (this.phase !== 'playing' || this.currentSeat !== seatIndex) return;
+          actions = computeBotTurnActions({ seat, state: this });
+        }
+      }
+    }
+
+    // Play melds & discard with small natural pacing
     let step = 0;
 
     const runNext = () => {
@@ -297,7 +318,10 @@ export class GameSession {
       } else if (act.type === 'layoffTile') {
         this.layoffTile(seatIndex, act.tileId, act.meldId, true);
       } else if (act.type === 'discardTile') {
-        this.discardTile(seatIndex, act.tileId, { silentNotify: false });
+        const discRes = this.discardTile(seatIndex, act.tileId, { silentNotify: false });
+        if (!discRes?.ok) {
+          this.handleTurnTimeout();
+        }
         return;
       }
 

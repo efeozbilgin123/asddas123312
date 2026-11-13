@@ -106,7 +106,7 @@ export function parseMusicUrl(rawUrl, customTitle = '') {
   }
 
   // Direct Audio File / Radio Stream
-  if (/\.(mp3|ogg|oga|wav|m4a|aac|opus|flac|weba)(\?.*)?$/i.test(parsed.pathname)) {
+  if (/\.(mp3|ogg|oga|wav|m4a|aac|opus|flac|weba)$/i.test(parsed.pathname)) {
     return {
       ok: true,
       provider: 'audio',

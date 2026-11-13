@@ -439,9 +439,23 @@ function createRoom(quickStart) {
   const name = validatePlayerName();
   if (!name) return;
 
+  if (!socket.connected) {
+    els.playerNameHelp.textContent = 'Sunucu bağlantısı bekleniyor, lütfen tekrar deneyin.';
+    return;
+  }
+
   const btn = quickStart ? els.btnQuickPlay : els.btnCreateRoom;
   btn.setAttribute('aria-busy', 'true');
   btn.disabled = true;
+
+  let settled = false;
+  const resetTimer = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    btn.removeAttribute('aria-busy');
+    btn.disabled = false;
+    els.playerNameHelp.textContent = 'Sunucu yanıt vermedi. Bağlantınızı kontrol edin.';
+  }, 6000);
 
   socket.emit(
     'room:create',
@@ -453,6 +467,9 @@ function createRoom(quickStart) {
       options: readLobbyOptions()
     },
     (res) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(resetTimer);
       btn.removeAttribute('aria-busy');
       btn.disabled = false;
       if (!res?.ok) {
@@ -472,6 +489,11 @@ function joinRoomByCode(code) {
     els.joinCode.setAttribute('aria-describedby', 'join-help');
     els.joinHelp.textContent = 'Katılmak için 4 haneli oda kodunu yazın.';
     els.joinCode.focus();
+    return;
+  }
+
+  if (!socket.connected) {
+    els.joinHelp.textContent = 'Sunucu bağlantısı bekleniyor, lütfen tekrar deneyin.';
     return;
   }
 
@@ -519,7 +541,8 @@ let activeAudioEl = null;
 let activeIframeEl = null;
 
 function applyMusicVolume(volPct) {
-  const pct = Math.max(0, Math.min(100, Number(volPct) || 0));
+  const raw = Number(volPct);
+  const pct = Math.max(0, Math.min(100, Number.isFinite(raw) ? raw : 55));
   if (activeAudioEl) {
     activeAudioEl.volume = pct / 100;
   }
@@ -528,12 +551,12 @@ function applyMusicVolume(volPct) {
       if (activeMusicData.provider === 'youtube') {
         activeIframeEl.contentWindow?.postMessage(
           JSON.stringify({ event: 'command', func: 'setVolume', args: [pct] }),
-          '*'
+          'https://www.youtube.com'
         );
       } else if (activeMusicData.provider === 'soundcloud') {
         activeIframeEl.contentWindow?.postMessage(
           JSON.stringify({ method: 'setVolume', value: pct }),
-          '*'
+          'https://w.soundcloud.com'
         );
       }
     } catch {
@@ -549,7 +572,14 @@ function applyRoomMusic(music) {
     activeAudioEl = null;
     activeIframeEl = null;
     scene3d.setMusicPerformanceMode(false);
-    if (els.musicDock) els.musicDock.hidden = true;
+    if (els.musicDock) {
+      els.musicDock.hidden = true;
+      els.musicDock.classList.remove('is-minimized');
+    }
+    if (els.musicDockToggle) {
+      els.musicDockToggle.textContent = 'Gizle';
+      els.musicDockToggle.setAttribute('aria-expanded', 'true');
+    }
     if (els.musicPlayerHost) els.musicPlayerHost.innerHTML = '';
     return;
   }
@@ -578,19 +608,25 @@ function applyRoomMusic(music) {
   if (!els.musicPlayerHost) return;
   els.musicPlayerHost.innerHTML = '';
 
+  const volVal = Number(els.musicVolume?.value);
+  const resolvedVol = Number.isFinite(volVal) ? volVal : 55;
+
   if (music.kind === 'audio') {
     const audio = document.createElement('audio');
     audio.controls = true;
     audio.autoplay = true;
     audio.src = music.embedUrl;
-    audio.volume = (Number(els.musicVolume?.value) || 55) / 100;
+    audio.volume = Math.max(0, Math.min(100, resolvedVol)) / 100;
     els.musicPlayerHost.appendChild(audio);
     activeAudioEl = audio;
     audio.play().catch(() => {});
   } else {
     const iframe = document.createElement('iframe');
     iframe.src = music.embedUrl;
-    iframe.allow = 'autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture';
+    if (music.provider === 'web') {
+      iframe.sandbox = 'allow-scripts allow-presentation';
+    }
+    iframe.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
     iframe.referrerPolicy = 'no-referrer-when-downgrade';
     iframe.loading = 'eager';
     iframe.title = music.title || 'Ortak Oda Müziği';
@@ -603,6 +639,7 @@ function applyRoomMusic(music) {
 }
 
 function switchView(room) {
+  const prevRoom = currentRoom;
   currentRoom = room;
   if (!room) {
     els.viewLobby.hidden = false;
@@ -618,10 +655,20 @@ function switchView(room) {
       b.classList.toggle('is-active', b.dataset.cam === 'fp');
     });
     stagedGroups = [];
+    lastEventIdSeen = 0;
     lastRoundModalNumber = 0;
     lastTurnSeatSeen = null;
     lastTurnRoundSeen = null;
     lastOrderIdSeen = 0;
+    bannerNotice = '';
+    if (noticeTimer) {
+      clearTimeout(noticeTimer);
+      noticeTimer = null;
+    }
+    if (gameAlertTimer) {
+      clearTimeout(gameAlertTimer);
+      gameAlertTimer = null;
+    }
     if (els.dialogRound.open) els.dialogRound.close();
     if (els.dialogSecret.open) els.dialogSecret.close();
     if (els.dialogMusic?.open) els.dialogMusic.close();
@@ -631,6 +678,13 @@ function switchView(room) {
     scene3d.setRoomOrders(null, 0);
     scene3d.renderGameState(null);
     return;
+  }
+
+  if (!prevRoom && room.lastOrder?.id) {
+    lastOrderIdSeen = Number(room.lastOrder.id);
+  }
+  if (els.dialogOrders?.open) {
+    renderOrdersTargetSelect();
   }
 
   els.btnLeave.hidden = false;
@@ -1241,9 +1295,22 @@ function leaveCurrentMatch() {
     switchView(null);
     return;
   }
-  socket.emit('room:leave', {}, () => {
+  if (!socket.connected) {
     switchView(null);
     refreshRooms();
+    return;
+  }
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    switchView(null);
+    refreshRooms();
+  };
+  const fallbackTimer = setTimeout(finish, 1000);
+  socket.emit('room:leave', {}, () => {
+    clearTimeout(fallbackTimer);
+    finish();
   });
 }
 
@@ -1399,6 +1466,9 @@ els.btnStageGroup.addEventListener('click', () => {
   if (selected.length === 2) {
     const pair = validatePair(selected, game.okeyTarget);
     if (pair.valid) {
+      if (stagedGroups.some((g) => g.mode !== 'pairs')) {
+        stagedGroups = [];
+      }
       stagedGroups.push({
         id: `st-${Date.now()}`,
         mode: 'pairs',
@@ -1492,11 +1562,11 @@ els.btnSound.addEventListener('click', () => {
 function openMusicDialog() {
   if (!currentRoom) return;
   if (els.musicUrlHelp) els.musicUrlHelp.textContent = '';
-  if (els.musicUrlInput && activeMusicData?.originalUrl) {
-    els.musicUrlInput.value = activeMusicData.originalUrl;
+  if (els.musicUrlInput) {
+    els.musicUrlInput.value = activeMusicData?.originalUrl || '';
   }
-  if (els.musicTitleInput && activeMusicData?.title) {
-    els.musicTitleInput.value = activeMusicData.title;
+  if (els.musicTitleInput) {
+    els.musicTitleInput.value = activeMusicData?.title || '';
   }
   els.dialogMusic?.showModal();
 }

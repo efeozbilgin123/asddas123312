@@ -25,6 +25,10 @@ export class GameSession {
     this.roomCode = roomCode;
     this.options = {
       katlamali: Boolean(options?.katlamali),
+      teamMode: options?.teamMode === 'paired' ? 'paired' : 'solo',
+      maxRounds: [0, 3, 5, 7, 9].includes(Number(options?.maxRounds))
+        ? Number(options.maxRounds)
+        : 5,
       islekPenalty: options?.islekPenalty !== false,
       turnSeconds: Number(options?.turnSeconds) || 60
     };
@@ -52,8 +56,10 @@ export class GameSession {
 
     this.seats = seatsConfig.map((cfg, idx) => ({
       seatIndex: idx,
+      teamIndex: idx % 2,
       playerId: cfg.playerId,
       name: cfg.name,
+      avatar: cfg.avatar || `avatar-${(idx % 6) + 1}`,
       isBot: Boolean(cfg.isBot),
       connected: cfg.connected !== false,
       hand: [],
@@ -75,11 +81,12 @@ export class GameSession {
     this.botTimer = null;
   }
 
-  updateSeatConnection(seatIndex, { playerId, name, isBot, connected }) {
+  updateSeatConnection(seatIndex, { playerId, name, avatar, isBot, connected }) {
     const seat = this.seats[seatIndex];
     if (!seat) return;
     if (playerId !== undefined) seat.playerId = playerId;
     if (name !== undefined) seat.name = name;
+    if (avatar !== undefined) seat.avatar = avatar;
     if (isBot !== undefined) seat.isBot = isBot;
     if (connected !== undefined) seat.connected = connected;
     if (seat.isBot && this.phase === 'playing' && this.currentSeat === seatIndex) {
@@ -600,7 +607,8 @@ export class GameSession {
       seats: this.seats,
       winnerSeat,
       finishedWithOkey,
-      okeyTarget: this.okeyTarget
+      okeyTarget: this.okeyTarget,
+      teamMode: this.options.teamMode
     });
 
     for (const row of breakdown) {
@@ -609,10 +617,22 @@ export class GameSession {
       row.totalScore = seat.totalScore;
     }
 
+    const teamScores = [
+      this.seats[0].totalScore + this.seats[2].totalScore,
+      this.seats[1].totalScore + this.seats[3].totalScore
+    ];
+    const maxRounds = this.options.maxRounds || 0;
+    const matchComplete = maxRounds > 0 && this.roundNumber >= maxRounds;
+
     this.roundSummary = {
       roundNumber: this.roundNumber,
+      maxRounds,
+      matchComplete,
+      teamMode: this.options.teamMode,
+      teamScores,
       winnerSeat,
       finishedWithOkey,
+      deckExhausted: winnerSeat === null,
       message,
       rows: breakdown
     };
@@ -622,10 +642,17 @@ export class GameSession {
   }
 
   getClientView(viewerSeatIndex) {
+    const teamScores = [
+      this.seats[0].totalScore + this.seats[2].totalScore,
+      this.seats[1].totalScore + this.seats[3].totalScore
+    ];
+
     return {
       roomCode: this.roomCode,
       options: this.options,
       roundNumber: this.roundNumber,
+      maxRounds: this.options.maxRounds || 0,
+      teamScores,
       dealerSeat: this.dealerSeat,
       phase: this.phase,
       turnPhase: this.turnPhase,
@@ -649,7 +676,9 @@ export class GameSession {
       viewerSeatIndex,
       seats: this.seats.map((s) => ({
         seatIndex: s.seatIndex,
+        teamIndex: s.seatIndex % 2,
         name: s.name,
+        avatar: s.avatar,
         isBot: s.isBot,
         connected: s.connected,
         tileCount: s.hand.length,

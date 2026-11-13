@@ -68,6 +68,7 @@ io.on('connection', (socket) => {
     const res = roomManager.createRoom({
       playerId,
       playerName: data?.playerName,
+      playerAvatar: data?.playerAvatar,
       roomName: data?.roomName,
       options: data?.options,
       quickStart: Boolean(data?.quickStart)
@@ -85,7 +86,8 @@ io.on('connection', (socket) => {
     const res = roomManager.joinRoom({
       roomCode: data?.roomCode,
       playerId,
-      playerName: data?.playerName
+      playerName: data?.playerName,
+      playerAvatar: data?.playerAvatar
     });
     if (res.ok) {
       const payload = roomManager.getRoomPayloadForPlayer(res.room, playerId);

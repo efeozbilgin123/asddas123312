@@ -54,3 +54,30 @@ test('RoomManager creates, joins, starts with bots, and converts leaving human t
   rm.leaveCurrentRoom('p1');
   assert.equal(rm.getRoom(code), null);
 });
+
+test('RoomManager preserves playerAvatar, teamMode, and maxRounds options', () => {
+  const io = createMockIo();
+  const rm = new RoomManager(io);
+
+  const created = rm.createRoom({
+    playerId: 'p1',
+    playerName: 'Efe',
+    playerAvatar: 'avatar-5',
+    roomName: 'Kahve Masası',
+    options: { teamMode: 'paired', katlamali: true, maxRounds: 7, turnSeconds: 90 }
+  });
+  assert.equal(created.ok, true);
+  assert.equal(created.room.seats[0].avatar, 'avatar-5');
+  assert.equal(created.room.options.teamMode, 'paired');
+  assert.equal(created.room.options.katlamali, true);
+  assert.equal(created.room.options.maxRounds, 7);
+
+  const upd = rm.updateOptions({
+    roomCode: created.room.code,
+    hostPlayerId: 'p1',
+    options: { teamMode: 'solo', maxRounds: 0 }
+  });
+  assert.equal(upd.ok, true);
+  assert.equal(created.room.options.teamMode, 'solo');
+  assert.equal(created.room.options.maxRounds, 0);
+});

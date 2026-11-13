@@ -14,6 +14,12 @@ function generateRoomCode(existing) {
   return code;
 }
 
+function normalizeAvatar(val, fallbackIdx = 0) {
+  const s = String(val || '').trim();
+  if (/^avatar-[1-6]$/.test(s)) return s;
+  return `avatar-${(fallbackIdx % 6) + 1}`;
+}
+
 export class RoomManager {
   constructor(io) {
     this.io = io;
@@ -45,7 +51,7 @@ export class RoomManager {
     return list;
   }
 
-  createRoom({ playerId, playerName, roomName, options = {}, quickStart = false }) {
+  createRoom({ playerId, playerName, playerAvatar, roomName, options = {}, quickStart = false }) {
     this.leaveCurrentRoom(playerId);
 
     const code = generateRoomCode(this.rooms);
@@ -61,16 +67,20 @@ export class RoomManager {
       createdAt: Date.now(),
       options: {
         katlamali: Boolean(options.katlamali),
+        teamMode: options.teamMode === 'paired' ? 'paired' : 'solo',
+        maxRounds: [0, 3, 5, 7, 9].includes(Number(options.maxRounds))
+          ? Number(options.maxRounds)
+          : 5,
         islekPenalty: options.islekPenalty !== false,
         turnSeconds: [45, 60, 90].includes(Number(options.turnSeconds))
           ? Number(options.turnSeconds)
           : 60
       },
       seats: [
-        { seatIndex: 0, type: 'human', playerId, name: cleanName, connected: true },
-        { seatIndex: 1, type: 'empty', playerId: null, name: null, connected: false },
-        { seatIndex: 2, type: 'empty', playerId: null, name: null, connected: false },
-        { seatIndex: 3, type: 'empty', playerId: null, name: null, connected: false }
+        { seatIndex: 0, type: 'human', playerId, name: cleanName, avatar: normalizeAvatar(playerAvatar, 0), connected: true },
+        { seatIndex: 1, type: 'empty', playerId: null, name: null, avatar: 'avatar-2', connected: false },
+        { seatIndex: 2, type: 'empty', playerId: null, name: null, avatar: 'avatar-3', connected: false },
+        { seatIndex: 3, type: 'empty', playerId: null, name: null, avatar: 'avatar-4', connected: false }
       ],
       session: null
     };
@@ -86,7 +96,7 @@ export class RoomManager {
     return { ok: true, room };
   }
 
-  joinRoom({ roomCode, playerId, playerName }) {
+  joinRoom({ roomCode, playerId, playerName, playerAvatar }) {
     const code = String(roomCode || '').trim().toUpperCase();
     const room = this.rooms.get(code);
     if (!room) {
@@ -102,10 +112,12 @@ export class RoomManager {
     if (existingSeat) {
       existingSeat.connected = true;
       existingSeat.name = cleanName;
+      if (playerAvatar) existingSeat.avatar = normalizeAvatar(playerAvatar, existingSeat.seatIndex);
       this.playerToRoom.set(playerId, code);
       if (room.session) {
         room.session.updateSeatConnection(existingSeat.seatIndex, {
           name: cleanName,
+          avatar: existingSeat.avatar,
           connected: true
         });
       }
@@ -115,7 +127,6 @@ export class RoomManager {
     this.leaveCurrentRoom(playerId);
 
     if (room.status === 'playing') {
-      // Allow taking over a disconnected human or bot seat if available? No, only disconnected human or empty
       const openSeat = room.seats.find(
         (s) => s.type === 'empty' || (s.type === 'human' && !s.connected)
       );
@@ -125,12 +136,14 @@ export class RoomManager {
       openSeat.type = 'human';
       openSeat.playerId = playerId;
       openSeat.name = cleanName;
+      openSeat.avatar = normalizeAvatar(playerAvatar, openSeat.seatIndex);
       openSeat.connected = true;
       this.playerToRoom.set(playerId, code);
       if (room.session) {
         room.session.updateSeatConnection(openSeat.seatIndex, {
           playerId,
           name: cleanName,
+          avatar: openSeat.avatar,
           isBot: false,
           connected: true
         });
@@ -149,6 +162,7 @@ export class RoomManager {
     targetSeat.type = 'human';
     targetSeat.playerId = playerId;
     targetSeat.name = cleanName;
+    targetSeat.avatar = normalizeAvatar(playerAvatar, targetSeat.seatIndex);
     targetSeat.connected = true;
     this.playerToRoom.set(playerId, code);
 
@@ -271,6 +285,12 @@ export class RoomManager {
     if (options.katlamali !== undefined) {
       room.options.katlamali = Boolean(options.katlamali);
     }
+    if (options.teamMode !== undefined) {
+      room.options.teamMode = options.teamMode === 'paired' ? 'paired' : 'solo';
+    }
+    if (options.maxRounds !== undefined && [0, 3, 5, 7, 9].includes(Number(options.maxRounds))) {
+      room.options.maxRounds = Number(options.maxRounds);
+    }
     if (options.islekPenalty !== undefined) {
       room.options.islekPenalty = Boolean(options.islekPenalty);
     }
@@ -296,6 +316,7 @@ export class RoomManager {
         seat.type = 'bot';
         seat.playerId = `bot-${seat.seatIndex}`;
         seat.name = BOT_NAMES[seat.seatIndex] || `Bot ${seat.seatIndex + 1}`;
+        seat.avatar = `avatar-${((seat.seatIndex + 1) % 6) + 1}`;
         seat.connected = true;
       }
     }
@@ -306,6 +327,7 @@ export class RoomManager {
       seatsConfig: room.seats.map((s) => ({
         playerId: s.playerId,
         name: s.name,
+        avatar: s.avatar,
         isBot: s.type === 'bot',
         connected: s.connected
       })),
@@ -336,8 +358,10 @@ export class RoomManager {
       viewerSeatIndex,
       seats: room.seats.map((s) => ({
         seatIndex: s.seatIndex,
+        teamIndex: s.seatIndex % 2,
         type: s.type,
         name: s.name,
+        avatar: s.avatar,
         connected: s.connected
       })),
       game: room.session ? room.session.getClientView(viewerSeatIndex) : null

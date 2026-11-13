@@ -23,6 +23,8 @@ function getOrCreatePlayerId() {
 
 const playerId = getOrCreatePlayerId();
 const savedName = localStorage.getItem('yuzbir_player_name') || '';
+const savedAvatar = localStorage.getItem('yuzbir_player_avatar') || 'avatar-1';
+let selectedAvatar = /^avatar-[1-6]$/.test(savedAvatar) ? savedAvatar : 'avatar-1';
 
 const els = {
   canvas: document.getElementById('table-canvas'),
@@ -41,7 +43,10 @@ const els = {
   playerName: document.getElementById('player-name'),
   playerNameHelp: document.getElementById('player-name-help'),
   roomName: document.getElementById('room-name'),
+  avatarPicker: document.getElementById('avatar-picker'),
+  optTeamMode: document.getElementById('opt-team-mode'),
   optKatlamali: document.getElementById('opt-katlamali'),
+  optMaxRounds: document.getElementById('opt-max-rounds'),
   optIslek: document.getElementById('opt-islek'),
   optTimer: document.getElementById('opt-timer'),
   btnQuickPlay: document.getElementById('btn-quick-play'),
@@ -65,14 +70,15 @@ const els = {
   btnCopyCode: document.getElementById('btn-copy-code'),
   waitSeatsGrid: document.getElementById('wait-seats-grid'),
   waitHostControls: document.getElementById('wait-host-controls'),
+  waitTeamMode: document.getElementById('wait-team-mode'),
   waitKatlamali: document.getElementById('wait-katlamali'),
+  waitMaxRounds: document.getElementById('wait-max-rounds'),
   waitIslek: document.getElementById('wait-islek'),
   waitTimer: document.getElementById('wait-timer'),
   waitStatusMsg: document.getElementById('wait-status-msg'),
   btnStartMatch: document.getElementById('btn-start-match'),
 
   hudRound: document.getElementById('hud-round'),
-  hudDeck: document.getElementById('hud-deck'),
   hudOkey: document.getElementById('hud-okey'),
   hudThreshold: document.getElementById('hud-threshold'),
   hudTimer: document.getElementById('hud-timer'),
@@ -101,7 +107,9 @@ const els = {
   dialogRound: document.getElementById('dialog-round'),
   roundDialogTitle: document.getElementById('round-dialog-title'),
   roundDialogMsg: document.getElementById('round-dialog-msg'),
+  roundTeamScores: document.getElementById('round-team-scores'),
   roundTbody: document.getElementById('round-tbody'),
+  btnRoundLeave: document.getElementById('btn-round-leave'),
   btnNextRound: document.getElementById('btn-next-round'),
   roundWaitHost: document.getElementById('round-wait-host'),
 
@@ -122,6 +130,23 @@ const urlRoom = new URLSearchParams(window.location.search).get('room');
 if (urlRoom) {
   els.joinCode.value = urlRoom.toUpperCase().slice(0, 6);
 }
+
+function setSelectedAvatar(avatarId) {
+  selectedAvatar = /^avatar-[1-6]$/.test(avatarId) ? avatarId : 'avatar-1';
+  localStorage.setItem('yuzbir_player_avatar', selectedAvatar);
+  els.avatarPicker?.querySelectorAll('.avatar-btn').forEach((btn) => {
+    const active = btn.dataset.avatar === selectedAvatar;
+    btn.classList.toggle('is-selected', active);
+    btn.setAttribute('aria-checked', String(active));
+  });
+}
+
+setSelectedAvatar(selectedAvatar);
+els.avatarPicker?.querySelectorAll('.avatar-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    setSelectedAvatar(btn.dataset.avatar);
+  });
+});
 
 let currentRoom = null;
 let localClient = null;
@@ -180,7 +205,9 @@ function setRoomsRegionState(mode, rooms = []) {
     els.roomsTbody.innerHTML = '';
     for (const r of rooms) {
       const tr = document.createElement('tr');
-      const ruleText = r.options?.katlamali ? 'Katlamalı' : 'Klasik 101';
+      const modeLabel = r.options?.teamMode === 'paired' ? 'Eşli' : 'Tekli';
+      const katLabel = r.options?.katlamali ? 'Katlamalı' : 'Katlamasız';
+      const ruleText = `${modeLabel} · ${katLabel}`;
       const statusText = r.status === 'playing' ? 'Oyunda' : 'Bekliyor';
 
       const tdName = document.createElement('td');
@@ -227,6 +254,16 @@ function validatePlayerName() {
   return val;
 }
 
+function readLobbyOptions() {
+  return {
+    teamMode: els.optTeamMode.value === 'paired' ? 'paired' : 'solo',
+    katlamali: els.optKatlamali.value === '1',
+    maxRounds: Number(els.optMaxRounds.value),
+    islekPenalty: els.optIslek.checked,
+    turnSeconds: Number(els.optTimer.value)
+  };
+}
+
 function startSingleplayer() {
   const rawName = els.playerName.value.trim();
   const name = rawName || 'Oyuncu';
@@ -247,11 +284,8 @@ function startSingleplayer() {
 
   localClient = new LocalSingleplayerClient({
     playerName: name,
-    options: {
-      katlamali: els.optKatlamali.checked,
-      islekPenalty: els.optIslek.checked,
-      turnSeconds: Number(els.optTimer.value)
-    },
+    playerAvatar: selectedAvatar,
+    options: readLobbyOptions(),
     onState: (room) => {
       switchView(room);
     }
@@ -271,13 +305,10 @@ function createRoom(quickStart) {
     'room:create',
     {
       playerName: name,
+      playerAvatar: selectedAvatar,
       roomName: els.roomName.value.trim(),
       quickStart,
-      options: {
-        katlamali: els.optKatlamali.checked,
-        islekPenalty: els.optIslek.checked,
-        turnSeconds: Number(els.optTimer.value)
-      }
+      options: readLobbyOptions()
     },
     (res) => {
       btn.removeAttribute('aria-busy');
@@ -305,12 +336,16 @@ function joinRoomByCode(code) {
   els.joinCode.removeAttribute('aria-invalid');
   els.joinHelp.textContent = '';
 
-  socket.emit('room:join', { roomCode: clean, playerName: name }, (res) => {
-    if (!res?.ok) {
-      els.joinCode.setAttribute('aria-invalid', 'true');
-      els.joinHelp.textContent = res?.error || 'Odaya katılınamadı.';
+  socket.emit(
+    'room:join',
+    { roomCode: clean, playerName: name, playerAvatar: selectedAvatar },
+    (res) => {
+      if (!res?.ok) {
+        els.joinCode.setAttribute('aria-invalid', 'true');
+        els.joinHelp.textContent = res?.error || 'Odaya katılınamadı.';
+      }
     }
-  });
+  );
 }
 
 function refreshRooms() {
@@ -335,6 +370,7 @@ function switchView(room) {
     els.viewWaiting.hidden = true;
     els.viewGame.hidden = true;
     els.btnLeave.hidden = true;
+    els.connBadge.hidden = false;
     els.roomPill.hidden = true;
     els.cameraGroup.hidden = true;
     stagedGroups = [];
@@ -346,13 +382,14 @@ function switchView(room) {
   }
 
   els.btnLeave.hidden = false;
-  els.roomPill.hidden = false;
-  els.roomPill.textContent = room.isLocal ? 'Tek Kişilik (Yerel)' : `Oda ${room.code}`;
 
   if (room.status === 'waiting') {
     els.viewLobby.hidden = true;
     els.viewWaiting.hidden = false;
     els.viewGame.hidden = true;
+    els.connBadge.hidden = false;
+    els.roomPill.hidden = false;
+    els.roomPill.textContent = `Oda ${room.code}`;
     els.cameraGroup.hidden = true;
     renderWaitingRoom(room);
     scene3d.renderGameState(null);
@@ -360,6 +397,8 @@ function switchView(room) {
     els.viewLobby.hidden = true;
     els.viewWaiting.hidden = true;
     els.viewGame.hidden = false;
+    els.connBadge.hidden = true;
+    els.roomPill.hidden = true;
     els.cameraGroup.hidden = false;
     renderGameRoom(room);
   }
@@ -371,16 +410,28 @@ function renderWaitingRoom(room) {
   els.waitHostControls.hidden = !room.isHost;
   els.btnStartMatch.hidden = !room.isHost;
 
-  els.waitKatlamali.checked = Boolean(room.options.katlamali);
+  els.waitTeamMode.value = room.options.teamMode === 'paired' ? 'paired' : 'solo';
+  els.waitKatlamali.value = room.options.katlamali ? '1' : '0';
+  els.waitMaxRounds.value = String(room.options.maxRounds ?? 5);
   els.waitIslek.checked = Boolean(room.options.islekPenalty);
   els.waitTimer.value = String(room.options.turnSeconds || 60);
 
   els.waitSeatsGrid.innerHTML = '';
   const seatLabels = ['Güney', 'Doğu', 'Kuzey', 'Batı'];
+  const isPaired = room.options.teamMode === 'paired';
 
   room.seats.forEach((seat) => {
     const card = document.createElement('div');
     card.className = 'wait-seat';
+
+    const left = document.createElement('div');
+    left.className = 'wait-seat__left';
+
+    const avatarImg = document.createElement('img');
+    avatarImg.className = 'wait-seat__avatar';
+    const avatarId = seat.avatar || `avatar-${(seat.seatIndex % 6) + 1}`;
+    avatarImg.src = `/assets/${avatarId}.jpg`;
+    avatarImg.alt = seat.name || seatLabels[seat.seatIndex];
 
     const info = document.createElement('div');
     info.className = 'wait-seat__info';
@@ -391,15 +442,19 @@ function renderWaitingRoom(room) {
 
     const role = document.createElement('span');
     role.className = 'wait-seat__role';
-    role.textContent =
+    const baseRole =
       seat.type === 'human'
         ? 'Gerçek oyuncu'
         : seat.type === 'bot'
           ? 'Yapay zekâ bot'
           : 'Oyun başlayınca bot atanabilir';
+    role.textContent = isPaired
+      ? `${(seat.seatIndex % 2) + 1}. Takım · ${baseRole}`
+      : baseRole;
 
     info.append(title, role);
-    card.appendChild(info);
+    left.append(avatarImg, info);
+    card.appendChild(left);
 
     if (room.isHost && seat.type !== 'human') {
       const btn = document.createElement('button');
@@ -426,9 +481,13 @@ function renderGameRoom(room) {
   if (game.lastEvent && game.lastEvent.id > lastEventIdSeen) {
     lastEventIdSeen = game.lastEvent.id;
     const ev = game.lastEvent;
-    if (ev.type === 'open_hand' || ev.type === 'round_over') {
+    if (ev.type === 'round_start') {
+      soundFX.playTileShuffle();
+    } else if (ev.type === 'draw_deck' || ev.type === 'draw_discard') {
+      soundFX.playTileFlip();
+    } else if (ev.type === 'open_hand' || ev.type === 'round_over') {
       soundFX.playMeldChime();
-    } else if (['draw_deck', 'draw_discard', 'discard', 'lay_meld', 'layoff'].includes(ev.type)) {
+    } else if (['discard', 'lay_meld', 'layoff'].includes(ev.type)) {
       soundFX.playTileClack(ev.type === 'discard' ? 0.92 : 1.08);
     }
     if (els.dialogSecret.open && !els.secretPanelView.hidden) {
@@ -440,8 +499,8 @@ function renderGameRoom(room) {
 
   scene3d.renderGameState(game);
 
-  els.hudRound.textContent = String(game.roundNumber);
-  els.hudDeck.textContent = String(game.deckCount);
+  els.hudRound.textContent =
+    game.maxRounds > 0 ? `${game.roundNumber} / ${game.maxRounds}` : String(game.roundNumber);
   els.hudThreshold.textContent = String(game.openThreshold);
 
   if (game.okeyTarget) {
@@ -450,33 +509,8 @@ function renderGameRoom(room) {
     els.hudOkey.className = `okey-chip okey-chip--${game.okeyTarget.color}`;
   }
 
-  const viewerIdx = game.viewerSeatIndex;
-  for (let rel = 0; rel < 4; rel += 1) {
-    const seatIdx = (viewerIdx + rel) % 4;
-    const seat = game.seats[seatIdx];
-    const card = document.getElementById(`seat-card-${rel}`);
-    if (!card || !seat) continue;
-
-    card.classList.toggle(
-      'is-active',
-      game.phase === 'playing' && game.currentSeat === seatIdx
-    );
-    card.querySelector('.seat-name').textContent =
-      rel === 0 ? `${seat.name} (Siz)` : seat.name;
-    card.querySelector('.seat-score').textContent = `${seat.totalScore} p`;
-    card.querySelector('.seat-tiles').textContent = `${seat.tileCount} taş`;
-
-    const tag = card.querySelector('.seat-open-tag');
-    if (seat.opened) {
-      tag.classList.add('is-opened');
-      tag.textContent = seat.openMode === 'pairs' ? 'Çift açık' : `${seat.openedPoints} açık`;
-    } else {
-      tag.classList.remove('is-opened');
-      tag.textContent = 'Açmadı';
-    }
-  }
-
   // Filter staged groups to only keep tiles still in hand
+  const viewerIdx = game.viewerSeatIndex;
   const handIds = new Set((game.seats[viewerIdx]?.hand || []).map((t) => t.id));
   stagedGroups = stagedGroups.filter((g) => g.tiles.every((t) => handIds.has(t.id)));
   if (game.seats[viewerIdx]?.opened) {
@@ -639,14 +673,60 @@ function renderStagingBar(game, mySeat, isPlayPhase) {
 }
 
 function openRoundSummaryDialog(room, summary) {
-  els.roundDialogTitle.textContent = `${summary.roundNumber}. El Sonucu`;
-  els.roundDialogMsg.textContent = summary.message || '';
-  els.roundTbody.innerHTML = '';
+  if (summary.matchComplete) {
+    els.roundDialogTitle.textContent = `Oyun Tamamlandı (${summary.maxRounds} El)`;
+  } else if (summary.deckExhausted) {
+    els.roundDialogTitle.textContent = `${summary.roundNumber}. El · Deste Tükendi`;
+  } else {
+    els.roundDialogTitle.textContent = `${summary.roundNumber}. El Sonucu`;
+  }
 
+  let msg = summary.message || '';
+  if (summary.matchComplete) {
+    if (summary.teamMode === 'paired' && Array.isArray(summary.teamScores)) {
+      const [t0, t1] = summary.teamScores;
+      if (t0 !== t1) {
+        const winnerLabel = t0 < t1 ? '1. Takım (Güney–Kuzey)' : '2. Takım (Doğu–Batı)';
+        msg = `${msg ? `${msg} · ` : ''}${winnerLabel} önde tamamladı! İsterseniz ekstra el ile devam edebilirsiniz.`;
+      }
+    } else {
+      msg = `${msg ? `${msg} · ` : ''}Belirlenen ${summary.maxRounds} el tamamlandı! İsterseniz ekstra el ile devam edebilirsiniz.`;
+    }
+  }
+  els.roundDialogMsg.textContent = msg;
+
+  if (summary.teamMode === 'paired' && Array.isArray(summary.teamScores)) {
+    els.roundTeamScores.hidden = false;
+    els.roundTeamScores.innerHTML = '';
+    const [t0, t1] = summary.teamScores;
+    const teams = [
+      { label: '1. Takım (Güney–Kuzey)', score: t0, leading: t0 <= t1 },
+      { label: '2. Takım (Doğu–Batı)', score: t1, leading: t1 <= t0 }
+    ];
+    teams.forEach((team) => {
+      const card = document.createElement('div');
+      card.className = `team-summary-card${team.leading ? ' is-leading' : ''}`;
+      const nameEl = document.createElement('strong');
+      nameEl.textContent = team.label;
+      const scoreEl = document.createElement('span');
+      scoreEl.className = 'num';
+      scoreEl.textContent = `${team.score} p`;
+      card.append(nameEl, scoreEl);
+      els.roundTeamScores.appendChild(card);
+    });
+  } else {
+    els.roundTeamScores.hidden = true;
+    els.roundTeamScores.innerHTML = '';
+  }
+
+  els.roundTbody.innerHTML = '';
   summary.rows.forEach((row) => {
     const tr = document.createElement('tr');
     const tdName = document.createElement('td');
-    tdName.textContent = row.isWinner ? `${row.name} (Kazandı)` : row.name;
+    const teamTag = summary.teamMode === 'paired' ? `[T${(row.seatIndex % 2) + 1}] ` : '';
+    tdName.textContent = row.isWinner
+      ? `${teamTag}${row.name} (Kazandı)`
+      : `${teamTag}${row.name}`;
 
     const tdOpen = document.createElement('td');
     tdOpen.textContent = row.opened ? 'Açtı' : 'Açmadı';
@@ -671,6 +751,9 @@ function openRoundSummaryDialog(room, summary) {
     els.roundTbody.appendChild(tr);
   });
 
+  els.btnNextRound.textContent = summary.matchComplete
+    ? 'Devam Et (Ekstra El)'
+    : 'Sonraki El';
   els.btnNextRound.hidden = !room.isHost;
   els.roundWaitHost.hidden = room.isHost;
   if (!els.dialogRound.open) {
@@ -711,6 +794,20 @@ function handleLayoffTile(tileId, meldId) {
   });
 }
 
+function leaveCurrentMatch() {
+  if (els.dialogRound.open) els.dialogRound.close();
+  if (localClient) {
+    localClient.destroy();
+    localClient = null;
+    switchView(null);
+    return;
+  }
+  socket.emit('room:leave', {}, () => {
+    switchView(null);
+    refreshRooms();
+  });
+}
+
 // Button Event Wiring
 els.btnQuickPlay.addEventListener('click', () => createRoom(true));
 els.btnSingleplayer?.addEventListener('click', startSingleplayer);
@@ -724,18 +821,8 @@ els.joinCodeForm.addEventListener('submit', (e) => {
 els.btnRefreshRooms.addEventListener('click', refreshRooms);
 els.btnRetryRooms.addEventListener('click', refreshRooms);
 
-els.btnLeave.addEventListener('click', () => {
-  if (localClient) {
-    localClient.destroy();
-    localClient = null;
-    switchView(null);
-    return;
-  }
-  socket.emit('room:leave', {}, () => {
-    switchView(null);
-    refreshRooms();
-  });
-});
+els.btnLeave.addEventListener('click', leaveCurrentMatch);
+els.btnRoundLeave.addEventListener('click', leaveCurrentMatch);
 
 els.btnCopyCode.addEventListener('click', async () => {
   if (!currentRoom) return;
@@ -750,13 +837,17 @@ els.btnCopyCode.addEventListener('click', async () => {
 
 function syncHostOptions() {
   socket.emit('room:options', {
-    katlamali: els.waitKatlamali.checked,
+    teamMode: els.waitTeamMode.value === 'paired' ? 'paired' : 'solo',
+    katlamali: els.waitKatlamali.value === '1',
+    maxRounds: Number(els.waitMaxRounds.value),
     islekPenalty: els.waitIslek.checked,
     turnSeconds: Number(els.waitTimer.value)
   });
 }
 
+els.waitTeamMode.addEventListener('change', syncHostOptions);
 els.waitKatlamali.addEventListener('change', syncHostOptions);
+els.waitMaxRounds.addEventListener('change', syncHostOptions);
 els.waitIslek.addEventListener('change', syncHostOptions);
 els.waitTimer.addEventListener('change', syncHostOptions);
 
@@ -1068,7 +1159,7 @@ function renderSecretSnapshot(snapshot) {
 
     const head = document.createElement('div');
     head.className = 'secret-group__title';
-    head.textContent = `${title} (${tiles.length} taş)`;
+    head.textContent = title;
     group.appendChild(head);
 
     const wrap = document.createElement('div');
@@ -1087,7 +1178,7 @@ function renderSecretSnapshot(snapshot) {
       btn.type = 'button';
       const isOk = isOkeyTile(tile, snapshot.okeyTarget);
       btn.className = `tile-chip tile-chip--${tile.color}${isOk ? ' is-okey' : ''}`;
-      btn.textContent = tile.isFakeOkey ? 'S' : String(tile.number);
+      btn.textContent = tile.isFakeOkey ? '✦' : String(tile.number);
       btn.title = `${formatTileLabel(tile)} ile sessiz takas yap`;
       btn.addEventListener('click', () => {
         const myTileId = els.secretMyTile.value;

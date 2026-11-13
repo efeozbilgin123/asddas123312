@@ -24,15 +24,15 @@
         <button type="button" class="seg__btn" data-cam="top">Üstten</button>
         <button type="button" class="seg__btn" data-cam="rack">Istaka</button>
       </div>
-      <button type="button" id="btn-sound" class="btn btn--quiet" aria-pressed="false" title="Ses efektleri">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+      <button type="button" id="btn-sound" class="btn btn--quiet btn--sm" aria-pressed="false" title="Ses efektleri">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M11 5L6 9H2v6h4l5 4V5z"/>
           <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
         </svg>
         <span>Ses açık</span>
       </button>
-      <button type="button" id="btn-rules" class="btn btn--quiet">Kurallar</button>
-      <button type="button" id="btn-leave" class="btn btn--quiet" hidden>Masadan Ayrıl</button>
+      <button type="button" id="btn-rules" class="btn btn--quiet btn--sm">Kurallar</button>
+      <button type="button" id="btn-leave" class="btn btn--quiet btn--sm" hidden>Masadan Ayrıl</button>
     </div>
   </header>
 
@@ -43,8 +43,8 @@
     <section id="view-lobby" class="lobby-shell" aria-label="Oyun lobisi">
       <div class="lobby-panel">
         <div class="lobby-panel__head">
-          <h1>101 Okey Masası</h1>
-          <p class="lead">Arkadaşlarınla oda kur ya da botlara karşı hemen oyna.</p>
+          <h1>101 Okey Kahvehanesi</h1>
+          <p class="lead">Profil fotoğrafını seç, tekli ya da eşli masa kur veya botlarla hemen başla.</p>
         </div>
 
         <form id="lobby-form" class="lobby-form" novalidate>
@@ -61,15 +61,55 @@
             </div>
           </div>
 
+          <div class="avatar-field">
+            <span class="avatar-field__label">Profil fotoğrafı</span>
+            <div id="avatar-picker" class="avatar-picker" role="radiogroup" aria-label="Profil fotoğrafı seçin">
+              <button type="button" class="avatar-btn is-selected" data-avatar="avatar-1" role="radio" aria-checked="true" aria-label="Avatar 1">
+                <img src="/assets/avatar-1.jpg" alt="Karakter 1">
+              </button>
+              <button type="button" class="avatar-btn" data-avatar="avatar-2" role="radio" aria-checked="false" aria-label="Avatar 2">
+                <img src="/assets/avatar-2.jpg" alt="Karakter 2">
+              </button>
+              <button type="button" class="avatar-btn" data-avatar="avatar-3" role="radio" aria-checked="false" aria-label="Avatar 3">
+                <img src="/assets/avatar-3.jpg" alt="Karakter 3">
+              </button>
+              <button type="button" class="avatar-btn" data-avatar="avatar-4" role="radio" aria-checked="false" aria-label="Avatar 4">
+                <img src="/assets/avatar-4.jpg" alt="Karakter 4">
+              </button>
+              <button type="button" class="avatar-btn" data-avatar="avatar-5" role="radio" aria-checked="false" aria-label="Avatar 5">
+                <img src="/assets/avatar-5.jpg" alt="Karakter 5">
+              </button>
+              <button type="button" class="avatar-btn" data-avatar="avatar-6" role="radio" aria-checked="false" aria-label="Avatar 6">
+                <img src="/assets/avatar-6.jpg" alt="Karakter 6">
+              </button>
+            </div>
+          </div>
+
           <div class="options-bar">
-            <label class="check">
-              <input id="opt-katlamali" type="checkbox">
-              <span>Katlamalı 101</span>
-            </label>
-            <label class="check">
-              <input id="opt-islek" type="checkbox" checked>
-              <span>İşlek taş cezası (+101)</span>
-            </label>
+            <div class="field field--inline">
+              <label for="opt-team-mode">Oyun tipi</label>
+              <select id="opt-team-mode">
+                <option value="solo" selected>Tekli (Herkes Tek)</option>
+                <option value="paired">Eşli (2v2 Çapraz)</option>
+              </select>
+            </div>
+            <div class="field field--inline">
+              <label for="opt-katlamali">Açılış kuralı</label>
+              <select id="opt-katlamali">
+                <option value="0" selected>Katlamasız</option>
+                <option value="1">Katlamalı</option>
+              </select>
+            </div>
+            <div class="field field--inline">
+              <label for="opt-max-rounds">Tur sayısı</label>
+              <select id="opt-max-rounds">
+                <option value="3">3 El</option>
+                <option value="5" selected>5 El</option>
+                <option value="7">7 El</option>
+                <option value="9">9 El</option>
+                <option value="0">Sınırsız</option>
+              </select>
+            </div>
             <div class="field field--inline">
               <label for="opt-timer">Hamle süresi</label>
               <select id="opt-timer">
@@ -78,6 +118,10 @@
                 <option value="90">90 sn</option>
               </select>
             </div>
+            <label class="check">
+              <input id="opt-islek" type="checkbox" checked>
+              <span>İşlek taş cezası (+101)</span>
+            </label>
           </div>
 
           <div class="lobby-actions">
@@ -155,22 +199,42 @@
         <div id="wait-seats-grid" class="wait-seats"></div>
 
         <div id="wait-host-controls" class="wait-controls" hidden>
-          <label class="check">
-            <input id="wait-katlamali" type="checkbox">
-            <span>Katlamalı 101</span>
-          </label>
-          <label class="check">
-            <input id="wait-islek" type="checkbox">
-            <span>İşlek taş cezası</span>
-          </label>
           <div class="field field--inline">
-            <label for="wait-timer">Hamle süresi</label>
+            <label for="wait-team-mode">Oyun tipi</label>
+            <select id="wait-team-mode">
+              <option value="solo">Tekli</option>
+              <option value="paired">Eşli (2v2)</option>
+            </select>
+          </div>
+          <div class="field field--inline">
+            <label for="wait-katlamali">Açılış</label>
+            <select id="wait-katlamali">
+              <option value="0">Katlamasız</option>
+              <option value="1">Katlamalı</option>
+            </select>
+          </div>
+          <div class="field field--inline">
+            <label for="wait-max-rounds">Tur</label>
+            <select id="wait-max-rounds">
+              <option value="3">3 El</option>
+              <option value="5">5 El</option>
+              <option value="7">7 El</option>
+              <option value="9">9 El</option>
+              <option value="0">Sınırsız</option>
+            </select>
+          </div>
+          <div class="field field--inline">
+            <label for="wait-timer">Süre</label>
             <select id="wait-timer">
               <option value="45">45 sn</option>
               <option value="60">60 sn</option>
               <option value="90">90 sn</option>
             </select>
           </div>
+          <label class="check">
+            <input id="wait-islek" type="checkbox">
+            <span>İşlek taş cezası</span>
+          </label>
         </div>
 
         <div class="wait-footer">
@@ -182,72 +246,11 @@
 
     <!-- Active 3D Game HUD -->
     <section id="view-game" class="game-hud" hidden aria-label="Oyun arayüzü">
-      <div class="seat-badges">
-        <article id="seat-card-2" class="seat-card seat-card--north" aria-label="Karşı oyuncu">
-          <div class="seat-card__top">
-            <strong class="seat-name"></strong>
-            <span class="seat-score num"></span>
-          </div>
-          <div class="seat-card__meta">
-            <span class="seat-tiles num"></span>
-            <span class="seat-open-tag"></span>
-          </div>
-        </article>
-
-        <article id="seat-card-3" class="seat-card seat-card--west" aria-label="Sol oyuncu">
-          <div class="seat-card__top">
-            <strong class="seat-name"></strong>
-            <span class="seat-score num"></span>
-          </div>
-          <div class="seat-card__meta">
-            <span class="seat-tiles num"></span>
-            <span class="seat-open-tag"></span>
-          </div>
-        </article>
-
-        <article id="seat-card-1" class="seat-card seat-card--east" aria-label="Sağ oyuncu">
-          <div class="seat-card__top">
-            <strong class="seat-name"></strong>
-            <span class="seat-score num"></span>
-          </div>
-          <div class="seat-card__meta">
-            <span class="seat-tiles num"></span>
-            <span class="seat-open-tag"></span>
-          </div>
-        </article>
-      </div>
-
-      <!-- Center Top Game Info Strip -->
-      <div class="table-status-strip">
-        <div class="status-chip">
-          <span class="status-chip__label">El</span>
-          <strong id="hud-round" class="num">1</strong>
-        </div>
-        <div class="status-chip">
-          <span class="status-chip__label">Deste</span>
-          <strong id="hud-deck" class="num">21</strong>
-        </div>
-        <div class="status-chip">
-          <span class="status-chip__label">Okey</span>
-          <strong id="hud-okey" class="okey-chip">-</strong>
-        </div>
-        <div class="status-chip">
-          <span class="status-chip__label">Açılış</span>
-          <strong id="hud-threshold" class="num">101</strong>
-        </div>
-        <div class="status-chip">
-          <span class="status-chip__label">Süre</span>
-          <strong id="hud-timer" class="num">60</strong>
-        </div>
-      </div>
-
-      <!-- Event / Prompt Banner -->
-      <div id="hud-banner" class="hud-banner" role="status" aria-live="polite">
-        <span id="hud-turn-text">Oyun hazır</span>
-      </div>
-
-      <!-- Bottom Control & Staging Dock above 3D Rack -->
       <div class="bottom-dock">
+        <div id="hud-banner" class="hud-banner" role="status" aria-live="polite">
+          <span id="hud-turn-text">Oyun hazır</span>
+        </div>
+
         <div id="staging-bar" class="staging-bar" hidden>
           <div id="staging-groups" class="staging-groups"></div>
           <div class="staging-summary">
@@ -259,16 +262,24 @@
 
         <div class="action-bar">
           <div class="action-bar__left">
-            <article id="seat-card-0" class="seat-card seat-card--south">
-              <div class="seat-card__top">
-                <strong class="seat-name">Siz</strong>
-                <span class="seat-score num">0 p</span>
-              </div>
-              <div class="seat-card__meta">
-                <span class="seat-tiles num">21 taş</span>
-                <span class="seat-open-tag">Açmadı</span>
-              </div>
-            </article>
+            <div class="dock-meta" aria-label="El bilgileri">
+              <span class="dock-stat">
+                <span class="dock-stat__label">El</span>
+                <strong id="hud-round" class="num">1</strong>
+              </span>
+              <span class="dock-stat">
+                <span class="dock-stat__label">Okey</span>
+                <strong id="hud-okey" class="okey-chip">-</strong>
+              </span>
+              <span class="dock-stat">
+                <span class="dock-stat__label">Açılış</span>
+                <strong id="hud-threshold" class="num">101</strong>
+              </span>
+              <span class="dock-stat">
+                <span class="dock-stat__label">Süre</span>
+                <strong id="hud-timer" class="num">60</strong>
+              </span>
+            </div>
 
             <div class="rack-tools">
               <button type="button" id="btn-sort-runs" class="btn btn--quiet btn--sm">Seri Diz</button>
@@ -302,12 +313,12 @@
     </div>
     <div class="dialog__body">
       <ul class="rules-list">
-        <li><strong>Amaç:</strong> Elini açtıktan sonra tüm taşlarını masaya indirip son kalan tek taşı kenara atarak eli bitirmek ve en düşük ceza puanıyla oyunu tamamlamak.</li>
-        <li><strong>El Açma:</strong> En az 101 toplam puanlık geçerli per/seriler (veya en az 5 adet çift) seçip Gruba Ekle ile hazırlayarak Masaya Aç düğmesine basın.</li>
-        <li><strong>Seri ve Perler:</strong> Aynı renkte ardışık en az 3 taş (12-13-1 dahil) seri sayılır. Aynı sayıda farklı renklerde 3 veya 4 taş per sayılır.</li>
-        <li><strong>Yandan Taş Alma:</strong> Solunuzdaki oyuncunun attığı taşı alırsanız o tur içinde mutlaka el açmalı veya masaya taş işlemelisiniz.</li>
-        <li><strong>Okey ve Sahte Okey:</strong> Gösterge taşının bir üst numarası Okeydir ve her taşın yerine geçer. Sahte Okey ise yalnızca Okey taşının gerçek değerini temsil eder.</li>
-        <li><strong>3D Kontroller:</strong> Taşları seçmek için tıklayın, ıstaka üzerinde sürükleyip yer değiştirin, sağ tuşla kamerayı çevirin.</li>
+        <li><strong>Amaç:</strong> Elini açtıktan sonra tüm taşlarını masaya indirip son kalan tek taşı sağ kenara atarak eli bitirmek ve en düşük ceza puanıyla oyunu tamamlamak.</li>
+        <li><strong>Tekli ve Eşli Mod:</strong> Eşli modda karşılıklı oturan oyuncular (Güney-Kuzey ve Doğu-Batı) aynı takımdır. Bir oyuncu eli bitirdiğinde takım arkadaşı açmama cezası almaz.</li>
+        <li><strong>Katlamalı / Katlamasız:</strong> Katlamalı modda her el açan oyuncu bir sonraki oyuncunun minimum açılış barajını yükseltir.</li>
+        <li><strong>Yandan Taş Alma:</strong> Solunuzdaki taş alanı ıstakanızın hemen solundadır. Yandan taş alırsanız o tur içinde mutlaka el açmalı veya masaya taş işlemelisiniz.</li>
+        <li><strong>Okey ve Sahte Okey:</strong> Gösterge taşının bir üst numarası Okeydir ve her taşın yerine geçer. Altın taçlı rozet Okeyi, rozetli taş ise Sahte Okeyi gösterir.</li>
+        <li><strong>3D Sürükle-Bırak:</strong> Taşı tutup kaldırarak ıstakanın diğer yuvalarına, sağdaki atma alanına veya masadaki yeşil perlerin üzerine bırakabilirsiniz.</li>
       </ul>
     </div>
   </dialog>
@@ -320,6 +331,9 @@
     </div>
     <div class="dialog__body">
       <p id="round-dialog-msg" class="lead"></p>
+
+      <div id="round-team-scores" class="team-summary-grid" hidden></div>
+
       <div class="rooms-table-wrap">
         <table class="rooms-table">
           <thead>
@@ -336,8 +350,9 @@
         </table>
       </div>
       <div class="dialog__actions">
-        <button type="button" id="btn-next-round" class="btn btn--primary" hidden>Yeni Eli Başlat</button>
-        <p id="round-wait-host" class="field__help" hidden>Masa kurucusunun yeni eli başlatması bekleniyor.</p>
+        <button type="button" id="btn-round-leave" class="btn btn--quiet">Masadan Ayrıl</button>
+        <button type="button" id="btn-next-round" class="btn btn--primary" hidden>Sonraki El</button>
+        <p id="round-wait-host" class="field__help" hidden>Masa kurucusunun devam etmesi bekleniyor.</p>
       </div>
     </div>
   </dialog>

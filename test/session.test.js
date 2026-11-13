@@ -184,3 +184,63 @@ test('LocalSingleplayerClient starts offline session and supports secret actions
 
   client.destroy();
 });
+
+test('GameSession paired team mode exempts winner partner from 202 penalty and supports continuing after maxRounds or deck empty', () => {
+  const session = new GameSession({
+    roomCode: 'PAIR',
+    seatsConfig: [
+      { playerId: 'p0', name: 'Oyuncu 0', avatar: 'avatar-1', isBot: false },
+      { playerId: 'p1', name: 'Oyuncu 1', avatar: 'avatar-2', isBot: false },
+      { playerId: 'p2', name: 'Oyuncu 2', avatar: 'avatar-3', isBot: false },
+      { playerId: 'p3', name: 'Oyuncu 3', avatar: 'avatar-4', isBot: false }
+    ],
+    options: { katlamali: false, teamMode: 'paired', maxRounds: 3, islekPenalty: true, turnSeconds: 60 },
+    onStateChange: () => {}
+  });
+
+  session.roundNumber = 2; // Next startRound -> round 3 (reaches maxRounds = 3)
+  session.startRound();
+  assert.equal(session.roundNumber, 3);
+  assert.equal(session.seats[0].avatar, 'avatar-1');
+  assert.equal(session.seats[2].teamIndex, 0);
+
+  // Make seat 0 finish immediately with a single non-okey discard
+  const safeTile = session.seats[0].hand.find((t) => !isOkeyTile(t, session.okeyTarget));
+  session.seats[0].hand = [safeTile];
+  session.seats[0].opened = true;
+  session.currentSeat = 0;
+  session.turnPhase = 'play';
+  const fin = session.discardTile(0, safeTile.id);
+  assert.equal(fin.ok, true);
+  assert.equal(fin.roundEnded, true);
+  assert.equal(session.phase, 'roundOver');
+
+  // Seat 2 (partner of seat 0) did not open, yet gets 0 penalty in paired mode
+  const row0 = session.roundSummary.rows.find((r) => r.seatIndex === 0);
+  const row2 = session.roundSummary.rows.find((r) => r.seatIndex === 2);
+  const row1 = session.roundSummary.rows.find((r) => r.seatIndex === 1);
+  assert.equal(row0.roundDelta, -101);
+  assert.equal(row2.roundDelta, 0);
+  assert.equal(row1.roundDelta, 202);
+  assert.equal(session.roundSummary.matchComplete, true);
+  assert.equal(session.roundSummary.teamMode, 'paired');
+  assert.deepEqual(session.roundSummary.teamScores, [-101, 404]);
+
+  // Continue into extra round 4 even after maxRounds was reached
+  session.startRound();
+  assert.equal(session.roundNumber, 4);
+  assert.equal(session.phase, 'playing');
+
+  // Exhaust deck and discard -> deckExhausted roundOver, still allows startRound
+  session.deck = [];
+  const dTile = session.seats[session.currentSeat].hand[0];
+  session.discardTile(session.currentSeat, dTile.id);
+  assert.equal(session.phase, 'roundOver');
+  assert.equal(session.roundSummary.deckExhausted, true);
+
+  session.startRound();
+  assert.equal(session.roundNumber, 5);
+  assert.equal(session.phase, 'playing');
+
+  session.destroy();
+});

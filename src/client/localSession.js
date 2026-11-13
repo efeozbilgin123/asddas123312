@@ -1,15 +1,15 @@
 import { GameSession } from '../../shared/gameSession.js';
 
 export class LocalSingleplayerClient {
-  constructor({ playerName, options, onState }) {
+  constructor({ playerName, playerAvatar, options, onState }) {
     this.onState = onState;
     this.session = new GameSession({
       roomCode: 'TEK1',
       seatsConfig: [
-        { playerId: 'local-0', name: playerName || 'Oyuncu', isBot: false, connected: true },
-        { playerId: 'bot-1', name: 'Selim (Bot)', isBot: true, connected: true },
-        { playerId: 'bot-2', name: 'Zeynep (Bot)', isBot: true, connected: true },
-        { playerId: 'bot-3', name: 'Kerem (Bot)', isBot: true, connected: true }
+        { playerId: 'local-0', name: playerName || 'Oyuncu', avatar: playerAvatar || 'avatar-1', isBot: false, connected: true },
+        { playerId: 'bot-1', name: 'Selim (Bot)', avatar: 'avatar-4', isBot: true, connected: true },
+        { playerId: 'bot-2', name: 'Zeynep (Bot)', avatar: 'avatar-2', isBot: true, connected: true },
+        { playerId: 'bot-3', name: 'Kerem (Bot)', avatar: 'avatar-3', isBot: true, connected: true }
       ],
       options,
       onStateChange: () => {
@@ -31,8 +31,10 @@ export class LocalSingleplayerClient {
       viewerSeatIndex: 0,
       seats: this.session.seats.map((s) => ({
         seatIndex: s.seatIndex,
+        teamIndex: s.seatIndex % 2,
         type: s.isBot ? 'bot' : 'human',
         name: s.name,
+        avatar: s.avatar,
         connected: true
       })),
       game: this.session.getClientView(0)

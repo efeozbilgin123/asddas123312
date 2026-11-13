@@ -3,7 +3,8 @@ services:
     name: yuzbir-okey-3d
     runtime: node
     plan: free
-    buildCommand: npm install --include=dev && npm run build
+    autoDeploy: true
+    buildCommand: npm install && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:

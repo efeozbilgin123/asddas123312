@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "concurrently -n server,client -c yellow,cyan \"node --watch server/index.js\" \"vite --host 0.0.0.0\"",
     "build": "vite build",
+    "postinstall": "node -e \"import('node:fs').then(f => f.existsSync('scripts/ensure-dist.mjs') && import('./scripts/ensure-dist.mjs'))\"",
+    "prestart": "node scripts/ensure-dist.mjs",
     "start": "node server/index.js",
     "test": "node --test test/*.test.js"
   },
@@ -13,11 +15,11 @@
     "express": "^4.21.2",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
-    "three": "^0.175.0"
+    "three": "^0.175.0",
+    "vite": "^6.2.5"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2",
-    "vite": "^6.2.5"
+    "concurrently": "^9.1.2"
   },
   "engines": {
     "node": ">=20"

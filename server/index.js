@@ -113,6 +113,16 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack(res);
   });
 
+  socket.on('room:switchSeat', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.switchSeat({
+      roomCode: code,
+      playerId,
+      targetSeatIndex: Number(data?.seatIndex)
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
   socket.on('room:options', (data, ack) => {
     const code = roomManager.playerToRoom.get(playerId);
     const res = roomManager.updateOptions({

@@ -105,6 +105,7 @@ const els = {
   hudPairsCount: document.getElementById('hud-pairs-count'),
   hudTimer: document.getElementById('hud-timer'),
   hudTurnText: document.getElementById('hud-turn-text'),
+  gameAlertToast: document.getElementById('game-alert-toast'),
 
   stagingBar: document.getElementById('staging-bar'),
   stagingGroups: document.getElementById('staging-groups'),
@@ -303,6 +304,27 @@ function showNotice(text, duration = 3500) {
   noticeTimer = setTimeout(() => {
     bannerNotice = '';
     updateTurnBanner();
+  }, duration);
+}
+
+let gameAlertTimer = null;
+function showGameAlert(text, kind = 'islek', duration = 4500) {
+  if (!els.gameAlertToast) return;
+  if (gameAlertTimer) clearTimeout(gameAlertTimer);
+  if (!text) {
+    els.gameAlertToast.hidden = true;
+    els.gameAlertToast.textContent = '';
+    els.gameAlertToast.classList.remove('is-okey', 'is-islek');
+    return;
+  }
+  els.gameAlertToast.textContent = text;
+  els.gameAlertToast.classList.remove('is-okey', 'is-islek');
+  els.gameAlertToast.classList.add(kind === 'okey' ? 'is-okey' : 'is-islek');
+  els.gameAlertToast.hidden = false;
+  gameAlertTimer = setTimeout(() => {
+    if (els.gameAlertToast) {
+      els.gameAlertToast.hidden = true;
+    }
   }, duration);
 }
 
@@ -602,6 +624,7 @@ function switchView(room) {
     if (els.dialogSecret.open) els.dialogSecret.close();
     if (els.dialogMusic?.open) els.dialogMusic.close();
     if (els.dialogOrders?.open) els.dialogOrders.close();
+    showGameAlert('', 'islek', 0);
     applyRoomMusic(null);
     scene3d.setRoomOrders(null, 0);
     scene3d.renderGameState(null);
@@ -624,6 +647,7 @@ function switchView(room) {
     els.roomPill.hidden = false;
     els.roomPill.textContent = `Oda ${room.code}`;
     els.cameraGroup.hidden = true;
+    showGameAlert('', 'islek', 0);
     renderWaitingRoom(room);
     scene3d.renderGameState(null);
   } else {
@@ -652,10 +676,12 @@ function renderWaitingRoom(room) {
   els.waitSeatsGrid.innerHTML = '';
   const seatLabels = ['Güney', 'Doğu', 'Kuzey', 'Batı'];
   const isPaired = room.options.teamMode === 'paired';
+  const mySeatIdx = room.viewerSeatIndex ?? 0;
 
   room.seats.forEach((seat) => {
+    const isMine = seat.seatIndex === mySeatIdx;
     const card = document.createElement('div');
-    card.className = 'wait-seat';
+    card.className = `wait-seat${isMine ? ' wait-seat--mine' : ''}`;
 
     const left = document.createElement('div');
     left.className = 'wait-seat__left';
@@ -673,15 +699,17 @@ function renderWaitingRoom(room) {
 
     const title = document.createElement('strong');
     title.textContent =
-      seat.type === 'empty' ? `${seatLabels[seat.seatIndex]} koltuğu boş` : seat.name;
+      seat.type === 'empty'
+        ? `${seatLabels[seat.seatIndex]} koltuğu boş`
+        : `${seat.name}${isMine ? ' (Siz)' : ''}`;
 
     const role = document.createElement('span');
     role.className = 'wait-seat__role';
     const baseRole =
       seat.type === 'human'
-        ? 'Gerçek oyuncu'
+        ? `${seatLabels[seat.seatIndex]} · Gerçek oyuncu`
         : seat.type === 'bot'
-          ? 'Yapay zekâ bot'
+          ? `${seatLabels[seat.seatIndex]} · Yapay zekâ bot`
           : 'Oyun başlayınca bot atanabilir';
     role.textContent = isPaired
       ? `${(seat.seatIndex % 2) + 1}. Takım · ${baseRole}`
@@ -690,6 +718,26 @@ function renderWaitingRoom(room) {
     info.append(title, role);
     left.append(avatarImg, info);
     card.appendChild(left);
+
+    const actions = document.createElement('div');
+    actions.className = 'wait-seat__actions';
+
+    if (!isMine && (seat.type !== 'human' || room.isHost)) {
+      const moveBtn = document.createElement('button');
+      moveBtn.type = 'button';
+      moveBtn.className = 'btn btn--quiet btn--sm';
+      moveBtn.textContent = seat.type === 'human' ? 'Yer Değiştir' : 'Buraya Geç';
+      moveBtn.addEventListener('click', () => {
+        socket.emit('room:switchSeat', { seatIndex: seat.seatIndex }, (res) => {
+          if (!res?.ok) {
+            els.waitStatusMsg.textContent = res?.error || 'Koltuk değiştirilemedi.';
+          } else {
+            els.waitStatusMsg.textContent = '';
+          }
+        });
+      });
+      actions.appendChild(moveBtn);
+    }
 
     if (room.isHost && seat.type !== 'human') {
       const btn = document.createElement('button');
@@ -701,7 +749,11 @@ function renderWaitingRoom(room) {
           if (!res?.ok) els.waitStatusMsg.textContent = res?.error || 'Koltuk güncellenemedi.';
         });
       });
-      card.appendChild(btn);
+      actions.appendChild(btn);
+    }
+
+    if (actions.childElementCount > 0) {
+      card.appendChild(actions);
     }
 
     els.waitSeatsGrid.appendChild(card);
@@ -712,12 +764,13 @@ function renderGameRoom(room) {
   const game = room.game;
   if (!game) return;
 
-  // Handle sound effects for newly seen event
+  // Handle sound effects & alerts for newly seen event
   if (game.lastEvent && game.lastEvent.id > lastEventIdSeen) {
     lastEventIdSeen = game.lastEvent.id;
     const ev = game.lastEvent;
     if (ev.type === 'round_start') {
       soundFX.playTileShuffle();
+      showGameAlert('', 'islek', 0);
     } else if (ev.type === 'draw_deck' || ev.type === 'draw_discard') {
       soundFX.playTileFlip();
     } else if (ev.type === 'return_discard') {
@@ -727,8 +780,21 @@ function renderGameRoom(room) {
     } else if (ev.type === 'round_over') {
       soundFX.playRoundWin();
     } else if (ev.type === 'discard') {
-      if (String(ev.message || '').toLowerCase().includes('ceza')) {
+      const msgLower = String(ev.message || '').toLowerCase();
+      const alertKind =
+        ev.alertKind ||
+        (msgLower.includes('okey')
+          ? 'okey'
+          : msgLower.includes('işlek') || msgLower.includes('ceza')
+            ? 'islek'
+            : null);
+
+      if (alertKind) {
         soundFX.playPenalty();
+        const tileText = ev.tile ? ` (${formatTileLabel(ev.tile)})` : '';
+        const alertText = `${ev.message}${tileText}`;
+        showNotice(alertText, 4500);
+        showGameAlert(alertText, alertKind, 4500);
       } else {
         soundFX.playTileClack(0.92);
       }
@@ -840,10 +906,13 @@ function updateGameControls() {
   );
 
   // Live automatic Tek (Seri) and Cift counting without needing a manual Per Bul button
+  const mustUseTileId = isPlayPhase ? (game.pickedDiscardTileId || null) : null;
   liveAutoAnalysis = analyzeHandLive(
     scene3d.getRackSlots(),
     mySeat?.hand || [],
-    game.okeyTarget
+    game.okeyTarget,
+    14,
+    mustUseTileId
   );
   const openReq = game.openThreshold || 101;
   const pairReq = game.pairThreshold || 5;
@@ -852,6 +921,10 @@ function updateGameControls() {
   const katlamaliPairOnly = Boolean(
     game.options?.katlamali && game.pickedDiscardTileId && pickedFromSeat?.openMode === 'pairs'
   );
+  const handCount = mySeat?.hand?.length || 0;
+  const seriesUsedCount = liveAutoAnalysis.seriesGroups.reduce((n, g) => n + g.tiles.length, 0);
+  const seriesLeavesDiscard = handCount - seriesUsedCount >= 1;
+  const pairsLeavesDiscard = handCount - liveAutoAnalysis.pairCount * 2 >= 1 || liveAutoAnalysis.pairCount > pairReq;
 
   if (els.hudSeriesCount) {
     if (mySeat?.opened) {
@@ -861,7 +934,10 @@ function updateGameControls() {
       els.hudSeriesCount.textContent = `${liveAutoAnalysis.seriesPoints} / ${openReq}`;
       els.hudSeriesCount.classList.toggle(
         'is-ready',
-        !katlamaliPairOnly && liveAutoAnalysis.seriesPoints >= openReq
+        !katlamaliPairOnly &&
+          liveAutoAnalysis.seriesUsesRequired &&
+          liveAutoAnalysis.seriesPoints >= openReq &&
+          seriesLeavesDiscard
       );
     }
   }
@@ -872,7 +948,12 @@ function updateGameControls() {
       els.hudPairsCount.classList.remove('is-ready');
     } else {
       els.hudPairsCount.textContent = `${liveAutoAnalysis.pairCount} / ${pairReq}`;
-      els.hudPairsCount.classList.toggle('is-ready', liveAutoAnalysis.pairCount >= pairReq);
+      els.hudPairsCount.classList.toggle(
+        'is-ready',
+        liveAutoAnalysis.pairsUsesRequired &&
+          liveAutoAnalysis.pairCount >= pairReq &&
+          pairsLeavesDiscard
+      );
     }
   }
 
@@ -881,15 +962,19 @@ function updateGameControls() {
     !mySeat?.opened &&
     stagedGroups.length === 0 &&
     !katlamaliPairOnly &&
+    liveAutoAnalysis.seriesUsesRequired &&
     liveAutoAnalysis.seriesPoints >= openReq &&
-    liveAutoAnalysis.seriesGroups.length > 0;
+    liveAutoAnalysis.seriesGroups.length > 0 &&
+    seriesLeavesDiscard;
 
   const canDirectPairsOpen =
     isPlayPhase &&
     !mySeat?.opened &&
     stagedGroups.length === 0 &&
+    liveAutoAnalysis.pairsUsesRequired &&
     liveAutoAnalysis.pairCount >= pairReq &&
-    liveAutoAnalysis.pairGroups.length >= pairReq;
+    liveAutoAnalysis.pairGroups.length >= pairReq &&
+    pairsLeavesDiscard;
 
   if (els.btnOpenSeries) {
     els.btnOpenSeries.hidden = !canDirectSeriesOpen;
@@ -1251,7 +1336,17 @@ els.btnOpenPairs?.addEventListener('click', () => {
   const mySeat = game?.seats[game.viewerSeatIndex];
   if (!game || !mySeat || mySeat.opened) return;
   if (liveAutoAnalysis.pairGroups.length === 0) return;
-  const groups = liveAutoAnalysis.pairGroups.map((g) => g.tiles.map((t) => t.id));
+
+  let pairsToOpen = [...liveAutoAnalysis.pairGroups];
+  const mustId = game.pickedDiscardTileId || null;
+  if (pairsToOpen.length * 2 >= mySeat.hand.length && pairsToOpen.length > 1) {
+    const dropIdx = pairsToOpen.findIndex((g) => !mustId || !g.tiles.some((t) => t.id === mustId));
+    if (dropIdx !== -1) {
+      pairsToOpen.splice(dropIdx, 1);
+    }
+  }
+
+  const groups = pairsToOpen.map((g) => g.tiles.map((t) => t.id));
   sendGameAction('game:openHand', { groups, mode: 'pairs' }, (res) => {
     if (!res?.ok) {
       showNotice(res?.error || 'Çift açılamadı.');

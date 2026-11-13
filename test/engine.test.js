@@ -315,3 +315,36 @@ test('analyzeHandLive automatically counts Tek (Seri) points and Cift count with
   assert.equal(arrangedLive.pairCount, 2);
 });
 
+test('analyzeHandLive respects requiredTileId (picked left discard) so Tek Ac never omits it', () => {
+  const okeyTarget = { color: 'yellow', number: 1 };
+  // Hand has 10-10-10 (30) + 12-12-12 (36) + 13-13-13 (39) = 105 without leftTile,
+  // and red 11 + red 12 + red 13 (leftTile) = 36 so 30 + 36 + 36 = 102 WITH leftTile!
+  const leftTile = t('left-r13', 'red', 13);
+  const hand = [
+    t('a1', 'blue', 10),
+    t('a2', 'black', 10),
+    t('a3', 'yellow', 10), // 30
+    t('b1', 'blue', 12),
+    t('b2', 'black', 12),
+    t('b3', 'yellow', 12), // 36
+    t('c1', 'blue', 13),
+    t('c2', 'black', 13),
+    t('c3', 'yellow', 13), // 39 (overlaps with leftTile if both used? No, leftTile is red 13!)
+    t('r11', 'red', 11),
+    t('r12', 'red', 12),
+    leftTile,
+    t('extra', 'black', 4)
+  ];
+
+  const liveWithReq = analyzeHandLive(new Array(28).fill(null), hand, okeyTarget, 14, leftTile.id);
+  assert.equal(liveWithReq.seriesUsesRequired, true);
+  assert.ok(liveWithReq.seriesPoints >= 101);
+  assert.ok(liveWithReq.seriesGroups.some((g) => g.tiles.some((x) => x.id === leftTile.id)));
+
+  // Unusable left tile marks seriesUsesRequired = false
+  const deadLeft = t('dead-2', 'yellow', 2);
+  const handWithDead = [...hand, deadLeft];
+  const liveDead = analyzeHandLive(new Array(28).fill(null), handWithDead, okeyTarget, 14, deadLeft.id);
+  assert.equal(liveDead.seriesUsesRequired, false);
+});
+

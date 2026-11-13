@@ -752,3 +752,85 @@ test('GameSession.getClientView hides opponent tileCount while preserving viewer
 
   session.destroy();
 });
+
+test('GameSession prevents layMeld/layoffTile softlock when holding pickedDiscardTileId and emits islek/okey alertKind', () => {
+  const session = new GameSession({
+    roomCode: 'LOCK',
+    seatsConfig: [
+      { playerId: 'p0', name: 'Efe', isBot: false },
+      { playerId: 'p1', name: 'Bot 1', isBot: true },
+      { playerId: 'p2', name: 'Bot 2', isBot: true },
+      { playerId: 'p3', name: 'Bot 3', isBot: true }
+    ],
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
+    onStateChange: () => {}
+  });
+
+  session.startRound();
+  session.okeyTarget = { color: 'yellow', number: 1 };
+  session.currentSeat = 0;
+  session.turnPhase = 'draw';
+  session.seats[0].opened = true;
+  session.seats[0].openMode = 'series';
+  session.tableMelds = [
+    {
+      id: 'm-1',
+      type: 'run',
+      ownerSeat: 1,
+      points: 30,
+      slots: [
+        { tile: { id: 'tm-1', color: 'blue', number: 9, copy: 0, isFakeOkey: false }, effectiveColor: 'blue', effectiveNumber: 9, isOkeyWild: false },
+        { tile: { id: 'tm-2', color: 'blue', number: 10, copy: 0, isFakeOkey: false }, effectiveColor: 'blue', effectiveNumber: 10, isOkeyWild: false },
+        { tile: { id: 'tm-3', color: 'blue', number: 11, copy: 0, isFakeOkey: false }, effectiveColor: 'blue', effectiveNumber: 11, isOkeyWild: false }
+      ]
+    }
+  ];
+
+  const pickedTile = { id: 'pick-r6', color: 'red', number: 6, copy: 0, isFakeOkey: false };
+  const meldTiles = [
+    { id: 'h1', color: 'red', number: 1, copy: 0, isFakeOkey: false },
+    { id: 'h2', color: 'red', number: 2, copy: 0, isFakeOkey: false },
+    { id: 'h3', color: 'red', number: 3, copy: 0, isFakeOkey: false }
+  ];
+  const islekTile = { id: 'h-b12', color: 'blue', number: 12, copy: 0, isFakeOkey: false };
+  const okeyTile = { id: 'h-y1', color: 'yellow', number: 1, copy: 0, isFakeOkey: false };
+
+  session.seats[0].hand = [...meldTiles, islekTile, okeyTile];
+  session.discardPiles[3] = [pickedTile];
+
+  const pickRes = session.drawFromDiscard(0);
+  assert.equal(pickRes.ok, true);
+  assert.equal(session.pickedDiscardTileId, pickedTile.id);
+
+  // Attempting layMeld without pickedTile must fail cleanly and NOT set committedMeldThisTurn
+  const badMeld = session.layMeld(0, meldTiles.map((x) => x.id));
+  assert.equal(badMeld.ok, false);
+  assert.equal(session.committedMeldThisTurn, false);
+
+  // Attempting layoffTile on a different tile must also fail cleanly
+  const badLayoff = session.layoffTile(0, islekTile.id, 'm-1');
+  assert.equal(badLayoff.ok, false);
+  assert.equal(session.committedMeldThisTurn, false);
+
+  // Player is NOT softlocked: can return pickedTile cleanly
+  const retRes = session.returnPickedDiscard(0);
+  assert.equal(retRes.ok, true);
+  assert.equal(session.turnPhase, 'draw');
+
+  // Draw from deck and discard an islek tile -> emits alertKind: 'islek'
+  session.drawFromDeck(0);
+  const discIslek = session.discardTile(0, islekTile.id);
+  assert.equal(discIslek.ok, true);
+  assert.equal(discIslek.islekTriggered, true);
+  assert.equal(session.lastEvent.alertKind, 'islek');
+
+  // Next turn for seat 0 discarding Okey mid-game -> emits alertKind: 'okey'
+  session.currentSeat = 0;
+  session.turnPhase = 'play';
+  const discOkey = session.discardTile(0, okeyTile.id);
+  assert.equal(discOkey.ok, true);
+  assert.equal(discOkey.okeyDiscardPenalty, true);
+  assert.equal(session.lastEvent.alertKind, 'okey');
+
+  session.destroy();
+});

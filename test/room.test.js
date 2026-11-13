@@ -81,3 +81,44 @@ test('RoomManager preserves playerAvatar, teamMode, and maxRounds options', () =
   assert.equal(created.room.options.teamMode, 'solo');
   assert.equal(created.room.options.maxRounds, 0);
 });
+
+test('RoomManager.switchSeat allows moving to empty/bot seats and host human swaps', () => {
+  const io = createMockIo();
+  const rm = new RoomManager(io);
+
+  const created = rm.createRoom({
+    playerId: 'host-1',
+    playerName: 'Efe',
+    roomName: 'Koltuk Testi',
+    options: { teamMode: 'paired' }
+  });
+  const code = created.room.code;
+
+  // Join p2 into seat 1
+  const j2 = rm.joinRoom({ roomCode: code, playerId: 'p2', playerName: 'Ali' });
+  assert.equal(j2.seatIndex, 1);
+
+  // Non-host p2 moves to empty seat 2
+  const moveEmpty = rm.switchSeat({ roomCode: code, playerId: 'p2', targetSeatIndex: 2 });
+  assert.equal(moveEmpty.ok, true);
+  assert.equal(created.room.seats[2].playerId, 'p2');
+  assert.equal(created.room.seats[1].type, 'empty');
+
+  // Add a bot to seat 3 and move p2 into bot seat 3 (bot swaps to seat 2)
+  rm.toggleBotSeat({ roomCode: code, hostPlayerId: 'host-1', seatIndex: 3 });
+  assert.equal(created.room.seats[3].type, 'bot');
+  const moveBot = rm.switchSeat({ roomCode: code, playerId: 'p2', targetSeatIndex: 3 });
+  assert.equal(moveBot.ok, true);
+  assert.equal(created.room.seats[3].playerId, 'p2');
+  assert.equal(created.room.seats[2].type, 'bot');
+
+  // Non-host p2 cannot steal host's human seat 0
+  const badSteal = rm.switchSeat({ roomCode: code, playerId: 'p2', targetSeatIndex: 0 });
+  assert.equal(badSteal.ok, false);
+
+  // Host can swap with p2
+  const hostSwap = rm.switchSeat({ roomCode: code, playerId: 'host-1', targetSeatIndex: 3 });
+  assert.equal(hostSwap.ok, true);
+  assert.equal(created.room.seats[3].playerId, 'host-1');
+  assert.equal(created.room.seats[0].playerId, 'p2');
+});

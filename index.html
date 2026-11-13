@@ -215,7 +215,7 @@
         <div class="waiting-head">
           <div>
             <h1 id="wait-room-title">Oda Hazırlığı</h1>
-            <p id="wait-room-subtitle" class="lead">4 koltuk dolduğunda veya bot ekleyerek oyunu başlatabilirsiniz.</p>
+            <p id="wait-room-subtitle" class="lead">Koltuk seçebilir, boş koltuklara bot ekleyerek oyunu başlatabilirsiniz.</p>
           </div>
           <div class="code-share">
             <span id="wait-room-code" class="code-badge num"></span>
@@ -275,6 +275,8 @@
 
     <!-- Active 3D Game HUD -->
     <section id="view-game" class="game-hud" hidden aria-label="Oyun arayüzü">
+      <div id="game-alert-toast" class="game-alert-toast" role="alert" aria-live="assertive" hidden></div>
+
       <div class="bottom-dock">
         <div id="hud-banner" class="hud-banner" role="status" aria-live="polite">
           <span id="hud-turn-text">Oyun hazır</span>

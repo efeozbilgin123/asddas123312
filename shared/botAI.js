@@ -29,7 +29,7 @@ export function chooseBotDrawSource({ seat, leftDiscardTop, state }) {
   } else {
     if (!katlamaliPairLock) {
       const withTile = [...seat.hand, leftDiscardTop];
-      const openTry = findBestOpening(withTile, state.okeyTarget, openTarget);
+      const openTry = findBestOpening(withTile, state.okeyTarget, openTarget, leftDiscardTop.id);
       if (openTry.canOpen) {
         const usesTile = openTry.groups.some((g) =>
           g.slots.some((s) => s.tile.id === leftDiscardTop.id)
@@ -38,7 +38,7 @@ export function chooseBotDrawSource({ seat, leftDiscardTop, state }) {
       }
     } else {
       const withTile = [...seat.hand, leftDiscardTop];
-      const pairList = findPairsInHand(withTile, state.okeyTarget);
+      const pairList = findPairsInHand(withTile, state.okeyTarget, leftDiscardTop.id);
       if (pairList.length >= pairTarget) {
         const usesTile = pairList.some((pair) => pair.some((t) => t.id === leftDiscardTop.id));
         if (usesTile) return 'discard';
@@ -74,8 +74,8 @@ export function computeBotTurnActions({ seat, state }) {
 
   // 1. Try opening if not yet opened
   if (!opened) {
-    const opening = findBestOpening(workingHand, state.okeyTarget, openTarget);
-    const pairList = findPairsInHand(workingHand, state.okeyTarget);
+    const opening = findBestOpening(workingHand, state.okeyTarget, openTarget, mustUseId);
+    const pairList = findPairsInHand(workingHand, state.okeyTarget, mustUseId);
     const canOpenPairs = pairList.length >= pairTarget;
 
     const openingUsesMust =
@@ -129,12 +129,49 @@ export function computeBotTurnActions({ seat, state }) {
     }
   }
 
+  // 1b. If already opened and holding mustUseId from left discard, lay it off onto a table meld first
+  let mustUseSatisfied = !mustUseId || !workingHand.some((t) => t.id === mustUseId);
+  if (opened && !mustUseSatisfied && workingHand.length > 1) {
+    const mustIdx = workingHand.findIndex((t) => t.id === mustUseId);
+    if (mustIdx !== -1) {
+      const mustTile = workingHand[mustIdx];
+      for (let mIdx = 0; mIdx < workingMelds.length; mIdx += 1) {
+        const res = canLayoffTile(mustTile, workingMelds[mIdx], state.okeyTarget);
+        if (res.valid && !res.swappedOkey) {
+          actions.push({
+            type: 'layoffTile',
+            tileId: mustTile.id,
+            meldId: workingMelds[mIdx].id
+          });
+          workingHand.splice(mustIdx, 1);
+          workingMelds[mIdx] = res.updatedMeld;
+          mustUseSatisfied = true;
+          break;
+        }
+      }
+    }
+  }
+
   // 2. If opened, try laying down extra complete melds (only if leaving >= 1 tile to discard)
   if (opened && openMode !== 'pairs') {
-    const extra = findBestOpening(workingHand, state.okeyTarget, 0);
-    for (const group of extra.groups) {
+    const extra = findBestOpening(
+      workingHand,
+      state.okeyTarget,
+      0,
+      mustUseSatisfied ? null : mustUseId
+    );
+    const orderedGroups = !mustUseSatisfied
+      ? [...extra.groups].sort((a, b) => {
+          const aHas = a.slots.some((s) => s.tile.id === mustUseId) ? 1 : 0;
+          const bHas = b.slots.some((s) => s.tile.id === mustUseId) ? 1 : 0;
+          return bHas - aHas;
+        })
+      : extra.groups;
+    for (const group of orderedGroups) {
       if (workingHand.length - group.slots.length >= 1) {
         const ids = group.slots.map((s) => s.tile.id);
+        if (!mustUseSatisfied && !ids.includes(mustUseId)) continue;
+        mustUseSatisfied = true;
         actions.push({
           type: 'layMeld',
           tileIds: ids
@@ -151,14 +188,21 @@ export function computeBotTurnActions({ seat, state }) {
       }
     }
   } else if (opened && openMode === 'pairs') {
-    const extraPairs = findPairsInHand(workingHand, state.okeyTarget);
+    const extraPairs = findPairsInHand(
+      workingHand,
+      state.okeyTarget,
+      mustUseSatisfied ? null : mustUseId
+    );
     for (const pair of extraPairs) {
       if (workingHand.length - 2 >= 1 && validatePair(pair, state.okeyTarget).valid) {
+        const ids = pair.map((t) => t.id);
+        if (!mustUseSatisfied && !ids.includes(mustUseId)) continue;
+        mustUseSatisfied = true;
         actions.push({
           type: 'layMeld',
-          tileIds: pair.map((t) => t.id)
+          tileIds: ids
         });
-        const idSet = new Set(pair.map((t) => t.id));
+        const idSet = new Set(ids);
         workingHand = workingHand.filter((t) => !idSet.has(t.id));
       }
     }

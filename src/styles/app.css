@@ -571,6 +571,51 @@ body {
   border: 1px solid var(--color-rule);
 }
 
+.wait-seat--mine {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.wait-seat__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2xs);
+  flex-shrink: 0;
+}
+
+.game-alert-toast {
+  position: absolute;
+  top: calc(var(--nav-h) + var(--space-sm));
+  left: 50%;
+  translate: -50% 0;
+  max-width: min(560px, calc(100% - var(--space-lg)));
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-pill);
+  background: var(--color-paper);
+  border: 2px solid var(--color-accent);
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  text-align: center;
+  box-shadow: var(--shadow-dialog);
+  pointer-events: none;
+  z-index: calc(var(--z-raised) + 2);
+}
+
+.game-alert-toast.is-okey {
+  border-color: var(--color-danger);
+  color: #FFE4DE;
+  background: #3A1614;
+}
+
+.game-alert-toast.is-islek {
+  border-color: var(--color-accent);
+  color: #FFF2CF;
+  background: #2E2110;
+}
+
 .wait-seat__left {
   display: flex;
   align-items: center;

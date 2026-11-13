@@ -155,7 +155,7 @@ export class GameSession {
     this.scheduleBotMove();
   }
 
-  emitEvent(type, seatIndex, tile = null, message = '') {
+  emitEvent(type, seatIndex, tile = null, message = '', extra = {}) {
     this.eventCounter += 1;
     this.lastEvent = {
       id: this.eventCounter,
@@ -163,6 +163,7 @@ export class GameSession {
       seatIndex,
       tile: tile ? { ...tile } : null,
       message,
+      alertKind: extra.alertKind || null,
       timestamp: Date.now()
     };
   }
@@ -533,6 +534,13 @@ export class GameSession {
       tiles.push(t);
     }
 
+    if (this.pickedDiscardTileId && !usedIds.has(this.pickedDiscardTileId)) {
+      return {
+        ok: false,
+        error: 'Yandan aldığınız taşı bu grupta kullanmalısınız (kullanmayacaksanız önce yan taşı geri koyun).'
+      };
+    }
+
     if (seat.openMode === 'pairs' && tiles.length !== 2) {
       return {
         ok: false,
@@ -587,6 +595,13 @@ export class GameSession {
     if (meldIdx === -1) return { ok: false, error: 'Hedef grup masada bulunamadı.' };
 
     const tile = seat.hand[tileIdx];
+    if (this.pickedDiscardTileId && tile.id !== this.pickedDiscardTileId) {
+      return {
+        ok: false,
+        error: 'Yandan aldığınız taşı masaya işlemelisiniz (kullanmayacaksanız önce yan taşı geri koyun).'
+      };
+    }
+
     const targetMeld = this.tableMelds[meldIdx];
     const res = canLayoffTile(tile, targetMeld, this.okeyTarget);
 
@@ -641,13 +656,12 @@ export class GameSession {
       seat.roundPenalties += 101;
     }
 
-    let islekTriggered = false;
-    if (
+    const islekPlayable =
       !isFinalWin &&
       !okeyDiscardPenalty &&
-      this.options.islekPenalty &&
-      isDiscardPlayableOnTable(tile, this.tableMelds, this.okeyTarget)
-    ) {
+      isDiscardPlayableOnTable(tile, this.tableMelds, this.okeyTarget);
+    let islekTriggered = false;
+    if (islekPlayable && this.options.islekPenalty) {
       seat.roundPenalties += 101;
       islekTriggered = true;
     }
@@ -688,19 +702,25 @@ export class GameSession {
     this.currentSeat = (seatIndex + 1) % 4;
     this.turnPhase = 'draw';
     let notice = `${seat.name} taş attı.`;
+    let alertKind = null;
     if (okeyDiscardPenalty) {
       notice = `${seat.name} Okeyi yere attı (+101 ceza).`;
+      alertKind = 'okey';
     } else if (islekTriggered) {
       notice = `${seat.name} işlek taş attı (+101 ceza).`;
+      alertKind = 'islek';
+    } else if (islekPlayable) {
+      notice = `${seat.name} işlek taş attı.`;
+      alertKind = 'islek';
     }
-    this.emitEvent('discard', seatIndex, tile, notice);
+    this.emitEvent('discard', seatIndex, tile, notice, { alertKind });
     this.resetTurnTimer();
 
     if (!silentNotify) {
       this.notify();
     }
     this.scheduleBotMove();
-    return { ok: true, islekTriggered, okeyDiscardPenalty };
+    return { ok: true, islekTriggered, islekPlayable, okeyDiscardPenalty };
   }
 
   finishRound(

@@ -284,6 +284,91 @@ export class RoomManager {
     return { ok: true };
   }
 
+  switchSeat({ roomCode, playerId, targetSeatIndex }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    if (room.status !== 'waiting') {
+      return { ok: false, error: 'Oyun başladıktan sonra koltuk değiştirilemez.' };
+    }
+
+    const mySeat = room.seats.find(
+      (s) => s.type === 'human' && s.playerId === playerId
+    );
+    if (!mySeat) {
+      return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+    }
+
+    const idx = Number(targetSeatIndex);
+    const targetSeat = Number.isInteger(idx) ? room.seats[idx] : null;
+    if (!targetSeat) {
+      return { ok: false, error: 'Geçersiz koltuk seçimi.' };
+    }
+
+    if (targetSeat.seatIndex === mySeat.seatIndex) {
+      return { ok: true, seatIndex: mySeat.seatIndex };
+    }
+
+    if (targetSeat.type === 'human' && room.hostPlayerId !== playerId) {
+      return {
+        ok: false,
+        error: 'Bu koltukta başka bir oyuncu oturuyor. Boş veya bot koltuğuna geçebilirsiniz.'
+      };
+    }
+
+    const prevMine = {
+      type: mySeat.type,
+      playerId: mySeat.playerId,
+      name: mySeat.name,
+      avatar: mySeat.avatar,
+      connected: mySeat.connected
+    };
+    const prevTarget = {
+      type: targetSeat.type,
+      playerId: targetSeat.playerId,
+      name: targetSeat.name,
+      avatar: targetSeat.avatar,
+      connected: targetSeat.connected
+    };
+
+    // Move caller to targetSeat
+    targetSeat.type = prevMine.type;
+    targetSeat.playerId = prevMine.playerId;
+    targetSeat.name = prevMine.name;
+    targetSeat.avatar = prevMine.avatar;
+    targetSeat.connected = prevMine.connected;
+
+    // Move target occupant (empty, bot, or swapped human) to caller's previous seat
+    if (prevTarget.type === 'empty') {
+      mySeat.type = 'empty';
+      mySeat.playerId = null;
+      mySeat.name = null;
+      mySeat.avatar = `avatar-${(mySeat.seatIndex % 6) + 1}`;
+      mySeat.connected = false;
+    } else if (prevTarget.type === 'bot') {
+      mySeat.type = 'bot';
+      mySeat.playerId = `bot-${mySeat.seatIndex}`;
+      mySeat.name = prevTarget.name;
+      mySeat.avatar = prevTarget.avatar;
+      mySeat.connected = true;
+    } else {
+      mySeat.type = prevTarget.type;
+      mySeat.playerId = prevTarget.playerId;
+      mySeat.name = prevTarget.name;
+      mySeat.avatar = prevTarget.avatar;
+      mySeat.connected = prevTarget.connected;
+    }
+
+    if (Array.isArray(room.orders)) {
+      const tmpOrder = room.orders[mySeat.seatIndex];
+      room.orders[mySeat.seatIndex] = room.orders[targetSeat.seatIndex];
+      room.orders[targetSeat.seatIndex] = tmpOrder;
+    }
+
+    this.broadcastRoomState(room);
+    this.broadcastRoomsList();
+    return { ok: true, seatIndex: targetSeat.seatIndex };
+  }
+
   updateOptions({ roomCode, hostPlayerId, options }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };

@@ -274,9 +274,12 @@ export function canLayoffTile(tile, targetMeld, okeyTarget) {
 /**
  * Finds non-overlapping high-value melds in a hand for smart sorting or AI opening.
  */
-export function findBestOpening(handTiles, okeyTarget, minPoints = 101) {
-  const wilds = handTiles.filter((t) => isOkeyTile(t, okeyTarget));
-  const normals = handTiles.filter((t) => !isOkeyTile(t, okeyTarget));
+export function findBestOpening(handTiles, okeyTarget, minPoints = 101, requiredTileId = null) {
+  const orderedHand = requiredTileId
+    ? [...handTiles].sort((a, b) => (a.id === requiredTileId ? -1 : b.id === requiredTileId ? 1 : 0))
+    : handTiles;
+  const wilds = orderedHand.filter((t) => isOkeyTile(t, okeyTarget));
+  const normals = orderedHand.filter((t) => !isOkeyTile(t, okeyTarget));
 
   // Generate candidate pure melds (0 wilds first, then 1 wild)
   const candidates = [];
@@ -355,22 +358,36 @@ export function findBestOpening(handTiles, okeyTarget, minPoints = 101) {
     }
   }
 
-  // Sort candidates by points descending, then fewer wilds
-  candidates.sort((a, b) => b.points - a.points || a.slots.length - b.slots.length);
+  // Sort candidates: when requiredTileId is set, place candidates containing it first, then by points descending
+  candidates.sort((a, b) => {
+    if (requiredTileId) {
+      const aHas = a.slots.some((s) => s.tile.id === requiredTileId) ? 1 : 0;
+      const bHas = b.slots.some((s) => s.tile.id === requiredTileId) ? 1 : 0;
+      if (bHas !== aHas) return bHas - aHas;
+    }
+    return b.points - a.points || a.slots.length - b.slots.length;
+  });
 
   // Greedy + simple swap backtracking over top candidates to maximize non-overlapping points
   let bestSolution = { groups: [], totalPoints: 0 };
+  let bestWithRequired = { groups: [], totalPoints: 0 };
 
   function search(idx, usedIds, chosen, sum) {
     if (sum > bestSolution.totalPoints) {
       bestSolution = { groups: [...chosen], totalPoints: sum };
+    }
+    if (requiredTileId && usedIds.has(requiredTileId) && sum > bestWithRequired.totalPoints) {
+      bestWithRequired = { groups: [...chosen], totalPoints: sum };
     }
     // Quick upper bound prune
     let possible = sum;
     for (let j = idx; j < Math.min(candidates.length, idx + 8); j += 1) {
       possible += candidates[j].points;
     }
-    if (possible <= bestSolution.totalPoints) return;
+    const floorScore = requiredTileId
+      ? Math.min(bestSolution.totalPoints, bestWithRequired.totalPoints)
+      : bestSolution.totalPoints;
+    if (possible <= floorScore) return;
 
     for (let i = idx; i < candidates.length; i += 1) {
       const cand = candidates[i];
@@ -390,16 +407,31 @@ export function findBestOpening(handTiles, okeyTarget, minPoints = 101) {
 
   search(0, new Set(), [], 0);
 
+  if (requiredTileId) {
+    return {
+      canOpen: bestWithRequired.totalPoints >= minPoints && bestWithRequired.groups.length > 0,
+      totalPoints: bestWithRequired.totalPoints,
+      groups: bestWithRequired.groups,
+      usesRequired: bestWithRequired.groups.length > 0,
+      fallbackTotalPoints: bestSolution.totalPoints,
+      fallbackGroups: bestSolution.groups
+    };
+  }
+
   return {
     canOpen: bestSolution.totalPoints >= minPoints,
     totalPoints: bestSolution.totalPoints,
-    groups: bestSolution.groups
+    groups: bestSolution.groups,
+    usesRequired: true
   };
 }
 
-export function findPairsInHand(handTiles, okeyTarget) {
-  const wilds = handTiles.filter((t) => isOkeyTile(t, okeyTarget));
-  const normals = handTiles.filter((t) => !isOkeyTile(t, okeyTarget));
+export function findPairsInHand(handTiles, okeyTarget, requiredTileId = null) {
+  const orderedHand = requiredTileId
+    ? [...handTiles].sort((a, b) => (a.id === requiredTileId ? -1 : b.id === requiredTileId ? 1 : 0))
+    : handTiles;
+  const wilds = orderedHand.filter((t) => isOkeyTile(t, okeyTarget));
+  const normals = orderedHand.filter((t) => !isOkeyTile(t, okeyTarget));
   const buckets = new Map();
 
   for (const t of normals) {
@@ -420,10 +452,14 @@ export function findPairsInHand(handTiles, okeyTarget) {
     }
   }
 
-  // Pair remaining highest single tiles with wilds if any
-  const sortedSingles = [...singles].sort(
-    (a, b) => effectiveTileProps(b, okeyTarget).number - effectiveTileProps(a, okeyTarget).number
-  );
+  // Pair remaining singles with wilds if any (prioritize requiredTileId first, then highest number)
+  const sortedSingles = [...singles].sort((a, b) => {
+    if (requiredTileId) {
+      if (a.id === requiredTileId) return -1;
+      if (b.id === requiredTileId) return 1;
+    }
+    return effectiveTileProps(b, okeyTarget).number - effectiveTileProps(a, okeyTarget).number;
+  });
 
   let wIdx = 0;
   while (wIdx < wilds.length && sortedSingles.length > 0) {
@@ -572,7 +608,7 @@ export function autoArrangePairs(handTiles, okeyTarget) {
  * Automatically evaluates both valid Seri/Per (Tek) points and valid Çift (Pair) count
  * from the current rack slot layout (respecting manual gaps) as well as optimal full-hand combinations.
  */
-export function analyzeHandLive(rackSlots, handTiles, okeyTarget, cols = 14) {
+export function analyzeHandLive(rackSlots, handTiles, okeyTarget, cols = 14, requiredTileId = null) {
   const safeHand = Array.isArray(handTiles) ? handTiles : [];
   const rackSeriesGroups = [];
   const rackPairGroups = [];
@@ -628,31 +664,80 @@ export function analyzeHandLive(rackSlots, handTiles, okeyTarget, cols = 14) {
     }
   }
 
-  const bestSeries = findBestOpening(safeHand, okeyTarget, 0);
-  const useRackSeries = rackSeriesGroups.length > 0 && rackSeriesPoints >= bestSeries.totalPoints;
+  const bestSeries = findBestOpening(safeHand, okeyTarget, 0, requiredTileId);
+  const rackSeriesUsesReq =
+    !requiredTileId ||
+    rackSeriesGroups.some((g) => g.tiles.some((t) => t.id === requiredTileId));
+
+  let useRackSeries = false;
+  if (requiredTileId) {
+    if (rackSeriesGroups.length > 0 && rackSeriesUsesReq) {
+      useRackSeries = !bestSeries.usesRequired || rackSeriesPoints >= bestSeries.totalPoints;
+    } else if (!bestSeries.usesRequired) {
+      useRackSeries =
+        rackSeriesGroups.length > 0 &&
+        rackSeriesPoints >= (bestSeries.fallbackTotalPoints ?? bestSeries.totalPoints);
+    }
+  } else {
+    useRackSeries = rackSeriesGroups.length > 0 && rackSeriesPoints >= bestSeries.totalPoints;
+  }
+
+  const fallbackList = bestSeries.fallbackGroups || bestSeries.groups;
+  const chosenSolverGroups =
+    requiredTileId && !bestSeries.usesRequired ? fallbackList : bestSeries.groups;
+  const chosenSolverPoints =
+    requiredTileId && !bestSeries.usesRequired
+      ? (bestSeries.fallbackTotalPoints ?? bestSeries.totalPoints)
+      : bestSeries.totalPoints;
+
   const seriesGroups = useRackSeries
     ? rackSeriesGroups
-    : bestSeries.groups.map((g) => ({
+    : chosenSolverGroups.map((g) => ({
         type: g.type,
         points: g.points,
         tiles: g.slots.map((s) => s.tile)
       }));
-  const seriesPoints = useRackSeries ? rackSeriesPoints : bestSeries.totalPoints;
+  const seriesPoints = useRackSeries ? rackSeriesPoints : chosenSolverPoints;
+  const seriesUsesRequired =
+    !requiredTileId ||
+    seriesGroups.some((g) => g.tiles.some((t) => t.id === requiredTileId));
 
-  const autoPairs = findPairsInHand(safeHand, okeyTarget);
-  const useRackPairs = rackPairGroups.length > 0 && rackPairGroups.length >= autoPairs.length;
+  const autoPairs = findPairsInHand(safeHand, okeyTarget, requiredTileId);
+  const rackPairsUsesReq =
+    !requiredTileId ||
+    rackPairGroups.some((g) => g.tiles.some((t) => t.id === requiredTileId));
+  const autoPairsUsesReq =
+    !requiredTileId ||
+    autoPairs.some((pair) => pair.some((t) => t.id === requiredTileId));
+
+  let useRackPairs = false;
+  if (requiredTileId) {
+    if (rackPairGroups.length > 0 && rackPairsUsesReq) {
+      useRackPairs = !autoPairsUsesReq || rackPairGroups.length >= autoPairs.length;
+    } else if (!autoPairsUsesReq) {
+      useRackPairs = rackPairGroups.length > 0 && rackPairGroups.length >= autoPairs.length;
+    }
+  } else {
+    useRackPairs = rackPairGroups.length > 0 && rackPairGroups.length >= autoPairs.length;
+  }
+
   const pairGroups = useRackPairs
     ? rackPairGroups
     : autoPairs.map((pair) => ({
         points: validatePair(pair, okeyTarget).points,
         tiles: pair
       }));
+  const pairsUsesRequired =
+    !requiredTileId ||
+    pairGroups.some((g) => g.tiles.some((t) => t.id === requiredTileId));
 
   return {
     seriesPoints,
     seriesGroups,
+    seriesUsesRequired,
     pairCount: pairGroups.length,
-    pairGroups
+    pairGroups,
+    pairsUsesRequired
   };
 }
 

@@ -3,7 +3,7 @@ import { createEmptyOrders, KAHVE_MENU_MAP } from '../../shared/menu.js';
 import { buildYouTubeEmbedUrl, parseMusicUrl } from '../../shared/music.js';
 
 export class LocalSingleplayerClient {
-  constructor({ playerName, playerAvatar, options, onState }) {
+  constructor({ playerName, playerAvatar, seatIndex = 0, options, onState }) {
     this.onState = onState;
     this.music = null;
     this.musicQueue = [];
@@ -14,14 +14,38 @@ export class LocalSingleplayerClient {
     this.lastOrder = null;
     this.orderSeq = 0;
     this.playerName = (typeof playerName === 'string' ? playerName.trim().slice(0, 20) : '') || 'Oyuncu';
+    this.viewerSeatIndex = [0, 1, 2, 3].includes(Number(seatIndex)) ? Number(seatIndex) : 0;
+
+    const botProfiles = [
+      { name: 'Selim (Bot)', avatar: 'avatar-4' },
+      { name: 'Zeynep (Bot)', avatar: 'avatar-2' },
+      { name: 'Kerem (Bot)', avatar: 'avatar-3' }
+    ];
+    let botCursor = 0;
+    const seatsConfig = [0, 1, 2, 3].map((idx) => {
+      if (idx === this.viewerSeatIndex) {
+        return {
+          playerId: `local-${idx}`,
+          name: this.playerName,
+          avatar: playerAvatar || 'avatar-1',
+          isBot: false,
+          connected: true
+        };
+      }
+      const bot = botProfiles[botCursor % botProfiles.length];
+      botCursor += 1;
+      return {
+        playerId: `bot-${idx}`,
+        name: bot.name,
+        avatar: bot.avatar,
+        isBot: true,
+        connected: true
+      };
+    });
+
     this.session = new GameSession({
       roomCode: 'TEK1',
-      seatsConfig: [
-        { playerId: 'local-0', name: this.playerName, avatar: playerAvatar || 'avatar-1', isBot: false, connected: true },
-        { playerId: 'bot-1', name: 'Selim (Bot)', avatar: 'avatar-4', isBot: true, connected: true },
-        { playerId: 'bot-2', name: 'Zeynep (Bot)', avatar: 'avatar-2', isBot: true, connected: true },
-        { playerId: 'bot-3', name: 'Kerem (Bot)', avatar: 'avatar-3', isBot: true, connected: true }
-      ],
+      seatsConfig,
       options,
       onStateChange: () => {
         this.emitRoomState();
@@ -52,7 +76,7 @@ export class LocalSingleplayerClient {
       orders: this.orders,
       lastOrder: this.lastOrder,
       options: this.session.options,
-      viewerSeatIndex: 0,
+      viewerSeatIndex: this.viewerSeatIndex,
       seats: this.session.seats.map((s) => ({
         seatIndex: s.seatIndex,
         teamIndex: s.seatIndex % 2,
@@ -61,7 +85,7 @@ export class LocalSingleplayerClient {
         avatar: s.avatar,
         connected: true
       })),
-      game: this.session.getClientView(0)
+      game: this.session.getClientView(this.viewerSeatIndex)
     });
   }
 
@@ -74,25 +98,25 @@ export class LocalSingleplayerClient {
     let res = { ok: false, error: 'Bilinmeyen işlem.' };
     switch (event) {
       case 'game:drawDeck':
-        res = this.session.drawFromDeck(0);
+        res = this.session.drawFromDeck(this.viewerSeatIndex);
         break;
       case 'game:drawDiscard':
-        res = this.session.drawFromDiscard(0);
+        res = this.session.drawFromDiscard(this.viewerSeatIndex);
         break;
       case 'game:returnDiscard':
-        res = this.session.returnPickedDiscard(0);
+        res = this.session.returnPickedDiscard(this.viewerSeatIndex);
         break;
       case 'game:openHand':
-        res = this.session.openHand(0, data?.groups, data?.mode);
+        res = this.session.openHand(this.viewerSeatIndex, data?.groups, data?.mode);
         break;
       case 'game:layMeld':
-        res = this.session.layMeld(0, data?.tileIds);
+        res = this.session.layMeld(this.viewerSeatIndex, data?.tileIds);
         break;
       case 'game:layoffTile':
-        res = this.session.layoffTile(0, data?.tileId, data?.meldId);
+        res = this.session.layoffTile(this.viewerSeatIndex, data?.tileId, data?.meldId);
         break;
       case 'game:discard':
-        res = this.session.discardTile(0, data?.tileId);
+        res = this.session.discardTile(this.viewerSeatIndex, data?.tileId);
         break;
       case 'game:nextRound':
         if (this.session.phase !== 'roundOver') {
@@ -279,7 +303,7 @@ export class LocalSingleplayerClient {
         if (target === 'all') {
           targetIndices = [0, 1, 2, 3];
         } else if (target === 'self') {
-          targetIndices = [0];
+          targetIndices = [this.viewerSeatIndex];
         } else {
           const idx = Number(target);
           if (!Number.isInteger(idx) || !this.session.seats[idx]) {
@@ -298,7 +322,7 @@ export class LocalSingleplayerClient {
             label: item.label,
             shortLabel: item.shortLabel,
             category: item.category,
-            fromSeat: 0,
+            fromSeat: this.viewerSeatIndex,
             fromName: this.playerName,
             servedAt
           };
@@ -307,7 +331,7 @@ export class LocalSingleplayerClient {
         const targetName =
           target === 'all'
             ? 'tüm masaya'
-            : targetIndices[0] === 0
+            : targetIndices[0] === this.viewerSeatIndex
               ? 'kendine'
               : this.session.seats[targetIndices[0]]?.name || 'arkadaşına';
         this.lastOrder = {
@@ -315,7 +339,7 @@ export class LocalSingleplayerClient {
           itemId: item.id,
           label: item.label,
           category: item.category,
-          fromSeat: 0,
+          fromSeat: this.viewerSeatIndex,
           fromName: this.playerName,
           target,
           targetName,
@@ -329,7 +353,7 @@ export class LocalSingleplayerClient {
         if (data?.target === 'all') {
           this.orders = createEmptyOrders();
         } else {
-          this.orders[0] = { drink: null, food: null };
+          this.orders[this.viewerSeatIndex] = { drink: null, food: null };
         }
         this.emitRoomState();
         res = { ok: true, orders: this.orders };
@@ -341,7 +365,7 @@ export class LocalSingleplayerClient {
         break;
       case 'admin:swapTile': {
         const out = this.session.adminSwapTile({
-          actorSeatIndex: 0,
+          actorSeatIndex: this.viewerSeatIndex,
           myTileId: data?.myTileId,
           sourceKind: data?.sourceKind,
           targetSeatIndex: data?.targetSeatIndex,
@@ -351,7 +375,7 @@ export class LocalSingleplayerClient {
         break;
       }
       case 'admin:stealOkey': {
-        const out = this.session.adminStealOkey(0, data?.myTileId);
+        const out = this.session.adminStealOkey(this.viewerSeatIndex, data?.myTileId);
         res = out.ok ? { ok: true, snapshot: this.session.getAdminSnapshot() } : out;
         break;
       }

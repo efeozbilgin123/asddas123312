@@ -60,7 +60,7 @@ export class RoomManager {
     return list;
   }
 
-  createRoom({ playerId, playerName, playerAvatar, roomName, options = {}, quickStart = false }) {
+  createRoom({ playerId, playerName, playerAvatar, roomName, options = {}, quickStart = false, seatIndex = 0 }) {
     this.leaveCurrentRoom(playerId);
 
     const code = generateRoomCode(this.rooms);
@@ -68,6 +68,13 @@ export class RoomManager {
     const cleanRoomName =
       (typeof roomName === 'string' ? roomName.trim().slice(0, 32) : '') || `${cleanName} Masası`;
     const opts = options && typeof options === 'object' ? options : {};
+    const preferredSeat = [0, 1, 2, 3].includes(Number(seatIndex)) ? Number(seatIndex) : 0;
+
+    const seats = [0, 1, 2, 3].map((idx) => (
+      idx === preferredSeat
+        ? { seatIndex: idx, type: 'human', playerId, name: cleanName, avatar: normalizeAvatar(playerAvatar, idx), connected: true }
+        : { seatIndex: idx, type: 'empty', playerId: null, name: null, avatar: `avatar-${(idx % 6) + 1}`, connected: false }
+    ));
 
     const room = {
       code,
@@ -95,12 +102,7 @@ export class RoomManager {
           ? Number(opts.turnSeconds)
           : 60
       },
-      seats: [
-        { seatIndex: 0, type: 'human', playerId, name: cleanName, avatar: normalizeAvatar(playerAvatar, 0), connected: true },
-        { seatIndex: 1, type: 'empty', playerId: null, name: null, avatar: 'avatar-2', connected: false },
-        { seatIndex: 2, type: 'empty', playerId: null, name: null, avatar: 'avatar-3', connected: false },
-        { seatIndex: 3, type: 'empty', playerId: null, name: null, avatar: 'avatar-4', connected: false }
-      ],
+      seats,
       session: null
     };
 
@@ -357,13 +359,6 @@ export class RoomManager {
 
     if (targetSeat.seatIndex === mySeat.seatIndex) {
       return { ok: true, seatIndex: mySeat.seatIndex };
-    }
-
-    if (targetSeat.type === 'human' && room.hostPlayerId !== playerId) {
-      return {
-        ok: false,
-        error: 'Bu koltukta başka bir oyuncu oturuyor. Boş veya bot koltuğuna geçebilirsiniz.'
-      };
     }
 
     const prevMine = {

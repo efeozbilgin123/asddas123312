@@ -137,7 +137,8 @@ io.on('connection', (socket) => {
       playerAvatar: data?.playerAvatar,
       roomName: data?.roomName,
       options: data?.options,
-      quickStart: Boolean(data?.quickStart)
+      quickStart: Boolean(data?.quickStart),
+      seatIndex: data?.seatIndex
     });
     if (res.ok) {
       const payload = roomManager.getRoomPayloadForPlayer(res.room, playerId);

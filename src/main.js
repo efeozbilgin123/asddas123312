@@ -68,6 +68,7 @@ const els = {
   optMaxRounds: document.getElementById('opt-max-rounds'),
   optIslek: document.getElementById('opt-islek'),
   optTimer: document.getElementById('opt-timer'),
+  optSeat: document.getElementById('opt-seat'),
   btnQuickPlay: document.getElementById('btn-quick-play'),
   btnSingleplayer: document.getElementById('btn-singleplayer'),
   btnCreateRoom: document.getElementById('btn-create-room'),
@@ -432,6 +433,7 @@ function startSingleplayer() {
   localClient = new LocalSingleplayerClient({
     playerName: name,
     playerAvatar: selectedAvatar,
+    seatIndex: Number(els.optSeat?.value || 0),
     options: readLobbyOptions(),
     onState: (room) => {
       switchView(room);
@@ -469,6 +471,7 @@ function createRoom(quickStart) {
       playerAvatar: selectedAvatar,
       roomName: els.roomName.value.trim(),
       quickStart,
+      seatIndex: Number(els.optSeat?.value || 0),
       options: readLobbyOptions()
     },
     (res) => {
@@ -1021,7 +1024,7 @@ function renderWaitingRoom(room) {
     const actions = document.createElement('div');
     actions.className = 'wait-seat__actions';
 
-    if (!isMine && (seat.type !== 'human' || room.isHost)) {
+    if (!isMine) {
       const moveBtn = document.createElement('button');
       moveBtn.type = 'button';
       moveBtn.className = 'btn btn--quiet btn--sm';

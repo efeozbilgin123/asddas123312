@@ -82,7 +82,7 @@ test('RoomManager preserves playerAvatar, teamMode, and maxRounds options', () =
   assert.equal(created.room.options.maxRounds, 0);
 });
 
-test('RoomManager.switchSeat allows moving to empty/bot seats and host human swaps', () => {
+test('RoomManager.switchSeat allows moving to empty/bot/human seats in waiting room and preserves hostPlayerId', () => {
   const io = createMockIo();
   const rm = new RoomManager(io);
 
@@ -90,9 +90,17 @@ test('RoomManager.switchSeat allows moving to empty/bot seats and host human swa
     playerId: 'host-1',
     playerName: 'Efe',
     roomName: 'Koltuk Testi',
+    seatIndex: 1,
     options: { teamMode: 'paired' }
   });
   const code = created.room.code;
+  assert.equal(created.room.seats[1].playerId, 'host-1');
+  assert.equal(created.room.seats[0].type, 'empty');
+
+  // Host moves to seat 0 so remaining flow checks seat 0..3
+  const hostToZero = rm.switchSeat({ roomCode: code, playerId: 'host-1', targetSeatIndex: 0 });
+  assert.equal(hostToZero.ok, true);
+  assert.equal(created.room.seats[0].playerId, 'host-1');
 
   // Join p2 into seat 1
   const j2 = rm.joinRoom({ roomCode: code, playerId: 'p2', playerName: 'Ali' });
@@ -112,15 +120,18 @@ test('RoomManager.switchSeat allows moving to empty/bot seats and host human swa
   assert.equal(created.room.seats[3].playerId, 'p2');
   assert.equal(created.room.seats[2].type, 'bot');
 
-  // Non-host p2 cannot steal host's human seat 0
-  const badSteal = rm.switchSeat({ roomCode: code, playerId: 'p2', targetSeatIndex: 0 });
-  assert.equal(badSteal.ok, false);
-
-  // Host can swap with p2
-  const hostSwap = rm.switchSeat({ roomCode: code, playerId: 'host-1', targetSeatIndex: 3 });
-  assert.equal(hostSwap.ok, true);
-  assert.equal(created.room.seats[3].playerId, 'host-1');
+  // Non-host p2 can also swap with host's human seat 0 in waiting room, while hostPlayerId stays host-1
+  const p2SwapHost = rm.switchSeat({ roomCode: code, playerId: 'p2', targetSeatIndex: 0 });
+  assert.equal(p2SwapHost.ok, true);
   assert.equal(created.room.seats[0].playerId, 'p2');
+  assert.equal(created.room.seats[3].playerId, 'host-1');
+  assert.equal(created.room.hostPlayerId, 'host-1');
+
+  // Host can swap back with p2
+  const hostSwap = rm.switchSeat({ roomCode: code, playerId: 'host-1', targetSeatIndex: 0 });
+  assert.equal(hostSwap.ok, true);
+  assert.equal(created.room.seats[0].playerId, 'host-1');
+  assert.equal(created.room.seats[3].playerId, 'p2');
 });
 
 test('RoomManager handles malformed inputs, double startGame, disconnected takeover, and hides hostPlayerId', (ctx) => {

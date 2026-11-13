@@ -1077,6 +1077,13 @@ export class OkeyTable3D {
     return new THREE.Vector3(x, y, z);
   }
 
+  findNearestRackSlot(localPt) {
+    const row = localPt.y >= 1.115 ? 0 : 1;
+    const colRaw = Math.round(localPt.x / RACK_SPACING_X + (RACK_COLS - 1) / 2);
+    const col = THREE.MathUtils.clamp(colRaw, 0, RACK_COLS - 1);
+    return row * RACK_COLS + col;
+  }
+
   createTileMesh(tile, { faceUp = true, okeyTarget = null, selected = false, mustUse = false } = {}) {
     let faceMat = this.backTileMat;
     if (faceUp) {
@@ -1651,8 +1658,10 @@ export class OkeyTable3D {
     });
   }
 
-  clearDynamic() {
-    this.cancelActiveInteractions();
+  clearDynamic({ preserveInteraction = false } = {}) {
+    if (!preserveInteraction) {
+      this.cancelActiveInteractions();
+    }
 
     while (this.dynamicGroup.children.length > 0) {
       const child = this.dynamicGroup.children.pop();
@@ -1875,10 +1884,22 @@ export class OkeyTable3D {
       }
     }
 
+    const viewerIdx = state?.viewerSeatIndex ?? 0;
+    const mySeat = state?.seats?.[viewerIdx];
+    const activeDragTileId = this.dragState?.tile?.id || null;
+    const canPreserveInteraction = Boolean(
+      state &&
+      sameRound &&
+      (
+        this.orbitDrag ||
+        (activeDragTileId && Array.isArray(mySeat?.hand) && mySeat.hand.some((t) => t.id === activeDragTileId))
+      )
+    );
+
     const wasDemo = this.demoMode;
     this.demoMode = false;
     this.currentState = state;
-    this.clearDynamic();
+    this.clearDynamic({ preserveInteraction: canPreserveInteraction });
 
     if (!state) {
       this.demoMode = true;
@@ -1896,8 +1917,6 @@ export class OkeyTable3D {
       this.setCameraPreset('fp');
     }
 
-    const viewerIdx = state.viewerSeatIndex ?? 0;
-    const mySeat = state.seats[viewerIdx];
     const isMyTurn = state.phase === 'playing' && state.currentSeat === viewerIdx;
     const isFreshRoundDeal = !sameRound && !instant && !this.reducedMotion && state.phase === 'playing';
     this.lastRenderedRound = state.roundNumber;
@@ -1944,6 +1963,16 @@ export class OkeyTable3D {
       this.rackTileMeshes.set(tile.id, mesh);
       this.trackedMeshes.set(tile.id, mesh);
 
+      const isActiveDraggedTile = Boolean(this.dragState && this.dragState.tile.id === tile.id);
+      if (isActiveDraggedTile) {
+        this.dragState.tile = tile;
+        this.dragState.fromSlotIdx = slotIdx;
+        this.dragState.mesh = mesh;
+        if (this.dragState.moved) {
+          mesh.visible = false;
+        }
+      }
+
       if (isFreshRoundDeal) {
         this.enqueueAnimationFromWorld(mesh, deckTopWorldPos, deckTopQuat, null, {
           duration: 0.42,
@@ -1951,7 +1980,7 @@ export class OkeyTable3D {
           delay: dealIdx * 0.016
         });
         dealIdx += 1;
-      } else if (snapshot) {
+      } else if (snapshot && !(isActiveDraggedTile && this.dragState?.moved)) {
         const prev = snapshot.tileTransforms.get(tile.id);
         if (prev) {
           this.southRackGroup.updateMatrixWorld(true);
@@ -2410,9 +2439,6 @@ export class OkeyTable3D {
           this.rackSlotMeshes.forEach((m) => {
             m.material.opacity = 0;
           });
-          if (slotHits.length > 0) {
-            slotHits[0].object.material.opacity = 0.45;
-          }
 
           const isFlipped = this.flippedTileIds.has(this.dragState.tile.id);
           const rackPt = new THREE.Vector3();
@@ -2422,13 +2448,17 @@ export class OkeyTable3D {
             this.raycaster.ray.intersectPlane(this.rackDragPlane, rackPt);
 
           let overRackPlane = false;
+          let hoverSlotIdx = slotHits.length > 0 ? slotHits[0].object.userData.slotIdx : null;
           if (hasRackHit) {
             const localPt = this.southRackGroup.worldToLocal(rackPt.clone());
             if (
               slotHits.length > 0 ||
-              (Math.abs(localPt.x) <= 5.1 && localPt.y >= -0.15 && localPt.y <= 2.65)
+              (Math.abs(localPt.x) <= 5.15 && localPt.y >= -0.2 && localPt.y <= 2.7)
             ) {
               overRackPlane = true;
+              if (hoverSlotIdx == null) {
+                hoverSlotIdx = this.findNearestRackSlot(localPt);
+              }
               const frontWorld = new THREE.Vector3(
                 THREE.MathUtils.clamp(localPt.x, -4.95, 4.95),
                 THREE.MathUtils.clamp(localPt.y, 0.25, 2.35),
@@ -2440,6 +2470,12 @@ export class OkeyTable3D {
                 new THREE.Euler(-0.32, isFlipped ? Math.PI : 0, 0, 'XYZ')
               );
             }
+          } else if (slotHits.length > 0) {
+            overRackPlane = true;
+          }
+
+          if (overRackPlane && hoverSlotIdx != null && this.rackSlotMeshes[hoverSlotIdx]) {
+            this.rackSlotMeshes[hoverSlotIdx].material.opacity = 0.45;
           }
 
           let dragTablePt = null;
@@ -2573,11 +2609,12 @@ export class OkeyTable3D {
         this.raycaster.ray.intersectPlane(this.rackDragPlane, rackPt);
 
       let overRackPlane = false;
+      let rackLocalPt = null;
       if (hasRackHit) {
-        const localPt = this.southRackGroup.worldToLocal(rackPt.clone());
+        rackLocalPt = this.southRackGroup.worldToLocal(rackPt.clone());
         if (
           slotHits.length > 0 ||
-          (Math.abs(localPt.x) <= 5.1 && localPt.y >= -0.15 && localPt.y <= 2.65)
+          (Math.abs(rackLocalPt.x) <= 5.15 && rackLocalPt.y >= -0.2 && rackLocalPt.y <= 2.7)
         ) {
           overRackPlane = true;
         }
@@ -2586,14 +2623,16 @@ export class OkeyTable3D {
       }
 
       if (overRackPlane) {
-        if (slotHits.length > 0) {
-          const targetSlotIdx = slotHits[0].object.userData.slotIdx;
-          if (targetSlotIdx !== drag.fromSlotIdx) {
-            const targetTile = this.handSlotData[targetSlotIdx];
-            this.handSlotData[targetSlotIdx] = drag.tile;
-            this.handSlotData[drag.fromSlotIdx] = targetTile;
-            this.callbacks.onRackReorder?.();
-          }
+        const targetSlotIdx = slotHits.length > 0
+          ? slotHits[0].object.userData.slotIdx
+          : (rackLocalPt ? this.findNearestRackSlot(rackLocalPt) : null);
+        const actualFromIdx = this.handSlotData.findIndex((t) => t && t.id === drag.tile.id);
+        const fromIdx = actualFromIdx !== -1 ? actualFromIdx : drag.fromSlotIdx;
+        if (targetSlotIdx != null && targetSlotIdx !== fromIdx && fromIdx >= 0 && fromIdx < this.handSlotData.length) {
+          const targetTile = this.handSlotData[targetSlotIdx];
+          this.handSlotData[targetSlotIdx] = drag.tile;
+          this.handSlotData[fromIdx] = targetTile;
+          this.callbacks.onRackReorder?.();
         }
         if (this.currentState) {
           this.renderGameState(this.currentState, { skipSlotSync: true });

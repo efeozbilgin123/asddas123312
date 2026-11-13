@@ -1431,4 +1431,48 @@ test('LocalSingleplayerClient supports Serhat Canikli queue, fallback, and autop
   assert.equal(stopRes.music, null);
 });
 
+test('LocalSingleplayerClient supports custom starting seatIndex for human player', () => {
+  const states = [];
+  const client = new LocalSingleplayerClient({
+    playerName: 'Kuzey Oyuncu',
+    playerAvatar: 'avatar-3',
+    seatIndex: 2,
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
+    onState: (room) => states.push(room)
+  });
+
+  client.emitRoomState();
+  const latest = states[states.length - 1];
+  assert.equal(latest.viewerSeatIndex, 2);
+  assert.equal(latest.seats[2].type, 'human');
+  assert.equal(latest.seats[2].name, 'Kuzey Oyuncu');
+  assert.equal(latest.seats[0].type, 'bot');
+  assert.equal(latest.game.viewerSeatIndex, 2);
+  assert.equal(latest.game.seats[2].hand.length, 21);
+
+  let orderRes = null;
+  client.action('room:orderTreat', { itemId: 'cay', target: 'self' }, (r) => { orderRes = r; });
+  assert.equal(orderRes.ok, true);
+  assert.equal(orderRes.orders[2].drink.fromSeat, 2);
+  assert.equal(orderRes.lastOrder.fromSeat, 2);
+  assert.equal(orderRes.lastOrder.targetName, 'kendine');
+
+  let clearRes = null;
+  client.action('room:orderClear', { target: 'self' }, (r) => { clearRes = r; });
+  assert.equal(clearRes.ok, true);
+  assert.equal(clearRes.orders[2].drink, null);
+
+  let snapRes = null;
+  client.action('admin:snapshot', {}, (r) => { snapRes = r; });
+  const myTileId = snapRes.snapshot.seats[2].hand[0].id;
+  const deckTileId = snapRes.snapshot.deck[0].id;
+  let swapRes = null;
+  client.action('admin:swapTile', { myTileId, sourceKind: 'deck', targetTileId: deckTileId }, (r) => {
+    swapRes = r;
+  });
+  assert.equal(swapRes.ok, true);
+  assert.equal(swapRes.snapshot.seats[2].hand[0].id, deckTileId);
+
+  client.destroy();
+});
 

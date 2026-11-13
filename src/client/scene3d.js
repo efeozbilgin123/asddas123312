@@ -26,17 +26,25 @@ const RACK_ROWS = 2;
 const RACK_SPACING_X = 0.67;
 
 const CAMERA_PRESETS = {
+  fp: {
+    pos: new THREE.Vector3(0, 6.1, 12.8),
+    target: new THREE.Vector3(0, 0.85, 2.0),
+    fov: 50
+  },
   table: {
     pos: new THREE.Vector3(0, 12.2, 14.4),
-    target: new THREE.Vector3(0, 0.45, 1.5)
+    target: new THREE.Vector3(0, 0.45, 1.5),
+    fov: 42
   },
   top: {
     pos: new THREE.Vector3(0, 18.2, 4.4),
-    target: new THREE.Vector3(0, 0.1, 0.6)
+    target: new THREE.Vector3(0, 0.1, 0.6),
+    fov: 42
   },
   rack: {
     pos: new THREE.Vector3(0, 7.6, 12.8),
-    target: new THREE.Vector3(0, 0.75, 4.4)
+    target: new THREE.Vector3(0, 0.75, 4.4),
+    fov: 44
   }
 };
 
@@ -168,7 +176,8 @@ export class OkeyTable3D {
     const width = rect.width || window.innerWidth;
     const height = rect.height || window.innerHeight;
 
-    this.camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 130);
+    this.camera = new THREE.PerspectiveCamera(CAMERA_PRESETS.table.fov, width / height, 0.1, 130);
+    this.targetFov = CAMERA_PRESETS.table.fov;
     this.camTarget = CAMERA_PRESETS.table.target.clone();
     this.camSpherical = new THREE.Spherical().setFromVector3(
       CAMERA_PRESETS.table.pos.clone().sub(this.camTarget)
@@ -1703,6 +1712,7 @@ export class OkeyTable3D {
       this.lastTileTap = null;
     }
 
+    const wasDemo = this.demoMode;
     this.demoMode = false;
     this.currentState = state;
     this.clearDynamic();
@@ -1712,8 +1722,13 @@ export class OkeyTable3D {
       this.lastHandIds = new Set();
       this.lastTableTileIds = new Set();
       this.lastDiscardTopIds = [null, null, null, null];
+      this.setCameraPreset('table');
       this.buildDemoSetup();
       return;
+    }
+
+    if (wasDemo) {
+      this.setCameraPreset('fp');
     }
 
     const viewerIdx = state.viewerSeatIndex ?? 0;
@@ -1807,17 +1822,25 @@ export class OkeyTable3D {
     this.lastHandIds = newHandIds;
     this.lastDraggedTransform = null;
 
-    // 2. Render Opponent racks (face-down 3D tiles, zero clipping)
+    // 2. Render uniform concealed covers on Opponent racks so remaining tile counts stay hidden
     const oppConfigs = [
       { rel: 1, pos: [6.85, 0.22, 0], rotY: Math.PI / 2 },
       { rel: 2, pos: [0, 0.22, -6.85], rotY: Math.PI },
       { rel: 3, pos: [-6.85, 0.22, 0], rotY: -Math.PI / 2 }
     ];
+    const coverWoodMat = new THREE.MeshStandardMaterial({
+      map: getWoodTexture(),
+      color: '#5B361D',
+      roughness: 0.46,
+      metalness: 0.08
+    });
+    const coverBrassMat = new THREE.MeshStandardMaterial({
+      color: '#B89242',
+      roughness: 0.34,
+      metalness: 0.65
+    });
 
     for (const cfg of oppConfigs) {
-      const seatIdx = (viewerIdx + cfg.rel) % 4;
-      const seat = state.seats[seatIdx];
-      const count = seat?.tileCount || 0;
       const rackHolder = new THREE.Group();
       rackHolder.position.set(...cfg.pos);
       rackHolder.rotation.y = cfg.rotY;
@@ -1826,13 +1849,16 @@ export class OkeyTable3D {
       tilt.rotation.x = -0.32;
       rackHolder.add(tilt);
 
-      for (let i = 0; i < Math.min(count, 28); i += 1) {
-        const mesh = this.createTileMesh({ id: `opp-${seatIdx}-${i}`, color: 'red', number: 1 }, { faceUp: false });
-        const slotIdx = i < 14 ? 14 + i : i - 14;
-        const p = this.getLocalRackSlotPosition(slotIdx);
-        mesh.position.copy(p);
-        tilt.add(mesh);
-      }
+      const shield = new THREE.Mesh(new THREE.BoxGeometry(9.5, 2.02, 0.24), coverWoodMat);
+      shield.position.set(0, 1.15, 0.02);
+      shield.castShadow = true;
+      shield.receiveShadow = true;
+      tilt.add(shield);
+
+      const topTrim = new THREE.Mesh(new THREE.BoxGeometry(9.54, 0.07, 0.26), coverBrassMat);
+      topTrim.position.set(0, 2.16, 0.02);
+      tilt.add(topTrim);
+
       this.dynamicGroup.add(rackHolder);
     }
 
@@ -2065,9 +2091,10 @@ export class OkeyTable3D {
   }
 
   setCameraPreset(presetName) {
-    const preset = CAMERA_PRESETS[presetName] || CAMERA_PRESETS.table;
+    const preset = CAMERA_PRESETS[presetName] || CAMERA_PRESETS.fp;
     this.targetCamLook.copy(preset.target);
     this.targetSpherical.setFromVector3(preset.pos.clone().sub(preset.target));
+    this.targetFov = preset.fov || 44;
   }
 
   updatePointer(clientX, clientY) {
@@ -2165,7 +2192,7 @@ export class OkeyTable3D {
         this.targetSpherical.phi = THREE.MathUtils.clamp(
           this.targetSpherical.phi - dy * 0.0055,
           0.25,
-          1.18
+          1.36
         );
         return;
       }
@@ -2468,6 +2495,10 @@ export class OkeyTable3D {
     this.camSpherical.phi += (this.targetSpherical.phi - this.camSpherical.phi) * damp;
     this.camSpherical.theta += (this.targetSpherical.theta - this.camSpherical.theta) * damp;
     this.camTarget.lerp(this.targetCamLook, damp);
+    if (this.targetFov && Math.abs(this.camera.fov - this.targetFov) > 0.05) {
+      this.camera.fov += (this.targetFov - this.camera.fov) * damp;
+      this.camera.updateProjectionMatrix();
+    }
 
     const offset = new THREE.Vector3().setFromSpherical(this.camSpherical);
     this.camera.position.copy(this.camTarget).add(offset);

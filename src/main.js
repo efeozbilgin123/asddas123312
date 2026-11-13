@@ -583,6 +583,9 @@ function switchView(room) {
     els.connBadge.hidden = false;
     els.roomPill.hidden = true;
     els.cameraGroup.hidden = true;
+    els.cameraGroup.querySelectorAll('.seg__btn').forEach((b) => {
+      b.classList.toggle('is-active', b.dataset.cam === 'fp');
+    });
     stagedGroups = [];
     lastRoundModalNumber = 0;
     lastTurnSeatSeen = null;

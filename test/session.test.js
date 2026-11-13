@@ -728,3 +728,27 @@ test('LocalSingleplayerClient handles room:orderTreat and room:orderClear', () =
 
   client.destroy();
 });
+
+test('GameSession.getClientView hides opponent tileCount while preserving viewer tileCount', () => {
+  const session = new GameSession({
+    roomCode: 'PRIV',
+    seatsConfig: [
+      { playerId: 'p0', name: 'Efe', isBot: false },
+      { playerId: 'p1', name: 'Bot 1', isBot: true },
+      { playerId: 'p2', name: 'Bot 2', isBot: true },
+      { playerId: 'p3', name: 'Bot 3', isBot: true }
+    ],
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
+    onStateChange: () => {}
+  });
+
+  session.startRound();
+  const view = session.getClientView(0);
+  assert.equal(view.seats[0].tileCount, session.seats[0].hand.length);
+  assert.equal(view.seats[1].tileCount, null);
+  assert.equal(view.seats[2].tileCount, null);
+  assert.equal(view.seats[3].tileCount, null);
+  assert.equal(view.seats[1].hand, null);
+
+  session.destroy();
+});

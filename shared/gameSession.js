@@ -801,7 +801,7 @@ export class GameSession {
         avatar: s.avatar,
         isBot: s.isBot,
         connected: s.connected,
-        tileCount: s.hand.length,
+        tileCount: s.seatIndex === viewerSeatIndex ? s.hand.length : null,
         opened: s.opened,
         openMode: s.openMode,
         openedPoints: s.openedPoints,

@@ -1399,6 +1399,356 @@ body {
   color: var(--color-muted);
 }
 
+/* Table Theme Swatches */
+.theme-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-card);
+  border: 1px solid var(--color-rule);
+}
+
+.theme-dot {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--color-rule);
+  cursor: pointer;
+  transition: transform var(--dur-micro) var(--ease-snap), border-color var(--dur-micro) var(--ease-snap);
+}
+
+.theme-dot:hover {
+  transform: scale(1.12);
+}
+
+.theme-dot:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.theme-dot.is-active {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-paper);
+}
+
+.theme-dot--green { background: #1D5E43; }
+.theme-dot--burgundy { background: #6E2030; }
+.theme-dot--navy { background: #203C61; }
+
+/* Chat Toggle & Unread Badge */
+.btn--chat-toggle {
+  position: relative;
+}
+
+.chat-unread-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-3);
+  color: var(--color-ink);
+  font-family: var(--font-outlier);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.chat-unread-dot[hidden] {
+  display: none;
+}
+
+/* HUD Speech Bubble for Local/South Seat */
+.hud-speech-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: 158px;
+  translate: -50% 0;
+  max-width: min(380px, calc(100% - var(--space-lg)));
+  padding: 7px 14px;
+  border-radius: var(--radius-pill);
+  background: var(--color-paper);
+  border: 1.5px solid var(--color-accent);
+  color: var(--color-ink);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  box-shadow: var(--shadow-card);
+  pointer-events: none;
+  z-index: var(--z-sticky);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-speech-bubble[hidden] {
+  display: none;
+}
+
+/* Room Chat & Table Nudge Drawer */
+.chat-drawer {
+  position: fixed;
+  top: calc(var(--space-sm) + 48px);
+  right: var(--space-md);
+  z-index: var(--z-sticky);
+  width: min(350px, calc(100% - var(--space-lg)));
+  max-height: min(62dvh, 460px);
+  display: grid;
+  grid-template-rows: auto minmax(120px, 1fr) auto auto;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  border-radius: var(--radius-stock);
+  background: var(--color-paper);
+  border: 1px solid var(--color-rule);
+  box-shadow: var(--shadow-card);
+}
+
+.chat-drawer[hidden] {
+  display: none;
+}
+
+.chat-drawer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xs);
+  padding-bottom: var(--space-2xs);
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.chat-drawer__title {
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+}
+
+.chat-drawer__head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+.chat-messages {
+  list-style: none;
+  margin: 0;
+  padding: 2px;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  overflow-y: auto;
+  min-height: 110px;
+}
+
+.chat-msg {
+  display: grid;
+  gap: 2px;
+  padding: 6px 9px;
+  border-radius: var(--radius-input);
+  background: var(--color-card);
+  border: 1px solid var(--color-rule);
+}
+
+.chat-msg.is-mine {
+  border-color: var(--color-mint);
+  background: var(--color-paper-2);
+}
+
+.chat-msg__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xs);
+}
+
+.chat-msg__author {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--color-accent);
+}
+
+.chat-msg.is-mine .chat-msg__author {
+  color: var(--color-mint);
+}
+
+.chat-msg__time {
+  font-size: 0.66rem;
+  color: var(--color-muted);
+  font-family: var(--font-outlier);
+}
+
+.chat-msg__text {
+  font-size: var(--text-xs);
+  color: var(--color-ink);
+  word-break: break-word;
+}
+
+.chat-empty {
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+  text-align: center;
+  padding: var(--space-sm);
+}
+
+.chat-quick-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chat-quick-btn {
+  padding: 4px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-rule);
+  background: var(--color-paper-2);
+  color: var(--color-ink-2);
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color var(--dur-micro) var(--ease-snap), background-color var(--dur-micro) var(--ease-snap);
+}
+
+.chat-quick-btn:hover {
+  border-color: var(--color-accent);
+  background: var(--color-paper-3);
+  color: var(--color-ink);
+}
+
+.chat-quick-btn:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.chat-form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+.chat-form input {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 var(--space-sm);
+  border-radius: var(--radius-input);
+  border: 1px solid var(--color-rule);
+  background: var(--color-card);
+  color: var(--color-ink);
+  font-size: var(--text-xs);
+}
+
+.chat-form input:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+}
+
+/* DJ Serhat Canikli Presets & Queue Reorder */
+.music-presets {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.music-presets__label {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--color-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.music-presets__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-xs);
+}
+
+.music-preset-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xs);
+  padding: 8px 10px;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--color-rule);
+  background: var(--color-card);
+}
+
+.music-preset-card__title {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--color-ink);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.music-preset-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.music-queue__item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.music-queue__move {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0 5px;
+  border: 1px solid var(--color-rule);
+  border-radius: 6px;
+  background: var(--color-paper-2);
+  color: var(--color-ink-2);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.music-queue__move:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-ink);
+}
+
+.music-queue__move:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Live Yazboz Dialog */
+.dialog--wide {
+  width: min(820px, calc(100% - var(--space-lg)));
+}
+
+.yazboz-table th,
+.yazboz-table td {
+  white-space: nowrap;
+}
+
+.yazboz-win {
+  color: var(--color-mint);
+  font-weight: 700;
+}
+
+.yazboz-pen {
+  color: var(--color-accent-3);
+}
+
+.yazboz-table tfoot td,
+.yazboz-table tfoot th {
+  font-weight: 700;
+  background: var(--color-paper-2);
+  border-top: 2px solid var(--color-rule);
+}
+
 @media (max-width: 60rem) {
   .topbar {
     top: var(--space-xs);
@@ -1410,10 +1760,16 @@ body {
     left: var(--space-xs);
     width: calc(100% - var(--space-md));
   }
+  .chat-drawer {
+    top: calc(var(--space-xs) + 96px);
+    right: var(--space-xs);
+    width: calc(100% - var(--space-md));
+  }
   .field-row,
   .wait-seats,
   .team-summary-grid,
-  .order-menu-grid {
+  .order-menu-grid,
+  .music-presets__grid {
     grid-template-columns: minmax(0, 1fr);
   }
   .lobby-panel,

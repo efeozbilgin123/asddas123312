@@ -288,6 +288,26 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack(res);
   });
 
+  safeOn('room:musicQueueShuffle', (_data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.shuffleMusicQueue({
+      roomCode: code,
+      playerId
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:musicQueueMove', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.moveMusicQueueItem({
+      roomCode: code,
+      playerId,
+      fromIndex: data?.fromIndex,
+      toIndex: data?.toIndex
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
   safeOn('room:orderTreat', (data, ack) => {
     const code = roomManager.playerToRoom.get(playerId);
     const res = roomManager.orderTreat({
@@ -305,6 +325,27 @@ io.on('connection', (socket) => {
       roomCode: code,
       playerId,
       target: data?.target || 'self'
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:chatSend', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.sendChatMessage({
+      roomCode: code,
+      playerId,
+      text: data?.text,
+      quickId: data?.quickId
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:nudge', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.sendTableNudge({
+      roomCode: code,
+      playerId,
+      targetSeatIndex: data?.targetSeatIndex
     });
     if (typeof ack === 'function') ack(res);
   });

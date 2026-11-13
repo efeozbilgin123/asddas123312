@@ -19,11 +19,31 @@
     </div>
 
     <div class="topbar__actions">
+      <div id="theme-picker" class="theme-picker" role="group" aria-label="Masa çuhası teması">
+        <button type="button" class="theme-dot theme-dot--green is-active" data-theme="green" aria-label="Yeşil Çuha" aria-pressed="true" title="Yeşil Çuha"></button>
+        <button type="button" class="theme-dot theme-dot--burgundy" data-theme="burgundy" aria-label="Bordo Kadife" aria-pressed="false" title="Bordo Kadife"></button>
+        <button type="button" class="theme-dot theme-dot--navy" data-theme="navy" aria-label="Gece Laciverti" aria-pressed="false" title="Gece Laciverti"></button>
+      </div>
       <div id="camera-group" class="seg" role="group" aria-label="Kamera açısı" hidden>
         <button type="button" class="seg__btn is-active" data-cam="fp">1. Şahıs</button>
         <button type="button" class="seg__btn" data-cam="table">Masa</button>
         <button type="button" class="seg__btn" data-cam="top">Üstten</button>
       </div>
+      <button type="button" id="btn-yazboz" class="btn btn--quiet btn--sm" hidden title="Canlı Yazboz defteri">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
+          <line x1="8" y1="7" x2="16" y2="7"/>
+          <line x1="8" y1="11" x2="14" y2="11"/>
+        </svg>
+        <span>Yazboz</span>
+      </button>
+      <button type="button" id="btn-chat" class="btn btn--quiet btn--sm btn--chat-toggle" hidden aria-expanded="false" aria-controls="chat-drawer" title="Masa sohbeti ve taş vurma">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+        <span>Sohbet</span>
+        <span id="chat-unread-badge" class="chat-unread-dot" hidden aria-label="Okunmamış mesaj">0</span>
+      </button>
       <button type="button" id="btn-orders" class="btn btn--quiet btn--sm" hidden title="Kahvehane çay ve ikram siparişi">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M17 8h1a4 4 0 1 1 0 8h-1"/>
@@ -184,6 +204,14 @@
                 <option value="3">Batı (2. Takım)</option>
               </select>
             </div>
+            <div class="field field--inline">
+              <label for="opt-table-theme">Masa çuhası</label>
+              <select id="opt-table-theme">
+                <option value="green" selected>Yeşil Çuha</option>
+                <option value="burgundy">Bordo Kadife</option>
+                <option value="navy">Gece Laciverti</option>
+              </select>
+            </div>
             <label class="check">
               <input id="opt-islek" type="checkbox" checked>
               <span>İşlek taş cezası (+101)</span>
@@ -315,6 +343,7 @@
     <!-- Active 3D Game HUD -->
     <section id="view-game" class="game-hud" hidden aria-label="Oyun arayüzü">
       <div id="game-alert-toast" class="game-alert-toast" role="alert" aria-live="assertive" hidden></div>
+      <div id="hud-speech-bubble" class="hud-speech-bubble" role="status" aria-live="polite" hidden></div>
 
       <div class="bottom-dock">
         <div id="hud-banner" class="hud-banner" role="status" aria-live="polite">
@@ -412,6 +441,7 @@
         <div class="music-queue__head">
           <span id="music-queue-summary" class="music-queue__title">Şarkı Sırası</span>
           <div class="music-queue__actions">
+            <button type="button" id="music-queue-shuffle" class="btn btn--quiet btn--sm" hidden>Karıştır</button>
             <button type="button" id="music-queue-clear" class="btn btn--quiet btn--sm" hidden>Sonrakileri Temizle</button>
             <button type="button" id="music-queue-add" class="btn btn--quiet btn--sm">+ Parça Ekle</button>
           </div>
@@ -419,6 +449,23 @@
         <ol id="music-queue-list" class="music-queue__list"></ol>
       </div>
       <div id="music-player-host" class="music-dock__body"></div>
+    </aside>
+
+    <!-- Collapsible Room Chat & Table Nudge Drawer -->
+    <aside id="chat-drawer" class="chat-drawer" hidden aria-label="Masa sohbeti ve sataşmalar">
+      <div class="chat-drawer__head">
+        <strong class="chat-drawer__title">Masa Sohbeti</strong>
+        <div class="chat-drawer__head-actions">
+          <button type="button" id="btn-table-nudge" class="btn btn--quiet btn--sm" title="Masaya taş vurup oyuncuları dürt">Taş Vur</button>
+          <button type="button" id="btn-chat-close" class="btn btn--quiet btn--sm">Kapat</button>
+        </div>
+      </div>
+      <ol id="chat-messages" class="chat-messages" aria-live="polite"></ol>
+      <div id="chat-quick-bar" class="chat-quick-bar" role="group" aria-label="Hızlı kahvehane mesajları"></div>
+      <form id="chat-form" class="chat-form" novalidate>
+        <input id="chat-input" type="text" maxlength="140" placeholder="Masaya yaz..." autocomplete="off">
+        <button type="submit" class="btn btn--primary btn--sm">Gönder</button>
+      </form>
     </aside>
   </main>
 
@@ -430,6 +477,10 @@
     </div>
     <div class="dialog__body">
       <p class="lead">Spotify şarkı veya çalma listesi linki, YouTube/SoundCloud linki ya da doğrudan şarkı adı yazın. Oda müzik botu <strong>Serhat Canikli</strong> arka planda müziği tüm masa için çalar ve parça bitince otomatik devam eder.</p>
+      <div class="music-presets">
+        <span class="music-presets__label">Hazır Kahvehane Listeleri</span>
+        <div id="music-presets-grid" class="music-presets__grid"></div>
+      </div>
       <form id="music-form" class="lobby-form" novalidate>
         <div class="field">
           <label for="music-url-input">Şarkı adı veya bağlantı</label>
@@ -449,10 +500,32 @@
       <section id="dialog-music-queue-section" class="music-queue music-queue--dialog" hidden aria-label="Şarkı sırası">
         <div class="music-queue__head">
           <span id="dialog-music-queue-summary" class="music-queue__title">Şarkı Sırası</span>
-          <button type="button" id="dialog-music-queue-clear" class="btn btn--quiet btn--sm" hidden>Sonrakileri Temizle</button>
+          <div class="music-queue__actions">
+            <button type="button" id="dialog-music-queue-shuffle" class="btn btn--quiet btn--sm" hidden>Karıştır</button>
+            <button type="button" id="dialog-music-queue-clear" class="btn btn--quiet btn--sm" hidden>Sonrakileri Temizle</button>
+          </div>
         </div>
         <ol id="dialog-music-queue-list" class="music-queue__list"></ol>
       </section>
+    </div>
+  </dialog>
+
+  <!-- Live Scorebook (Yazboz) Dialog -->
+  <dialog id="dialog-yazboz" class="dialog dialog--wide">
+    <div class="dialog__head">
+      <h2>Canlı Yazboz Defteri</h2>
+      <button type="button" class="btn btn--quiet btn--sm" data-close-dialog="dialog-yazboz">Kapat</button>
+    </div>
+    <div class="dialog__body">
+      <p id="yazboz-empty" class="field__help">Henüz tamamlanmış bir el yok. İlk el bittiğinde skor geçmişi burada listelenecek.</p>
+      <div id="yazboz-team-totals" class="team-summary-grid" hidden></div>
+      <div id="yazboz-table-wrap" class="rooms-table-wrap" hidden>
+        <table class="rooms-table yazboz-table">
+          <thead id="yazboz-thead"></thead>
+          <tbody id="yazboz-tbody"></tbody>
+          <tfoot id="yazboz-tfoot"></tfoot>
+        </table>
+      </div>
     </div>
   </dialog>
 

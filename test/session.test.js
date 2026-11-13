@@ -1669,6 +1669,89 @@ test('LocalSingleplayerClient supports queueing URLs and queue jump/remove/clear
   assert.equal(cleared.music.title, 'Üçüncü');
 });
 
+test('GameSession accumulates roundHistory across rounds and exposes it in getClientView', () => {
+  const session = new GameSession({
+    roomCode: 'YAZB',
+    seatsConfig: [
+      { playerId: 'p0', name: 'Efe', isBot: false },
+      { playerId: 'p1', name: 'Arhan', isBot: false },
+      { playerId: 'p2', name: 'Hasan', isBot: false },
+      { playerId: 'p3', name: 'Eray', isBot: false }
+    ],
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
+    onStateChange: () => {}
+  });
 
+  // Round 1: Seat 0 wins cleanly
+  session.startRound();
+  const safe0 = session.seats[0].hand.find((t) => !isOkeyTile(t, session.okeyTarget));
+  session.seats[0].hand = [safe0];
+  session.seats[0].opened = true;
+  session.currentSeat = 0;
+  session.turnPhase = 'play';
+  session.discardTile(0, safe0.id);
+  assert.equal(session.roundHistory.length, 1);
+  assert.equal(session.roundHistory[0].roundNumber, 1);
+  assert.equal(session.roundHistory[0].winnerSeat, 0);
 
+  // Round 2: Deck exhausted
+  session.startRound();
+  session.deck = [];
+  const cur = session.currentSeat;
+  session.discardTile(cur, session.seats[cur].hand[0].id);
+  assert.equal(session.roundHistory.length, 2);
+  assert.equal(session.roundHistory[1].roundNumber, 2);
+  assert.equal(session.roundHistory[1].deckExhausted, true);
 
+  const view = session.getClientView(0);
+  assert.equal(view.roundHistory.length, 2);
+  assert.equal(view.roundHistory[0].winnerName, 'Efe');
+  assert.equal(view.roundHistory[1].deckExhausted, true);
+
+  session.destroy();
+});
+
+test('LocalSingleplayerClient handles chatSend, nudge cooldown, musicQueueMove, and musicQueueShuffle', (ctx) => {
+  const states = [];
+  const client = new LocalSingleplayerClient({
+    playerName: 'Efe',
+    seatIndex: 1,
+    options: { katlamali: false, islekPenalty: true, turnSeconds: 60 },
+    onState: (room) => states.push(room)
+  });
+  ctx.after(() => client.destroy());
+
+  let chatRes = null;
+  client.action('room:chatSend', { quickId: 'play' }, (r) => { chatRes = r; });
+  assert.equal(chatRes.ok, true);
+  assert.equal(chatRes.entry.seatIndex, 1);
+  assert.equal(chatRes.entry.text, 'Hadi oyna!');
+  assert.equal(states[states.length - 1].chatHistory.length, 1);
+
+  let nudge1 = null;
+  client.action('room:nudge', {}, (r) => { nudge1 = r; });
+  assert.equal(nudge1.ok, true);
+  assert.equal(nudge1.nudge.seatIndex, 1);
+
+  let nudgeFast = null;
+  client.action('room:nudge', {}, (r) => { nudgeFast = r; });
+  assert.equal(nudgeFast.ok, false);
+
+  client.action('room:musicSet', { url: 'https://youtu.be/dQw4w9WgXcQ', title: 'A' });
+  client.action('room:musicSet', { url: 'https://youtu.be/9bZkp7q19f0', title: 'B', mode: 'queue' });
+  client.action('room:musicSet', { url: 'https://youtu.be/kJQP7kiw5Fk', title: 'C', mode: 'queue' });
+
+  let moved = null;
+  client.action('room:musicQueueMove', { fromIndex: 2, toIndex: 0 }, (r) => { moved = r; });
+  assert.equal(moved.ok, true);
+  assert.equal(moved.music.title, 'A');
+  assert.equal(moved.music.queueIndex, 1);
+  assert.deepEqual(moved.music.queueItems.map((q) => q.title), ['C', 'A', 'B']);
+
+  let shuffled = null;
+  client.action('room:musicQueueShuffle', {}, (r) => { shuffled = r; });
+  assert.equal(shuffled.ok, true);
+  assert.equal(shuffled.music.queueItems.length, 3);
+  assert.equal(shuffled.music.queueItems[0].title, 'C');
+  assert.equal(shuffled.music.queueItems[1].title, 'A');
+});

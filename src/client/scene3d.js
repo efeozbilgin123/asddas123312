@@ -4,6 +4,7 @@ import { isOkeyTile } from '../../shared/tiles.js';
 import { soundFX } from './sound.js';
 import {
   createNameplateTexture,
+  createSpeechBubbleTexture,
   getAvatarTexture,
   getDiscardPadTexture,
   getFeltTexture,
@@ -305,7 +306,21 @@ export class OkeyTable3D {
 
     this.orderGroup = new THREE.Group();
     this.scene.add(this.orderGroup);
+    this.bubbleGroup = new THREE.Group();
+    this.scene.add(this.bubbleGroup);
+    this.celebrationGroup = new THREE.Group();
+    this.scene.add(this.celebrationGroup);
     this.steamParticles = [];
+    this.speechBubbles = new Map();
+    this.celebrationParticles = [];
+    this.nudgeShake = null;
+    this.tableTheme = 'green';
+    this.tableFeltMat = null;
+    this.sideFeltMats = [];
+    this.confettiGeom = new THREE.PlaneGeometry(0.18, 0.11);
+    this.confettiMats = ['#F5C842', '#3FA876', '#E55B5B', '#56B4E9', '#FFF4DC'].map(
+      (color) => new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true, opacity: 1 })
+    );
     this.currentOrders = null;
     this.currentViewerIdx = 0;
 
@@ -461,13 +476,14 @@ export class OkeyTable3D {
     top.position.y = -0.14;
     group.add(top);
 
+    const sideFeltMat = new THREE.MeshStandardMaterial({
+      map: getFeltTexture(this.tableTheme),
+      roughness: 0.9
+    });
+    this.sideFeltMats.push(sideFeltMat);
     const feltCenter = new THREE.Mesh(
       new THREE.BoxGeometry(3.6, 0.04, 3.6),
-      new THREE.MeshStandardMaterial({
-        map: getFeltTexture(),
-        color: '#2B6E4F',
-        roughness: 0.9
-      })
+      sideFeltMat
     );
     feltCenter.position.y = -0.01;
     group.add(feltCenter);
@@ -858,8 +874,8 @@ export class OkeyTable3D {
       roughness: 0.48,
       metalness: 0.06
     });
-    const feltMat = new THREE.MeshStandardMaterial({
-      map: getFeltTexture(),
+    this.tableFeltMat = new THREE.MeshStandardMaterial({
+      map: getFeltTexture(this.tableTheme),
       roughness: 0.9,
       metalness: 0.02
     });
@@ -876,8 +892,8 @@ export class OkeyTable3D {
     outer.castShadow = true;
     this.scene.add(outer);
 
-    // Emerald wool felt playing surface
-    const felt = new THREE.Mesh(new THREE.BoxGeometry(16.6, 0.08, 16.6), feltMat);
+    // Wool felt playing surface
+    const felt = new THREE.Mesh(new THREE.BoxGeometry(16.6, 0.08, 16.6), this.tableFeltMat);
     felt.position.y = -0.02;
     felt.receiveShadow = true;
     this.scene.add(felt);
@@ -2707,6 +2723,107 @@ export class OkeyTable3D {
     window.addEventListener('resize', this.onResize);
   }
 
+  setTableTheme(theme = 'green') {
+    const valid = theme === 'burgundy' || theme === 'navy' ? theme : 'green';
+    this.tableTheme = valid;
+    const tex = getFeltTexture(valid);
+    if (this.tableFeltMat) {
+      this.tableFeltMat.map = tex;
+      this.tableFeltMat.needsUpdate = true;
+    }
+    for (const mat of this.sideFeltMats) {
+      mat.map = tex;
+      mat.needsUpdate = true;
+    }
+  }
+
+  showSeatBubble(seatIndex, name, text, viewerSeatIndex = this.currentViewerIdx) {
+    const rel = (Number(seatIndex) - Number(viewerSeatIndex || 0) + 4) % 4;
+    if (rel === 0) return;
+
+    const anchors = {
+      1: [8.85, 5.25, 0],
+      2: [0, 5.45, -8.85],
+      3: [-8.85, 5.25, 0]
+    };
+    const pos = anchors[rel];
+    if (!pos) return;
+
+    const existing = this.speechBubbles.get(rel);
+    if (existing) {
+      this.bubbleGroup.remove(existing.sprite);
+      existing.sprite.material?.map?.dispose();
+      existing.sprite.material?.dispose();
+      this.speechBubbles.delete(rel);
+    }
+
+    const tex = createSpeechBubbleTexture(name, text);
+    const mat = new THREE.SpriteMaterial({
+      map: tex,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.position.set(pos[0], pos[1], pos[2]);
+    sprite.scale.set(4.1, 1.15, 1);
+    sprite.renderOrder = 30;
+    this.bubbleGroup.add(sprite);
+
+    this.speechBubbles.set(rel, {
+      sprite,
+      baseY: pos[1],
+      age: 0,
+      ttl: 4.5
+    });
+  }
+
+  nudgeSeat(seatIndex = 0) {
+    if (this.reducedMotion) return;
+    this.nudgeShake = {
+      seatIndex,
+      elapsed: 0,
+      duration: 0.45
+    };
+  }
+
+  triggerWinCelebration({ winnerSeat = 0, viewerSeat = 0, multiplier = 1 } = {}) {
+    if (this.reducedMotion) return;
+    const rel = (Number(winnerSeat) - Number(viewerSeat || 0) + 4) % 4;
+    const originMap = {
+      0: [0, 2.2, 4.4],
+      1: [5.4, 2.4, 0],
+      2: [0, 2.5, -5.4],
+      3: [-5.4, 2.4, 0]
+    };
+    const origin = originMap[rel] || [0, 2.2, 0];
+    const count = multiplier >= 2 ? 68 : 44;
+
+    for (let i = 0; i < count; i += 1) {
+      const mat = this.confettiMats[i % this.confettiMats.length];
+      const mesh = new THREE.Mesh(this.confettiGeom, mat);
+      mesh.position.set(
+        origin[0] + (Math.random() - 0.5) * 1.4,
+        origin[1] + Math.random() * 0.6,
+        origin[2] + (Math.random() - 0.5) * 1.4
+      );
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 2.4 + Math.random() * 4.2;
+      this.celebrationGroup.add(mesh);
+      this.celebrationParticles.push({
+        mesh,
+        vx: Math.cos(angle) * speed,
+        vy: 3.6 + Math.random() * 3.8,
+        vz: Math.sin(angle) * speed,
+        rx: (Math.random() - 0.5) * 9,
+        ry: (Math.random() - 0.5) * 9,
+        rz: (Math.random() - 0.5) * 9,
+        life: 0,
+        maxLife: 2.4 + Math.random() * 1.0
+      });
+    }
+  }
+
   animate() {
     this.rafId = requestAnimationFrame(this.animate);
     const dt = Math.min(this.clock.getDelta(), 0.05);
@@ -2736,6 +2853,48 @@ export class OkeyTable3D {
         const sc = 0.7 + sp.phase * 0.9;
         sp.mesh.scale.setScalar(sc);
         sp.mesh.material.opacity = Math.sin(sp.phase * Math.PI) * 0.34;
+      }
+    }
+
+    // Floating 3D speech bubbles over opponent seats
+    if (this.speechBubbles.size > 0) {
+      for (const [rel, b] of this.speechBubbles.entries()) {
+        b.age += dt;
+        const remain = b.ttl - b.age;
+        if (remain <= 0) {
+          this.bubbleGroup.remove(b.sprite);
+          b.sprite.material?.map?.dispose();
+          b.sprite.material?.dispose();
+          this.speechBubbles.delete(rel);
+          continue;
+        }
+        const bob = this.reducedMotion ? 0 : Math.sin(b.age * 3.2) * 0.06;
+        b.sprite.position.y = b.baseY + bob;
+        if (remain < 0.45) {
+          b.sprite.material.opacity = Math.max(0, remain / 0.45);
+        }
+      }
+    }
+
+    // Celebratory win confetti particles
+    if (this.celebrationParticles.length > 0) {
+      for (let i = this.celebrationParticles.length - 1; i >= 0; i -= 1) {
+        const p = this.celebrationParticles[i];
+        p.life += dt;
+        if (p.life >= p.maxLife || p.mesh.position.y < -0.2) {
+          this.celebrationGroup.remove(p.mesh);
+          this.celebrationParticles.splice(i, 1);
+          continue;
+        }
+        p.vy -= 5.8 * dt;
+        p.vx *= 0.992;
+        p.vz *= 0.992;
+        p.mesh.position.x += p.vx * dt;
+        p.mesh.position.y += p.vy * dt;
+        p.mesh.position.z += p.vz * dt;
+        p.mesh.rotation.x += p.rx * dt;
+        p.mesh.rotation.y += p.ry * dt;
+        p.mesh.rotation.z += p.rz * dt;
       }
     }
 
@@ -2773,6 +2932,17 @@ export class OkeyTable3D {
 
     const offset = new THREE.Vector3().setFromSpherical(this.camSpherical);
     this.camera.position.copy(this.camTarget).add(offset);
+    if (this.nudgeShake && !this.reducedMotion) {
+      this.nudgeShake.elapsed += dt;
+      if (this.nudgeShake.elapsed >= this.nudgeShake.duration) {
+        this.nudgeShake = null;
+      } else {
+        const t = this.nudgeShake.elapsed / this.nudgeShake.duration;
+        const amp = (1 - t) * 0.14;
+        this.camera.position.x += Math.sin(t * Math.PI * 14) * amp;
+        this.camera.position.y += Math.cos(t * Math.PI * 10) * amp * 0.55;
+      }
+    }
     this.camera.lookAt(this.camTarget);
 
     this.renderer.render(this.scene, this.camera);
@@ -2800,7 +2970,8 @@ export class OkeyTable3D {
       this.deckGlowRingGeom,
       this.leftDiscardRingGeom,
       this.turnRingGeom,
-      this.steamPuffGeom
+      this.steamPuffGeom,
+      this.confettiGeom
     ];
     for (const g of staticGeoms) g?.dispose();
 
@@ -2817,9 +2988,18 @@ export class OkeyTable3D {
       this.leftDiscardRingMat,
       this.discardPadMatIdle,
       this.discardPadMatActive,
-      this.rightDiscardRingMat
+      this.rightDiscardRingMat,
+      this.tableFeltMat,
+      ...this.sideFeltMats,
+      ...this.confettiMats
     ];
     for (const m of staticMats) m?.dispose();
+
+    for (const b of this.speechBubbles.values()) {
+      b.sprite.material?.map?.dispose();
+      b.sprite.material?.dispose();
+    }
+    this.speechBubbles.clear();
 
     for (const mat of this.tileFaceMatCache.values()) mat?.dispose();
     this.tileFaceMatCache.clear();

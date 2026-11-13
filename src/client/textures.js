@@ -11,10 +11,16 @@ const TILE_INK = {
 
 const faceCache = new Map();
 const avatarCache = new Map();
+const feltTextureCache = new Map();
 let cachedBackTexture = null;
 let cachedWoodTexture = null;
-let cachedFeltTexture = null;
 let cachedBackdropTexture = null;
+
+const FELT_PALETTES = {
+  green: ['#1D5E43', '#154B35', '#0E3425'],
+  burgundy: ['#6E2030', '#541623', '#360D15'],
+  navy: ['#203C61', '#162C49', '#0C1A2E']
+};
 
 const textureLoader = new THREE.TextureLoader();
 
@@ -63,17 +69,20 @@ export function getAvatarTexture(avatarId = 'avatar-1') {
   return tex;
 }
 
-export function getFeltTexture() {
-  if (cachedFeltTexture) return cachedFeltTexture;
+export function getFeltTexture(theme = 'green') {
+  const key = Object.prototype.hasOwnProperty.call(FELT_PALETTES, theme) ? theme : 'green';
+  if (feltTextureCache.has(key)) return feltTextureCache.get(key);
+
+  const palette = FELT_PALETTES[key];
   const canvas = document.createElement('canvas');
   canvas.width = 768;
   canvas.height = 768;
   const ctx = canvas.getContext('2d');
 
   const grad = ctx.createRadialGradient(384, 384, 40, 384, 384, 540);
-  grad.addColorStop(0, '#1D5E43');
-  grad.addColorStop(0.65, '#154B35');
-  grad.addColorStop(1, '#0E3425');
+  grad.addColorStop(0, palette[0]);
+  grad.addColorStop(0.65, palette[1]);
+  grad.addColorStop(1, palette[2]);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, 768, 768);
 
@@ -97,7 +106,50 @@ export function getFeltTexture() {
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
-  cachedFeltTexture = tex;
+  feltTextureCache.set(key, tex);
+  return tex;
+}
+
+export function createSpeechBubbleTexture(name, text) {
+  const cleanName = String(name || 'Oyuncu').slice(0, 18);
+  const cleanText = String(text || '').trim().slice(0, 46);
+  const canvas = document.createElement('canvas');
+  canvas.width = 640;
+  canvas.height = 176;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, 640, 176);
+
+  // Warm parchment speech bubble card + bottom pointer triangle
+  ctx.fillStyle = 'rgba(252, 245, 228, 0.96)';
+  ctx.beginPath();
+  ctx.roundRect(24, 16, 592, 126, 28);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(300, 140);
+  ctx.lineTo(320, 170);
+  ctx.lineTo(344, 140);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = '#C9962E';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.roundRect(24, 16, 592, 126, 28);
+  ctx.stroke();
+
+  ctx.fillStyle = '#8C5B12';
+  ctx.font = '700 24px "Plus Jakarta Sans", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(cleanName, 320, 48);
+
+  ctx.fillStyle = '#1E1A16';
+  ctx.font = '700 32px "Plus Jakarta Sans", sans-serif';
+  ctx.fillText(cleanText, 320, 98);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
 

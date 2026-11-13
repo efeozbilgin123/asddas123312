@@ -2,6 +2,7 @@ import { createEmptyOrders, KAHVE_MENU_MAP } from '../shared/menu.js';
 import { buildYouTubeEmbedUrl, parseMusicUrl, summarizeMusicQueue } from '../shared/music.js';
 import {
   isPresetAvatar,
+  KAHVE_QUICK_CHATS,
   pickRandomBotAvatar,
   pickRandomBotName,
   PRESET_AVATAR_COUNT
@@ -10,6 +11,7 @@ import { findAutoplayTrack, resolveMusicInput, resolveQueuedTrack } from './musi
 import { GameSession } from './gameSession.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const QUICK_CHAT_MAP = new Map(KAHVE_QUICK_CHATS.map((q) => [q.id, q]));
 
 function generateRoomCode(existing) {
   let code = '';
@@ -106,6 +108,10 @@ export class RoomManager {
       orders: createEmptyOrders(),
       lastOrder: null,
       orderSeq: 0,
+      chatHistory: [],
+      chatSeq: 0,
+      nudgeSeq: 0,
+      nudgeCooldowns: new Map(),
       options: {
         katlamali: Boolean(opts.katlamali),
         teamMode: opts.teamMode === 'paired' ? 'paired' : 'solo',
@@ -828,6 +834,87 @@ export class RoomManager {
     return { ok: true, music: room.music };
   }
 
+  shuffleMusicQueue({ roomCode, playerId }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
+    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+
+    const queue = Array.isArray(room.musicQueue) ? room.musicQueue : [];
+    if (!room.music || queue.length === 0) {
+      return { ok: true, music: room.music };
+    }
+
+    const curIdx = Math.max(0, Math.min(room.musicQueueIndex || 0, queue.length - 1));
+    const head = queue.slice(0, curIdx + 1);
+    const upcoming = queue.slice(curIdx + 1);
+    for (let i = upcoming.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [upcoming[i], upcoming[j]] = [upcoming[j], upcoming[i]];
+    }
+    room.musicQueue = [...head, ...upcoming];
+    room.musicQueueIndex = curIdx;
+    room.music = {
+      ...room.music,
+      queueIndex: curIdx,
+      queueTotal: room.musicQueue.length,
+      hasNext: curIdx + 1 < room.musicQueue.length,
+      queueItems: summarizeMusicQueue(room.musicQueue, curIdx)
+    };
+    this.broadcastRoomMusic(room);
+    return { ok: true, music: room.music };
+  }
+
+  moveMusicQueueItem({ roomCode, playerId, fromIndex, toIndex }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
+    if (!seat) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+
+    const queue = Array.isArray(room.musicQueue) ? room.musicQueue : [];
+    const fromIdx = Number(fromIndex);
+    const toIdx = Number(toIndex);
+    if (
+      !Number.isInteger(fromIdx) ||
+      !Number.isInteger(toIdx) ||
+      fromIdx < 0 ||
+      fromIdx >= queue.length ||
+      toIdx < 0 ||
+      toIdx >= queue.length
+    ) {
+      return { ok: false, error: 'Geçersiz sıra konumu.' };
+    }
+
+    if (fromIdx === toIdx) {
+      return { ok: true, music: room.music };
+    }
+
+    const [moved] = queue.splice(fromIdx, 1);
+    queue.splice(toIdx, 0, moved);
+
+    let curIdx = room.musicQueueIndex || 0;
+    if (curIdx === fromIdx) {
+      curIdx = toIdx;
+    } else if (fromIdx < curIdx && toIdx >= curIdx) {
+      curIdx -= 1;
+    } else if (fromIdx > curIdx && toIdx <= curIdx) {
+      curIdx += 1;
+    }
+    room.musicQueueIndex = curIdx;
+
+    if (room.music) {
+      room.music = {
+        ...room.music,
+        queueIndex: curIdx,
+        queueTotal: queue.length,
+        hasNext: curIdx + 1 < queue.length,
+        queueItems: summarizeMusicQueue(queue, curIdx)
+      };
+    }
+    this.broadcastRoomMusic(room);
+    return { ok: true, music: room.music };
+  }
+
   switchMusicFallback({ roomCode, playerId, currentKey = '' }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
@@ -977,6 +1064,84 @@ export class RoomManager {
     }
   }
 
+  sendChatMessage({ roomCode, playerId, text = '', quickId = null }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    const sender = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
+    if (!sender) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+
+    const quick = quickId ? QUICK_CHAT_MAP.get(String(quickId)) : null;
+    const rawText = quick ? quick.text : String(text || '');
+    const cleanText = rawText.trim().replace(/\s+/g, ' ').slice(0, 140);
+    if (!cleanText) {
+      return { ok: false, error: 'Boş mesaj gönderilemez.' };
+    }
+
+    if (!Array.isArray(room.chatHistory)) room.chatHistory = [];
+    room.chatSeq = (room.chatSeq || 0) + 1;
+    const entry = {
+      id: room.chatSeq,
+      seatIndex: sender.seatIndex,
+      name: sender.name || 'Oyuncu',
+      avatar: sender.avatar,
+      text: cleanText,
+      quickId: quick?.id || null,
+      sentAt: Date.now()
+    };
+    room.chatHistory.push(entry);
+    if (room.chatHistory.length > 40) {
+      room.chatHistory.shift();
+    }
+
+    for (const seat of room.seats) {
+      if (seat.type === 'human' && seat.playerId) {
+        this.io.to(`player:${seat.playerId}`).emit('room:chat', entry);
+      }
+    }
+    return { ok: true, entry };
+  }
+
+  sendTableNudge({ roomCode, playerId, targetSeatIndex = null }) {
+    const room = this.getRoom(roomCode);
+    if (!room) return { ok: false, error: 'Masa bulunamadı.' };
+    const sender = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
+    if (!sender) return { ok: false, error: 'Bu masada koltuğunuz bulunmuyor.' };
+
+    if (!(room.nudgeCooldowns instanceof Map)) {
+      room.nudgeCooldowns = new Map();
+    }
+    const now = Date.now();
+    const prevAt = room.nudgeCooldowns.get(playerId) || 0;
+    if (now - prevAt < 2500) {
+      return { ok: false, error: 'Biraz yavaş, masayı kırmayalım!' };
+    }
+    room.nudgeCooldowns.set(playerId, now);
+
+    let validTarget = null;
+    if (targetSeatIndex !== null && targetSeatIndex !== undefined) {
+      const idx = Number(targetSeatIndex);
+      if (Number.isInteger(idx) && room.seats[idx] && room.seats[idx].type !== 'empty') {
+        validTarget = idx;
+      }
+    }
+
+    room.nudgeSeq = (room.nudgeSeq || 0) + 1;
+    const nudge = {
+      id: room.nudgeSeq,
+      seatIndex: sender.seatIndex,
+      name: sender.name || 'Oyuncu',
+      targetSeatIndex: validTarget,
+      sentAt: now
+    };
+
+    for (const seat of room.seats) {
+      if (seat.type === 'human' && seat.playerId) {
+        this.io.to(`player:${seat.playerId}`).emit('room:nudge', nudge);
+      }
+    }
+    return { ok: true, nudge };
+  }
+
   getRoomPayloadForPlayer(room, playerId) {
     const mySeat = room.seats.find(
       (s) => s.type === 'human' && s.playerId === playerId
@@ -991,6 +1156,7 @@ export class RoomManager {
       music: room.music || null,
       orders: room.orders || createEmptyOrders(),
       lastOrder: room.lastOrder || null,
+      chatHistory: room.chatHistory || [],
       options: room.options,
       viewerSeatIndex,
       seats: room.seats.map((s) => ({

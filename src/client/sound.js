@@ -321,27 +321,29 @@ class SoundFX {
     this.playOpenHand();
   }
 
-  playRoundWin() {
+  playRoundWin(multiplier = 1) {
     const ctx = this.ensureCtx();
     if (!ctx) return;
     this.playFeltSlide(0.14, 0.18);
     this.playWoodKnock(145, 0.24, 0.09);
 
     const now = ctx.currentTime;
-    const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5];
+    const notes = multiplier >= 2
+      ? [523.25, 659.25, 783.99, 1046.5, 1318.5, 1567.98, 2093.0]
+      : [523.25, 659.25, 783.99, 1046.5, 1318.5];
     notes.forEach((freq, i) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.type = 'triangle';
+      osc.type = i >= 5 ? 'sine' : 'triangle';
       const t = now + i * 0.065;
       osc.frequency.setValueAtTime(freq, t);
       gain.gain.setValueAtTime(0.001, t);
-      gain.gain.linearRampToValueAtTime(0.085, t + 0.018);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.52);
+      gain.gain.linearRampToValueAtTime(multiplier >= 4 ? 0.1 : 0.085, t + 0.018);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.56);
       osc.connect(gain);
-      this.routeNode(gain, 0.5);
+      this.routeNode(gain, 0.55);
       osc.start(t);
-      osc.stop(t + 0.56);
+      osc.stop(t + 0.6);
     });
   }
 
@@ -387,6 +389,35 @@ class SoundFX {
     this.routeNode(gain, 0.45);
     osc.start(now);
     osc.stop(now + 0.26);
+  }
+
+  playChatBlip() {
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(660, now);
+    osc.frequency.exponentialRampToValueAtTime(880, now + 0.06);
+    gain.gain.setValueAtTime(0.045, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
+    osc.connect(gain);
+    this.routeNode(gain, 0.28);
+    osc.start(now);
+    osc.stop(now + 0.12);
+  }
+
+  playTableNudge() {
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+    this.playWoodKnock(128, 0.32, 0.09);
+    setTimeout(() => {
+      if (this.muted) return;
+      this.playWoodKnock(142, 0.26, 0.08);
+      this.playCeramicSnap(0.95, 0.12);
+    }, 115);
   }
 
   playOrderServed(category = 'drink') {

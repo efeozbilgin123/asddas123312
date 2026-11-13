@@ -228,5 +228,33 @@ export function summarizeMusicQueue(queue, currentIndex = 0) {
   }));
 }
 
+export const KAHVE_PLAYLISTS = Object.freeze([
+  {
+    id: 'pop90',
+    label: "90'lar Türkçe Pop",
+    query: 'Tarkan Şımarık 90lar Türkçe Pop',
+    title: "90'lar Türkçe Pop"
+  },
+  {
+    id: 'akustik',
+    label: 'Kahvehane Akustik',
+    query: 'Barış Manço Dağlar Dağlar akustik',
+    title: 'Kahvehane Akustik'
+  },
+  {
+    id: 'oyun',
+    label: 'Oyun Havası',
+    query: 'Ankara Oyun Havası Misket',
+    title: 'Oyun Havası'
+  },
+  {
+    id: 'lofi',
+    label: 'Gece Lo-Fi Masa',
+    query: 'lofi hip hop beats chill mix',
+    title: 'Gece Lo-Fi Masa'
+  }
+]);
+
+
 
 

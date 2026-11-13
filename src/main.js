@@ -7,8 +7,8 @@ import {
   validatePair
 } from '../shared/melds.js';
 import { KAHVE_MENU } from '../shared/menu.js';
-import { formatMusicPlayerDisplay, parseMusicUrl } from '../shared/music.js';
-import { isPresetAvatar } from '../shared/presets.js';
+import { formatMusicPlayerDisplay, KAHVE_PLAYLISTS, parseMusicUrl } from '../shared/music.js';
+import { isPresetAvatar, KAHVE_QUICK_CHATS, TABLE_THEMES } from '../shared/presets.js';
 import { COLOR_LABELS, formatTileLabel, isOkeyTile } from '../shared/tiles.js';
 import { LocalSingleplayerClient } from './client/localSession.js';
 import { OkeyTable3D } from './client/scene3d.js';
@@ -46,7 +46,11 @@ const els = {
   wordmark: document.querySelector('.wordmark'),
   connBadge: document.getElementById('connection-badge'),
   roomPill: document.getElementById('room-pill'),
+  themePicker: document.getElementById('theme-picker'),
   cameraGroup: document.getElementById('camera-group'),
+  btnYazboz: document.getElementById('btn-yazboz'),
+  btnChat: document.getElementById('btn-chat'),
+  chatUnreadBadge: document.getElementById('chat-unread-badge'),
   btnOrders: document.getElementById('btn-orders'),
   btnMusic: document.getElementById('btn-music'),
   btnSound: document.getElementById('btn-sound'),
@@ -70,6 +74,7 @@ const els = {
   optIslek: document.getElementById('opt-islek'),
   optTimer: document.getElementById('opt-timer'),
   optSeat: document.getElementById('opt-seat'),
+  optTableTheme: document.getElementById('opt-table-theme'),
   btnQuickPlay: document.getElementById('btn-quick-play'),
   btnSingleplayer: document.getElementById('btn-singleplayer'),
   btnCreateRoom: document.getElementById('btn-create-room'),
@@ -108,6 +113,7 @@ const els = {
   hudTimer: document.getElementById('hud-timer'),
   hudTurnText: document.getElementById('hud-turn-text'),
   gameAlertToast: document.getElementById('game-alert-toast'),
+  hudSpeechBubble: document.getElementById('hud-speech-bubble'),
 
   stagingBar: document.getElementById('staging-bar'),
   stagingGroups: document.getElementById('staging-groups'),
@@ -146,12 +152,22 @@ const els = {
   musicDockStop: document.getElementById('music-dock-stop'),
   musicQueueDrawer: document.getElementById('music-queue-drawer'),
   musicQueueSummary: document.getElementById('music-queue-summary'),
+  musicQueueShuffle: document.getElementById('music-queue-shuffle'),
   musicQueueClear: document.getElementById('music-queue-clear'),
   musicQueueAdd: document.getElementById('music-queue-add'),
   musicQueueList: document.getElementById('music-queue-list'),
   musicPlayerHost: document.getElementById('music-player-host'),
 
+  chatDrawer: document.getElementById('chat-drawer'),
+  btnTableNudge: document.getElementById('btn-table-nudge'),
+  btnChatClose: document.getElementById('btn-chat-close'),
+  chatMessages: document.getElementById('chat-messages'),
+  chatQuickBar: document.getElementById('chat-quick-bar'),
+  chatForm: document.getElementById('chat-form'),
+  chatInput: document.getElementById('chat-input'),
+
   dialogMusic: document.getElementById('dialog-music'),
+  musicPresetsGrid: document.getElementById('music-presets-grid'),
   musicForm: document.getElementById('music-form'),
   musicUrlInput: document.getElementById('music-url-input'),
   musicUrlHelp: document.getElementById('music-url-help'),
@@ -161,8 +177,17 @@ const els = {
   btnMusicPlay: document.getElementById('btn-music-play'),
   dialogMusicQueueSection: document.getElementById('dialog-music-queue-section'),
   dialogMusicQueueSummary: document.getElementById('dialog-music-queue-summary'),
+  dialogMusicQueueShuffle: document.getElementById('dialog-music-queue-shuffle'),
   dialogMusicQueueClear: document.getElementById('dialog-music-queue-clear'),
   dialogMusicQueueList: document.getElementById('dialog-music-queue-list'),
+
+  dialogYazboz: document.getElementById('dialog-yazboz'),
+  yazbozEmpty: document.getElementById('yazboz-empty'),
+  yazbozTeamTotals: document.getElementById('yazboz-team-totals'),
+  yazbozTableWrap: document.getElementById('yazboz-table-wrap'),
+  yazbozThead: document.getElementById('yazboz-thead'),
+  yazbozTbody: document.getElementById('yazboz-tbody'),
+  yazbozTfoot: document.getElementById('yazboz-tfoot'),
 
   dialogOrders: document.getElementById('dialog-orders'),
   orderTarget: document.getElementById('order-target'),
@@ -277,11 +302,15 @@ let stagedGroups = []; // [{ id, mode: 'series'|'pairs', tiles, points }]
 let liveAutoAnalysis = { seriesPoints: 0, seriesGroups: [], pairCount: 0, pairGroups: [] };
 let lastEventIdSeen = 0;
 let lastOrderIdSeen = 0;
+let lastChatIdSeen = 0;
+let lastNudgeIdSeen = 0;
+let chatUnreadCount = 0;
 let lastRoundModalNumber = 0;
 let lastTurnSeatSeen = null;
 let lastTurnRoundSeen = null;
 let bannerNotice = '';
 let noticeTimer = null;
+let hudBubbleTimer = null;
 
 function applyRoomOrders(orders, lastOrder, viewerSeatIndex) {
   const viewerIdx = viewerSeatIndex ?? currentRoom?.viewerSeatIndex ?? 0;
@@ -318,6 +347,34 @@ const scene3d = new OkeyTable3D(els.canvas, {
   }
 });
 
+function applyTableTheme(themeId, persist = true) {
+  const valid = TABLE_THEMES.some((t) => t.id === themeId) ? themeId : 'green';
+  if (persist) {
+    localStorage.setItem('yuzbir_table_theme', valid);
+  }
+  scene3d.setTableTheme(valid);
+  if (els.optTableTheme) {
+    els.optTableTheme.value = valid;
+  }
+  els.themePicker?.querySelectorAll('.theme-dot').forEach((btn) => {
+    const active = btn.dataset.theme === valid;
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-pressed', String(active));
+  });
+}
+
+applyTableTheme(localStorage.getItem('yuzbir_table_theme') || 'green', false);
+
+els.themePicker?.querySelectorAll('.theme-dot').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    applyTableTheme(btn.dataset.theme || 'green');
+  });
+});
+
+els.optTableTheme?.addEventListener('change', (e) => {
+  applyTableTheme(e.target.value);
+});
+
 function showNotice(text, duration = 3500) {
   bannerNotice = text;
   updateTurnBanner();
@@ -326,6 +383,139 @@ function showNotice(text, duration = 3500) {
     bannerNotice = '';
     updateTurnBanner();
   }, duration);
+}
+
+function showHudSpeechBubble(name, text, duration = 4200) {
+  if (!els.hudSpeechBubble) return;
+  if (hudBubbleTimer) clearTimeout(hudBubbleTimer);
+  if (!text) {
+    els.hudSpeechBubble.hidden = true;
+    els.hudSpeechBubble.textContent = '';
+    return;
+  }
+  els.hudSpeechBubble.textContent = `${name || 'Oyuncu'}: ${text}`;
+  els.hudSpeechBubble.hidden = false;
+  hudBubbleTimer = setTimeout(() => {
+    if (els.hudSpeechBubble) {
+      els.hudSpeechBubble.hidden = true;
+    }
+  }, duration);
+}
+
+function updateChatUnreadBadge() {
+  if (!els.chatUnreadBadge) return;
+  if (chatUnreadCount > 0) {
+    els.chatUnreadBadge.textContent = chatUnreadCount > 9 ? '9+' : String(chatUnreadCount);
+    els.chatUnreadBadge.hidden = false;
+  } else {
+    els.chatUnreadBadge.textContent = '0';
+    els.chatUnreadBadge.hidden = true;
+  }
+}
+
+function formatChatTime(ts) {
+  const d = new Date(ts || Date.now());
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function appendChatMessageEl(entry) {
+  if (!els.chatMessages || !entry) return;
+  const emptyEl = els.chatMessages.querySelector('.chat-empty');
+  if (emptyEl) emptyEl.remove();
+
+  const li = document.createElement('li');
+  const mySeatIdx = currentRoom?.viewerSeatIndex ?? 0;
+  const isMine = entry.seatIndex === mySeatIdx;
+  li.className = `chat-msg${isMine ? ' is-mine' : ''}`;
+
+  const head = document.createElement('div');
+  head.className = 'chat-msg__head';
+
+  const author = document.createElement('span');
+  author.className = 'chat-msg__author';
+  author.textContent = isMine ? `${entry.name} (Siz)` : (entry.name || 'Oyuncu');
+
+  const time = document.createElement('span');
+  time.className = 'chat-msg__time';
+  time.textContent = formatChatTime(entry.sentAt);
+
+  head.append(author, time);
+
+  const body = document.createElement('div');
+  body.className = 'chat-msg__text';
+  body.textContent = entry.text || '';
+
+  li.append(head, body);
+  els.chatMessages.appendChild(li);
+  while (els.chatMessages.children.length > 40) {
+    els.chatMessages.firstElementChild?.remove();
+  }
+  els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
+}
+
+function renderChatHistory(history) {
+  if (!els.chatMessages) return;
+  els.chatMessages.innerHTML = '';
+  const list = Array.isArray(history) ? history : [];
+  if (list.length === 0) {
+    const empty = document.createElement('li');
+    empty.className = 'chat-empty';
+    empty.textContent = 'Masada henüz mesaj yok. Çabuk bir sataşma gönderin!';
+    els.chatMessages.appendChild(empty);
+    return;
+  }
+  list.forEach((entry) => appendChatMessageEl(entry));
+}
+
+function handleIncomingChat(entry) {
+  if (!entry || !entry.id) return;
+  const idNum = Number(entry.id);
+  if (idNum <= lastChatIdSeen) return;
+  lastChatIdSeen = idNum;
+
+  appendChatMessageEl(entry);
+  soundFX.playChatBlip();
+
+  const viewerIdx = currentRoom?.viewerSeatIndex ?? 0;
+  const rel = (Number(entry.seatIndex) - Number(viewerIdx) + 4) % 4;
+
+  if (currentRoom?.status === 'playing') {
+    if (rel === 0) {
+      showHudSpeechBubble(entry.name, entry.text);
+    } else {
+      scene3d.showSeatBubble(entry.seatIndex, entry.name, entry.text, viewerIdx);
+    }
+  }
+
+  if (els.chatDrawer?.hidden) {
+    chatUnreadCount += 1;
+    updateChatUnreadBadge();
+  }
+}
+
+function syncChatHistory(history, { announceNew = false } = {}) {
+  const list = Array.isArray(history) ? history : [];
+  if (!announceNew) {
+    renderChatHistory(list);
+    lastChatIdSeen = list.reduce((m, item) => Math.max(m, Number(item?.id || 0)), lastChatIdSeen);
+    return;
+  }
+  for (const item of list) {
+    if (Number(item?.id || 0) > lastChatIdSeen) {
+      handleIncomingChat(item);
+    }
+  }
+}
+
+function handleIncomingNudge(nudge) {
+  if (!nudge || !nudge.id) return;
+  const idNum = Number(nudge.id);
+  if (idNum <= lastNudgeIdSeen) return;
+  lastNudgeIdSeen = idNum;
+
+  soundFX.playTableNudge();
+  scene3d.nudgeSeat(nudge.seatIndex ?? 0);
+  showNotice(`${nudge.name || 'Bir oyuncu'} masaya vurdu!`, 3200);
 }
 
 let gameAlertTimer = null;
@@ -440,6 +630,11 @@ function startSingleplayer() {
   }
 
   lastEventIdSeen = 0;
+  lastOrderIdSeen = 0;
+  lastChatIdSeen = 0;
+  lastNudgeIdSeen = 0;
+  chatUnreadCount = 0;
+  updateChatUnreadBadge();
   lastRoundModalNumber = 0;
   stagedGroups = [];
 
@@ -752,6 +947,24 @@ function clearUpcomingMusicQueue() {
   });
 }
 
+function shuffleMusicQueue() {
+  if (!currentRoom || !activeMusicData) return;
+  sendGameAction('room:musicQueueShuffle', {}, (res) => {
+    if (res?.ok) {
+      applyRoomMusic(res.music || null);
+    }
+  });
+}
+
+function moveMusicQueueItem(fromIndex, toIndex) {
+  if (!currentRoom || !activeMusicData) return;
+  sendGameAction('room:musicQueueMove', { fromIndex, toIndex }, (res) => {
+    if (res?.ok) {
+      applyRoomMusic(res.music || null);
+    }
+  });
+}
+
 function populateQueueListEl(listEl, items) {
   if (!listEl) return;
   listEl.innerHTML = '';
@@ -797,6 +1010,31 @@ function populateQueueListEl(listEl, items) {
     playBtn.appendChild(idxSpan);
     playBtn.appendChild(metaDiv);
 
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'music-queue__item-actions';
+
+    const upBtn = document.createElement('button');
+    upBtn.type = 'button';
+    upBtn.className = 'music-queue__move';
+    upBtn.textContent = '↑';
+    upBtn.title = 'Yukarı taşı';
+    upBtn.disabled = item.index === 0;
+    upBtn.setAttribute('aria-label', `${item.title || 'Parçayı'} yukarı taşı`);
+    upBtn.addEventListener('click', () => {
+      if (item.index > 0) moveMusicQueueItem(item.index, item.index - 1);
+    });
+
+    const downBtn = document.createElement('button');
+    downBtn.type = 'button';
+    downBtn.className = 'music-queue__move';
+    downBtn.textContent = '↓';
+    downBtn.title = 'Aşağı taşı';
+    downBtn.disabled = item.index >= items.length - 1;
+    downBtn.setAttribute('aria-label', `${item.title || 'Parçayı'} aşağı taşı`);
+    downBtn.addEventListener('click', () => {
+      if (item.index < items.length - 1) moveMusicQueueItem(item.index, item.index + 1);
+    });
+
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'music-queue__remove';
@@ -807,8 +1045,9 @@ function populateQueueListEl(listEl, items) {
       removeMusicQueueItem(item.index);
     });
 
+    actionsDiv.append(upBtn, downBtn, removeBtn);
     li.appendChild(playBtn);
-    li.appendChild(removeBtn);
+    li.appendChild(actionsDiv);
     listEl.appendChild(li);
   });
 }
@@ -825,7 +1064,10 @@ function renderMusicQueue(music = activeMusicData) {
       }] : []);
 
   const total = items.length;
-  const hasUpcoming = items.some((it, i) => i > (music?.queueIndex || 0));
+  const curIdx = music?.queueIndex || 0;
+  const upcomingCount = items.filter((it, i) => i > curIdx).length;
+  const hasUpcoming = upcomingCount > 0;
+  const canShuffle = upcomingCount >= 2;
 
   if (els.musicDockQueue) {
     els.musicDockQueue.textContent = total > 0 ? `Sıra (${total})` : 'Sıra';
@@ -833,6 +1075,9 @@ function renderMusicQueue(music = activeMusicData) {
   }
   if (els.musicQueueSummary) {
     els.musicQueueSummary.textContent = `Şarkı Sırası (${total})`;
+  }
+  if (els.musicQueueShuffle) {
+    els.musicQueueShuffle.hidden = !canShuffle;
   }
   if (els.musicQueueClear) {
     els.musicQueueClear.hidden = !hasUpcoming && total <= 1;
@@ -842,6 +1087,9 @@ function renderMusicQueue(music = activeMusicData) {
   }
   if (els.dialogMusicQueueSummary) {
     els.dialogMusicQueueSummary.textContent = `Çalma Sırası (${total})`;
+  }
+  if (els.dialogMusicQueueShuffle) {
+    els.dialogMusicQueueShuffle.hidden = !canShuffle;
   }
   if (els.dialogMusicQueueClear) {
     els.dialogMusicQueueClear.hidden = !hasUpcoming && total <= 1;
@@ -1068,6 +1316,13 @@ function switchView(room) {
     els.viewWaiting.hidden = true;
     els.viewGame.hidden = true;
     els.btnLeave.hidden = true;
+    if (els.btnYazboz) els.btnYazboz.hidden = true;
+    if (els.btnChat) {
+      els.btnChat.hidden = true;
+      els.btnChat.setAttribute('aria-expanded', 'false');
+    }
+    if (els.chatDrawer) els.chatDrawer.hidden = true;
+    if (els.hudSpeechBubble) els.hudSpeechBubble.hidden = true;
     if (els.btnOrders) els.btnOrders.hidden = true;
     if (els.btnMusic) els.btnMusic.hidden = true;
     els.connBadge.hidden = false;
@@ -1082,10 +1337,19 @@ function switchView(room) {
     lastTurnSeatSeen = null;
     lastTurnRoundSeen = null;
     lastOrderIdSeen = 0;
+    lastChatIdSeen = 0;
+    lastNudgeIdSeen = 0;
+    chatUnreadCount = 0;
+    updateChatUnreadBadge();
+    if (els.chatMessages) els.chatMessages.innerHTML = '';
     bannerNotice = '';
     if (noticeTimer) {
       clearTimeout(noticeTimer);
       noticeTimer = null;
+    }
+    if (hudBubbleTimer) {
+      clearTimeout(hudBubbleTimer);
+      hudBubbleTimer = null;
     }
     if (gameAlertTimer) {
       clearTimeout(gameAlertTimer);
@@ -1095,6 +1359,7 @@ function switchView(room) {
     if (els.dialogSecret.open) els.dialogSecret.close();
     if (els.dialogMusic?.open) els.dialogMusic.close();
     if (els.dialogOrders?.open) els.dialogOrders.close();
+    if (els.dialogYazboz?.open) els.dialogYazboz.close();
     showGameAlert('', 'islek', 0);
     applyRoomMusic(null);
     scene3d.setRoomOrders(null, 0);
@@ -1110,12 +1375,15 @@ function switchView(room) {
   }
 
   els.btnLeave.hidden = false;
+  if (els.btnChat) els.btnChat.hidden = false;
+  if (els.btnYazboz) els.btnYazboz.hidden = !room.game;
   if (els.btnOrders) els.btnOrders.hidden = false;
   if (els.btnMusic) els.btnMusic.hidden = false;
   if (Object.prototype.hasOwnProperty.call(room, 'music')) {
     applyRoomMusic(room.music || null);
   }
   applyRoomOrders(room.orders || null, room.lastOrder || null, room.viewerSeatIndex ?? 0);
+  syncChatHistory(room.chatHistory, { announceNew: Boolean(prevRoom) });
 
   if (room.status === 'waiting') {
     els.viewLobby.hidden = true;
@@ -1256,7 +1524,27 @@ function renderGameRoom(room) {
     } else if (ev.type === 'open_hand') {
       soundFX.playOpenHand();
     } else if (ev.type === 'round_over') {
-      soundFX.playRoundWin();
+      const summary = game.roundSummary;
+      const mult = summary
+        ? (summary.finishedWithOkey ? 2 : 1) * ((summary.finishedFromPairs || summary.finishedFromHand) ? 2 : 1)
+        : 1;
+      soundFX.playRoundWin(mult);
+      if (
+        summary &&
+        summary.winnerSeat !== null &&
+        summary.winnerSeat !== undefined &&
+        !summary.roundCancelled &&
+        !summary.deckExhausted
+      ) {
+        scene3d.triggerWinCelebration({
+          winnerSeat: summary.winnerSeat,
+          viewerSeat: game.viewerSeatIndex,
+          multiplier: mult
+        });
+      }
+      if (els.dialogYazboz?.open) {
+        renderYazbozDialog();
+      }
     } else if (ev.type === 'discard') {
       const msgLower = String(ev.message || '').toLowerCase();
       const alertKind =
@@ -1998,6 +2286,43 @@ els.btnSound.addEventListener('click', () => {
 });
 
 // Shared Room Music controls (Serhat Canikli bot style)
+function renderMusicPresets() {
+  if (!els.musicPresetsGrid) return;
+  els.musicPresetsGrid.innerHTML = '';
+  KAHVE_PLAYLISTS.forEach((preset) => {
+    const card = document.createElement('div');
+    card.className = 'music-preset-card';
+
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'music-preset-card__title';
+    titleSpan.textContent = preset.label;
+    titleSpan.title = preset.label;
+
+    const actions = document.createElement('div');
+    actions.className = 'music-preset-card__actions';
+
+    const playBtn = document.createElement('button');
+    playBtn.type = 'button';
+    playBtn.className = 'btn btn--quiet btn--sm';
+    playBtn.textContent = 'Çal';
+    playBtn.addEventListener('click', () => {
+      submitRoomMusic('replace', { url: preset.query, title: preset.title });
+    });
+
+    const queueBtn = document.createElement('button');
+    queueBtn.type = 'button';
+    queueBtn.className = 'btn btn--quiet btn--sm';
+    queueBtn.textContent = '+ Sıra';
+    queueBtn.addEventListener('click', () => {
+      submitRoomMusic('queue', { url: preset.query, title: preset.title });
+    });
+
+    actions.append(playBtn, queueBtn);
+    card.append(titleSpan, actions);
+    els.musicPresetsGrid.appendChild(card);
+  });
+}
+
 function openMusicDialog({ emptyInput = Boolean(activeMusicData) } = {}) {
   if (!currentRoom) return;
   if (els.musicUrlHelp) els.musicUrlHelp.textContent = '';
@@ -2010,6 +2335,7 @@ function openMusicDialog({ emptyInput = Boolean(activeMusicData) } = {}) {
   if (els.btnMusicQueue) {
     els.btnMusicQueue.hidden = !activeMusicData;
   }
+  renderMusicPresets();
   renderMusicQueue(activeMusicData);
   els.dialogMusic?.showModal();
   if (emptyInput) {
@@ -2022,10 +2348,10 @@ els.btnWaitMusic?.addEventListener('click', () => openMusicDialog());
 
 let musicSubmitting = false;
 
-async function submitRoomMusic(mode = 'replace') {
+async function submitRoomMusic(mode = 'replace', override = null) {
   if (musicSubmitting) return;
-  const rawUrl = els.musicUrlInput?.value || '';
-  const customTitle = els.musicTitleInput?.value || '';
+  const rawUrl = override ? (override.url || '') : (els.musicUrlInput?.value || '');
+  const customTitle = override ? (override.title || '') : (els.musicTitleInput?.value || '');
   const preview = parseMusicUrl(rawUrl, customTitle);
   if (!preview.ok) {
     if (els.musicUrlHelp) els.musicUrlHelp.textContent = preview.error;
@@ -2087,15 +2413,17 @@ async function submitRoomMusic(mode = 'replace') {
       }
       if (res.music) applyRoomMusic(res.music);
       if (mode === 'queue') {
-        if (els.musicUrlInput) els.musicUrlInput.value = '';
-        if (els.musicTitleInput) els.musicTitleInput.value = '';
+        if (!override) {
+          if (els.musicUrlInput) els.musicUrlInput.value = '';
+          if (els.musicTitleInput) els.musicTitleInput.value = '';
+        }
         if (els.musicUrlHelp) {
           const addedCount = Number(res.queuedCount);
           els.musicUrlHelp.textContent = addedCount > 1
             ? `${addedCount} parça sıraya eklendi.`
             : 'Parça sıraya eklendi.';
         }
-        els.musicUrlInput?.focus();
+        if (!override) els.musicUrlInput?.focus();
       } else {
         if (els.musicUrlHelp) els.musicUrlHelp.textContent = '';
         if (els.dialogMusic?.open) els.dialogMusic.close();
@@ -2168,6 +2496,8 @@ els.musicDockQueue?.addEventListener('click', () => {
 
 els.musicDockAdd?.addEventListener('click', () => openMusicDialog({ emptyInput: true }));
 els.musicQueueAdd?.addEventListener('click', () => openMusicDialog({ emptyInput: true }));
+els.musicQueueShuffle?.addEventListener('click', shuffleMusicQueue);
+els.dialogMusicQueueShuffle?.addEventListener('click', shuffleMusicQueue);
 els.musicQueueClear?.addEventListener('click', clearUpcomingMusicQueue);
 els.dialogMusicQueueClear?.addEventListener('click', clearUpcomingMusicQueue);
 
@@ -2333,6 +2663,211 @@ els.btnOrderClear?.addEventListener('click', () => {
   });
 });
 
+// Live Scorebook (Canlı Yazboz) controls
+function renderYazbozDialog() {
+  const game = currentRoom?.game;
+  if (!game) return;
+  const history = Array.isArray(game.roundHistory) ? game.roundHistory : [];
+  const isPaired = game.options?.teamMode === 'paired';
+  const seats = Array.isArray(game.seats) ? game.seats : [];
+
+  if (history.length === 0) {
+    if (els.yazbozEmpty) els.yazbozEmpty.hidden = false;
+    if (els.yazbozTableWrap) els.yazbozTableWrap.hidden = true;
+    if (els.yazbozTeamTotals) {
+      els.yazbozTeamTotals.hidden = true;
+      els.yazbozTeamTotals.innerHTML = '';
+    }
+    return;
+  }
+
+  if (els.yazbozEmpty) els.yazbozEmpty.hidden = true;
+  if (els.yazbozTableWrap) els.yazbozTableWrap.hidden = false;
+
+  if (isPaired && els.yazbozTeamTotals) {
+    const t0 = (seats[0]?.totalScore || 0) + (seats[2]?.totalScore || 0);
+    const t1 = (seats[1]?.totalScore || 0) + (seats[3]?.totalScore || 0);
+    els.yazbozTeamTotals.hidden = false;
+    els.yazbozTeamTotals.innerHTML = '';
+    [
+      { label: '1. Takım (Güney & Kuzey)', score: t0, leading: t0 <= t1 },
+      { label: '2. Takım (Doğu & Batı)', score: t1, leading: t1 <= t0 }
+    ].forEach((team) => {
+      const card = document.createElement('div');
+      card.className = `team-summary-card${team.leading ? ' is-leading' : ''}`;
+      const nameEl = document.createElement('strong');
+      nameEl.textContent = team.label;
+      const scoreEl = document.createElement('span');
+      scoreEl.className = 'num';
+      scoreEl.textContent = `${team.score} p`;
+      card.append(nameEl, scoreEl);
+      els.yazbozTeamTotals.appendChild(card);
+    });
+  } else if (els.yazbozTeamTotals) {
+    els.yazbozTeamTotals.hidden = true;
+    els.yazbozTeamTotals.innerHTML = '';
+  }
+
+  if (els.yazbozThead) {
+    els.yazbozThead.innerHTML = '';
+    const tr = document.createElement('tr');
+    const thRound = document.createElement('th');
+    thRound.scope = 'col';
+    thRound.textContent = 'El';
+    const thRes = document.createElement('th');
+    thRes.scope = 'col';
+    thRes.textContent = 'Sonuç';
+    tr.append(thRound, thRes);
+
+    seats.forEach((seat, idx) => {
+      const th = document.createElement('th');
+      th.scope = 'col';
+      const teamTag = isPaired ? `[T${(idx % 2) + 1}] ` : '';
+      const selfTag = idx === game.viewerSeatIndex ? ' (Siz)' : '';
+      th.textContent = `${teamTag}${seat?.name || `Koltuk ${idx + 1}`}${selfTag}`;
+      tr.appendChild(th);
+    });
+    els.yazbozThead.appendChild(tr);
+  }
+
+  if (els.yazbozTbody) {
+    els.yazbozTbody.innerHTML = '';
+    history.forEach((entry) => {
+      const tr = document.createElement('tr');
+
+      const tdEl = document.createElement('td');
+      tdEl.className = 'num';
+      tdEl.textContent = `#${entry.roundNumber}`;
+
+      const tdRes = document.createElement('td');
+      if (entry.roundCancelled) {
+        tdRes.textContent = 'İptal (4 Çift)';
+      } else if (entry.deckExhausted) {
+        tdRes.textContent = 'Deste Tükendi';
+      } else {
+        const tags = [];
+        if (entry.finishedFromPairs) tags.push('Çiftten');
+        if (entry.finishedFromHand) tags.push('Elden');
+        if (entry.finishedWithOkey) tags.push('Okeyle');
+        tdRes.textContent = tags.length > 0
+          ? `${entry.winnerName || 'Kazanan'} (${tags.join(' + ')})`
+          : (entry.winnerName || 'Kazanan');
+      }
+
+      tr.append(tdEl, tdRes);
+
+      for (let sIdx = 0; sIdx < 4; sIdx += 1) {
+        const row = (entry.rows || []).find((r) => r.seatIndex === sIdx);
+        const td = document.createElement('td');
+        td.className = 'num';
+        if (!row) {
+          td.textContent = '-';
+        } else {
+          const deltaStr = row.roundDelta > 0 ? `+${row.roundDelta}` : String(row.roundDelta);
+          td.textContent = `${deltaStr} (${row.totalScore})`;
+          if (row.isWinner) td.classList.add('yazboz-win');
+          else if (row.roundDelta >= 101) td.classList.add('yazboz-pen');
+        }
+        tr.appendChild(td);
+      }
+
+      els.yazbozTbody.appendChild(tr);
+    });
+  }
+
+  if (els.yazbozTfoot) {
+    els.yazbozTfoot.innerHTML = '';
+    const tr = document.createElement('tr');
+    const thTotal = document.createElement('th');
+    thTotal.scope = 'row';
+    thTotal.colSpan = 2;
+    thTotal.textContent = 'Güncel Toplam';
+    tr.appendChild(thTotal);
+    for (let sIdx = 0; sIdx < 4; sIdx += 1) {
+      const td = document.createElement('td');
+      td.className = 'num';
+      td.textContent = `${seats[sIdx]?.totalScore ?? 0} p`;
+      tr.appendChild(td);
+    }
+    els.yazbozTfoot.appendChild(tr);
+  }
+}
+
+els.btnYazboz?.addEventListener('click', () => {
+  if (!currentRoom?.game) return;
+  renderYazbozDialog();
+  els.dialogYazboz?.showModal();
+});
+
+// Room Chat & Table Nudge controls
+function toggleChatDrawer(forceOpen) {
+  if (!els.chatDrawer || !currentRoom) return;
+  const shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : els.chatDrawer.hidden;
+  els.chatDrawer.hidden = !shouldOpen;
+  if (els.btnChat) {
+    els.btnChat.setAttribute('aria-expanded', String(shouldOpen));
+  }
+  if (shouldOpen) {
+    chatUnreadCount = 0;
+    updateChatUnreadBadge();
+    if (els.chatMessages) {
+      els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
+    }
+    els.chatInput?.focus();
+  }
+}
+
+function sendChatPayload({ text = '', quickId = null }) {
+  if (!currentRoom) return;
+  sendGameAction('room:chatSend', { text, quickId }, (res) => {
+    if (!res?.ok) {
+      if (res?.error) showNotice(res.error, 2500);
+      return;
+    }
+    if (res.entry) {
+      handleIncomingChat(res.entry);
+    }
+  });
+}
+
+if (els.chatQuickBar) {
+  els.chatQuickBar.innerHTML = '';
+  KAHVE_QUICK_CHATS.forEach((q) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chat-quick-btn';
+    btn.textContent = q.label;
+    btn.addEventListener('click', () => {
+      sendChatPayload({ quickId: q.id });
+    });
+    els.chatQuickBar.appendChild(btn);
+  });
+}
+
+els.btnChat?.addEventListener('click', () => toggleChatDrawer());
+els.btnChatClose?.addEventListener('click', () => toggleChatDrawer(false));
+
+els.chatForm?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const text = els.chatInput?.value?.trim() || '';
+  if (!text) return;
+  els.chatInput.value = '';
+  sendChatPayload({ text });
+});
+
+els.btnTableNudge?.addEventListener('click', () => {
+  if (!currentRoom) return;
+  sendGameAction('room:nudge', {}, (res) => {
+    if (!res?.ok) {
+      if (res?.error) showNotice(res.error, 2200);
+      return;
+    }
+    if (res.nudge) {
+      handleIncomingNudge(res.nudge);
+    }
+  });
+});
+
 // Dialog controls
 els.btnRules.addEventListener('click', () => {
   els.dialogRules.showModal();
@@ -2345,7 +2880,14 @@ document.querySelectorAll('[data-close-dialog]').forEach((btn) => {
   });
 });
 
-[els.dialogRules, els.dialogRound, els.dialogSecret, els.dialogMusic, els.dialogOrders].forEach((dlg) => {
+[
+  els.dialogRules,
+  els.dialogRound,
+  els.dialogSecret,
+  els.dialogMusic,
+  els.dialogOrders,
+  els.dialogYazboz
+].forEach((dlg) => {
   dlg?.addEventListener('click', (e) => {
     if (e.target === dlg) dlg.close();
   });
@@ -2587,5 +3129,20 @@ socket.on('room:orders', (payload) => {
     currentRoom.orders = payload.orders || null;
     currentRoom.lastOrder = payload.lastOrder || null;
     applyRoomOrders(payload.orders || null, payload.lastOrder || null, currentRoom.viewerSeatIndex ?? 0);
+  }
+});
+
+socket.on('room:chat', (entry) => {
+  if (!localClient && currentRoom && entry) {
+    if (!Array.isArray(currentRoom.chatHistory)) currentRoom.chatHistory = [];
+    currentRoom.chatHistory.push(entry);
+    if (currentRoom.chatHistory.length > 40) currentRoom.chatHistory.shift();
+    handleIncomingChat(entry);
+  }
+});
+
+socket.on('room:nudge', (nudge) => {
+  if (!localClient && currentRoom && nudge) {
+    handleIncomingNudge(nudge);
   }
 });

@@ -303,4 +303,71 @@ test('RoomManager exposes music queueItems and supports jump, remove, and clear 
   assert.equal(cleared.music.hasNext, false);
 });
 
+test('RoomManager supports musicQueueMove, musicQueueShuffle, room chat, and nudge cooldown', async () => {
+  const io = createMockIo();
+  const rm = new RoomManager(io);
+  const created = rm.createRoom({
+    playerId: 'h1',
+    playerName: 'Efe',
+    roomName: 'Sohbet ve Sıra'
+  });
+  const code = created.room.code;
 
+  rm.joinRoom({ roomCode: code, playerId: 'p2', playerName: 'Arhan' });
+
+  rm.setRoomMusic({ roomCode: code, playerId: 'h1', url: 'https://youtu.be/dQw4w9WgXcQ', title: 'Bir' });
+  rm.setRoomMusic({ roomCode: code, playerId: 'h1', url: 'https://youtu.be/9bZkp7q19f0', title: 'İki', mode: 'queue' });
+  rm.setRoomMusic({ roomCode: code, playerId: 'h1', url: 'https://youtu.be/kJQP7kiw5Fk', title: 'Üç', mode: 'queue' });
+  rm.setRoomMusic({ roomCode: code, playerId: 'h1', url: 'https://youtu.be/3JZ_D3ELwOQ', title: 'Dört', mode: 'queue' });
+
+  // Jump to index 1 ('İki')
+  await rm.jumpMusicQueue({ roomCode: code, playerId: 'h1', index: 1 });
+  assert.equal(created.room.music.queueIndex, 1);
+
+  // Move index 3 ('Dört') up to index 0 -> current track ('İki') shifts from 1 to 2
+  const moved = rm.moveMusicQueueItem({ roomCode: code, playerId: 'h1', fromIndex: 3, toIndex: 0 });
+  assert.equal(moved.ok, true);
+  assert.equal(moved.music.title, 'İki');
+  assert.equal(moved.music.queueIndex, 2);
+  assert.deepEqual(moved.music.queueItems.map((q) => q.title), ['Dört', 'Bir', 'İki', 'Üç']);
+
+  // Jump back to 0 and shuffle upcoming [1,2,3] -> index 0 remains 'Dört'
+  await rm.jumpMusicQueue({ roomCode: code, playerId: 'h1', index: 0 });
+  const shuffled = rm.shuffleMusicQueue({ roomCode: code, playerId: 'h1' });
+  assert.equal(shuffled.ok, true);
+  assert.equal(shuffled.music.queueItems[0].title, 'Dört');
+  assert.equal(shuffled.music.queueItems.length, 4);
+  assert.deepEqual(
+    shuffled.music.queueItems.map((q) => q.title).sort(),
+    ['Bir', 'Dört', 'İki', 'Üç'].sort()
+  );
+
+  // Chat send: quickId + free text + cap at 40
+  const quickRes = rm.sendChatMessage({ roomCode: code, playerId: 'h1', quickId: 'tea' });
+  assert.equal(quickRes.ok, true);
+  assert.equal(quickRes.entry.text, 'Çaylar benden!');
+  assert.equal(io.emitted.some((e) => e.event === 'room:chat' && e.target === 'player:p2'), true);
+
+  const emptyChat = rm.sendChatMessage({ roomCode: code, playerId: 'h1', text: '   ' });
+  assert.equal(emptyChat.ok, false);
+
+  for (let i = 0; i < 45; i += 1) {
+    rm.sendChatMessage({ roomCode: code, playerId: 'p2', text: `Mesaj ${i}` });
+  }
+  const payload = rm.getRoomPayloadForPlayer(created.room, 'h1');
+  assert.equal(payload.chatHistory.length, 40);
+  assert.equal(payload.chatHistory[39].text, 'Mesaj 44');
+
+  // Nudge emits room:nudge and enforces 2500ms cooldown per player
+  const nudge1 = rm.sendTableNudge({ roomCode: code, playerId: 'h1' });
+  assert.equal(nudge1.ok, true);
+  assert.equal(io.emitted.some((e) => e.event === 'room:nudge' && e.target === 'player:p2'), true);
+
+  const nudgeFast = rm.sendTableNudge({ roomCode: code, playerId: 'h1' });
+  assert.equal(nudgeFast.ok, false);
+
+  // Different player can still nudge immediately
+  const nudgeP2 = rm.sendTableNudge({ roomCode: code, playerId: 'p2', targetSeatIndex: 0 });
+  assert.equal(nudgeP2.ok, true);
+  assert.equal(nudgeP2.nudge.targetSeatIndex, 0);
+});

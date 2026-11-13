@@ -57,6 +57,7 @@ export class GameSession {
     this.openedThisTurn = false;
     this.turnEndsAt = null;
     this.roundSummary = null;
+    this.roundHistory = [];
     this.eventCounter = 0;
     this.lastEvent = null;
     this.meldCounter = 0;
@@ -838,6 +839,19 @@ export class GameSession {
       message,
       rows: breakdown
     };
+    this.roundHistory.push({
+      roundNumber: this.roundNumber,
+      winnerSeat,
+      winnerName: winnerSeat !== null ? (this.seats[winnerSeat]?.name || null) : null,
+      finishedWithOkey: Boolean(finishedWithOkey),
+      finishedFromPairs: Boolean(finishedFromPairs),
+      finishedFromHand: Boolean(finishedFromHand),
+      roundCancelled: Boolean(roundCancelled),
+      deckExhausted: !roundCancelled && winnerSeat === null,
+      teamScores: [...teamScores],
+      message,
+      rows: breakdown.map((r) => ({ ...r }))
+    });
 
     this.emitEvent('round_over', winnerSeat ?? this.currentSeat, null, message);
     this.notify();
@@ -879,6 +893,7 @@ export class GameSession {
         viewerSeatIndex === this.currentSeat ? this.committedMeldThisTurn : false,
       turnEndsAt: this.turnEndsAt,
       roundSummary: this.roundSummary,
+      roundHistory: this.roundHistory,
       lastEvent: this.lastEvent,
       viewerSeatIndex,
       seats: this.seats.map((s) => ({

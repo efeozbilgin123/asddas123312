@@ -53,3 +53,18 @@ export function pickRandomBotAvatar(excludeAvatars = [], rng = Math.random) {
   const idx = Math.floor(rng() * candidates.length) % candidates.length;
   return candidates[idx];
 }
+
+export const KAHVE_QUICK_CHATS = Object.freeze([
+  { id: 'play', label: 'Hadi oyna!', text: 'Hadi oyna!' },
+  { id: 'tea', label: 'Çaylar benden', text: 'Çaylar benden!' },
+  { id: 'opened', label: 'El açtık hayırlısı', text: 'El açtık hayırlısı!' },
+  { id: 'okey', label: 'Okey mi geldi?', text: 'Okey mi geldi yoksa?' },
+  { id: 'gg', label: 'Eline sağlık', text: 'Eline sağlık!' }
+]);
+
+export const TABLE_THEMES = Object.freeze([
+  { id: 'green', label: 'Yeşil Çuha', color: '#1D5E43' },
+  { id: 'burgundy', label: 'Bordo Kadife', color: '#6E2030' },
+  { id: 'navy', label: 'Gece Laciverti', color: '#203C61' }
+]);
+

@@ -1,7 +1,9 @@
 import { GameSession } from '../../shared/gameSession.js';
 import { createEmptyOrders, KAHVE_MENU_MAP } from '../../shared/menu.js';
 import { buildYouTubeEmbedUrl, parseMusicUrl, summarizeMusicQueue } from '../../shared/music.js';
-import { pickRandomBotAvatar, pickRandomBotName } from '../../shared/presets.js';
+import { KAHVE_QUICK_CHATS, pickRandomBotAvatar, pickRandomBotName } from '../../shared/presets.js';
+
+const LOCAL_QUICK_CHAT_MAP = new Map(KAHVE_QUICK_CHATS.map((q) => [q.id, q]));
 
 export class LocalSingleplayerClient {
   constructor({ playerName, playerAvatar, seatIndex = 0, options, onState }) {
@@ -14,6 +16,10 @@ export class LocalSingleplayerClient {
     this.orders = createEmptyOrders();
     this.lastOrder = null;
     this.orderSeq = 0;
+    this.chatHistory = [];
+    this.chatSeq = 0;
+    this.nudgeSeq = 0;
+    this.lastNudgeAt = 0;
     this.playerName = (typeof playerName === 'string' ? playerName.trim().slice(0, 20) : '') || 'Oyuncu';
     this.viewerSeatIndex = [0, 1, 2, 3].includes(Number(seatIndex)) ? Number(seatIndex) : 0;
 
@@ -75,6 +81,7 @@ export class LocalSingleplayerClient {
       music: this.music,
       orders: this.orders,
       lastOrder: this.lastOrder,
+      chatHistory: this.chatHistory,
       options: this.session.options,
       viewerSeatIndex: this.viewerSeatIndex,
       seats: this.session.seats.map((s) => ({
@@ -394,6 +401,73 @@ export class LocalSingleplayerClient {
         res = { ok: true, music: this.music };
         break;
       }
+      case 'room:musicQueueShuffle': {
+        if (!this.music || this.musicQueue.length === 0) {
+          res = { ok: true, music: this.music };
+          break;
+        }
+        const curIdx = Math.max(0, Math.min(this.musicQueueIndex || 0, this.musicQueue.length - 1));
+        const head = this.musicQueue.slice(0, curIdx + 1);
+        const upcoming = this.musicQueue.slice(curIdx + 1);
+        for (let i = upcoming.length - 1; i > 0; i -= 1) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [upcoming[i], upcoming[j]] = [upcoming[j], upcoming[i]];
+        }
+        this.musicQueue = [...head, ...upcoming];
+        this.musicQueueIndex = curIdx;
+        this.music = {
+          ...this.music,
+          queueIndex: curIdx,
+          queueTotal: this.musicQueue.length,
+          hasNext: curIdx + 1 < this.musicQueue.length,
+          queueItems: summarizeMusicQueue(this.musicQueue, curIdx)
+        };
+        this.emitRoomState();
+        res = { ok: true, music: this.music };
+        break;
+      }
+      case 'room:musicQueueMove': {
+        const fromIdx = Number(data?.fromIndex);
+        const toIdx = Number(data?.toIndex);
+        if (
+          !Number.isInteger(fromIdx) ||
+          !Number.isInteger(toIdx) ||
+          fromIdx < 0 ||
+          fromIdx >= this.musicQueue.length ||
+          toIdx < 0 ||
+          toIdx >= this.musicQueue.length
+        ) {
+          res = { ok: false, error: 'Geçersiz sıra konumu.' };
+          break;
+        }
+        if (fromIdx === toIdx) {
+          res = { ok: true, music: this.music };
+          break;
+        }
+        const [moved] = this.musicQueue.splice(fromIdx, 1);
+        this.musicQueue.splice(toIdx, 0, moved);
+        let curIdx = this.musicQueueIndex || 0;
+        if (curIdx === fromIdx) {
+          curIdx = toIdx;
+        } else if (fromIdx < curIdx && toIdx >= curIdx) {
+          curIdx -= 1;
+        } else if (fromIdx > curIdx && toIdx <= curIdx) {
+          curIdx += 1;
+        }
+        this.musicQueueIndex = curIdx;
+        if (this.music) {
+          this.music = {
+            ...this.music,
+            queueIndex: curIdx,
+            queueTotal: this.musicQueue.length,
+            hasNext: curIdx + 1 < this.musicQueue.length,
+            queueItems: summarizeMusicQueue(this.musicQueue, curIdx)
+          };
+        }
+        this.emitRoomState();
+        res = { ok: true, music: this.music };
+        break;
+      }
       case 'room:musicFallback': {
         const fallbacks = Array.isArray(this.music?.fallbackVideoIds) ? [...this.music.fallbackVideoIds] : [];
         const nextId = fallbacks.shift();
@@ -487,6 +561,57 @@ export class LocalSingleplayerClient {
         }
         this.emitRoomState();
         res = { ok: true, orders: this.orders };
+        break;
+      }
+      case 'room:chatSend': {
+        const quick = data?.quickId ? LOCAL_QUICK_CHAT_MAP.get(String(data.quickId)) : null;
+        const rawText = quick ? quick.text : String(data?.text || '');
+        const cleanText = rawText.trim().replace(/\s+/g, ' ').slice(0, 140);
+        if (!cleanText) {
+          res = { ok: false, error: 'Boş mesaj gönderilemez.' };
+          break;
+        }
+        this.chatSeq += 1;
+        const viewerSeat = this.session.seats[this.viewerSeatIndex];
+        const entry = {
+          id: this.chatSeq,
+          seatIndex: this.viewerSeatIndex,
+          name: this.playerName,
+          avatar: viewerSeat?.avatar || 'avatar-1',
+          text: cleanText,
+          quickId: quick?.id || null,
+          sentAt: Date.now()
+        };
+        this.chatHistory.push(entry);
+        if (this.chatHistory.length > 40) this.chatHistory.shift();
+        this.emitRoomState();
+        res = { ok: true, entry };
+        break;
+      }
+      case 'room:nudge': {
+        const now = Date.now();
+        if (now - this.lastNudgeAt < 2500) {
+          res = { ok: false, error: 'Biraz yavaş, masayı kırmayalım!' };
+          break;
+        }
+        this.lastNudgeAt = now;
+        this.nudgeSeq += 1;
+        const rawTarget = data?.targetSeatIndex;
+        const validTarget =
+          rawTarget !== null &&
+          rawTarget !== undefined &&
+          Number.isInteger(Number(rawTarget)) &&
+          this.session.seats[Number(rawTarget)]
+            ? Number(rawTarget)
+            : null;
+        const nudge = {
+          id: this.nudgeSeq,
+          seatIndex: this.viewerSeatIndex,
+          name: this.playerName,
+          targetSeatIndex: validTarget,
+          sentAt: now
+        };
+        res = { ok: true, nudge };
         break;
       }
       case 'admin:unlock':

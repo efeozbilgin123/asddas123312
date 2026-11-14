@@ -3367,6 +3367,33 @@ export class OkeyTable3D {
     this.targetFov = preset.fov || 44;
   }
 
+  // Presets are framed for landscape screens. On a narrow (portrait phone)
+  // viewport the same vertical FOV would crop the rack and the table sides,
+  // so widen it to keep the horizontal field of view the presets were tuned for.
+  getAspectCompensatedFov() {
+    const fov = this.targetFov;
+    if (!fov || this.cameraMode === 'freeroam') return fov;
+    const DESIGN_ASPECT = 1.45;
+    const MAX_FOV = 104;
+    const aspect = this.camera.aspect || DESIGN_ASPECT;
+    if (aspect >= DESIGN_ASPECT) return fov;
+    const half = Math.atan(Math.tan(THREE.MathUtils.degToRad(fov) / 2) * (DESIGN_ASPECT / aspect));
+    return Math.min(MAX_FOV, Math.max(fov, THREE.MathUtils.radToDeg(half) * 2));
+  }
+
+  // The bird's-eye camera sits above the pendant lamps and ceiling beams, so
+  // in that view the near plane is pushed down past them (everything above
+  // y = OVERHEAD_CLIP_Y is cut away) instead of letting them cover the table.
+  syncOverheadClip() {
+    const OVERHEAD_CLIP_Y = 9.0;
+    const overhead = this.cameraMode === 'top' && this.camera.position.y > OVERHEAD_CLIP_Y + 0.5;
+    const near = overhead ? this.camera.position.y - OVERHEAD_CLIP_Y : 0.1;
+    if (Math.abs(this.camera.near - near) > 0.01) {
+      this.camera.near = near;
+      this.camera.updateProjectionMatrix();
+    }
+  }
+
   teleportFreeroam(zone = 'okey') {
     const zones = {
       okey: { x: 0, z: 12.2, yaw: 0, pitch: -0.15 },
@@ -5200,8 +5227,9 @@ export class OkeyTable3D {
     }
 
     const damp = this.reducedMotion ? 1 : Math.min(1, dt * 8);
-    if (this.targetFov && Math.abs(this.camera.fov - this.targetFov) > 0.05) {
-      this.camera.fov += (this.targetFov - this.camera.fov) * damp;
+    const fovGoal = this.getAspectCompensatedFov();
+    if (fovGoal && Math.abs(this.camera.fov - fovGoal) > 0.05) {
+      this.camera.fov += (fovGoal - this.camera.fov) * damp;
       this.camera.updateProjectionMatrix();
     }
 
@@ -5268,6 +5296,7 @@ export class OkeyTable3D {
       const lz = -Math.cos(fs.yaw) * cosPitch;
 
       this.camera.position.copy(fs.pos);
+      this.syncOverheadClip();
       this._roamTmpLook.set(fs.pos.x + lx * 8, fs.pos.y + ly * 8, fs.pos.z + lz * 8);
       this.camera.lookAt(this._roamTmpLook);
     } else {
@@ -5278,6 +5307,7 @@ export class OkeyTable3D {
 
       this._camOffsetVec.setFromSpherical(this.camSpherical);
       this.camera.position.copy(this.camTarget).add(this._camOffsetVec);
+      this.syncOverheadClip();
       if (this.nudgeShake && !this.reducedMotion) {
         this.nudgeShake.elapsed += dt;
         if (this.nudgeShake.elapsed >= this.nudgeShake.duration) {

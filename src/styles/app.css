@@ -37,6 +37,19 @@ body {
   pointer-events: auto;
 }
 
+/* When the actions wrap to a second row keep them flush right, brand on top. */
+.topbar {
+  align-items: flex-start;
+}
+
+.topbar__brand {
+  flex: 0 0 auto;
+}
+
+.topbar__actions {
+  justify-content: flex-end;
+}
+
 .wordmark {
   display: inline-flex;
   align-items: center;
@@ -2071,6 +2084,19 @@ body {
   gap: var(--space-xs);
 }
 
+/* .join-row caps inputs at room-code width; the search box needs the full row. */
+.cozy-ambiance-form .join-row input {
+  flex: 1 1 220px;
+  max-width: none;
+  font-family: inherit;
+}
+
+/* Informational notes reuse .field__help, which is error-red by default. */
+#cozy-ambiance-now,
+#dialog-cozy span.field__help {
+  color: var(--color-ink-2);
+}
+
 .cozy-section__head {
   display: flex;
   align-items: center;
@@ -2817,11 +2843,23 @@ body {
     flex-wrap: wrap;
     gap: 6px;
   }
+  /* One swipeable row: wrapping used to stack five rows over the 3D view. */
   .topbar__actions {
     width: 100%;
     justify-content: flex-start;
+    flex-wrap: nowrap;
     overflow-x: auto;
-    padding-bottom: 2px;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    padding-bottom: 5px;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  }
+  .topbar__actions::-webkit-scrollbar {
+    display: none;
+  }
+  .topbar__actions > * {
+    flex: 0 0 auto;
   }
   .music-dock {
     top: calc(var(--space-xs) + 102px);
@@ -2889,8 +2927,12 @@ body {
     bottom: auto;
     width: calc(100% - var(--space-sm));
   }
+  /* Sit above the two-line free-roam hint bar instead of on top of it. */
+  .mobile-joystick {
+    bottom: max(112px, calc(env(safe-area-inset-bottom) + 104px));
+  }
   .proximity-prompt {
-    bottom: 84px;
+    bottom: 244px;
     max-width: calc(100% - 24px);
     font-size: var(--text-xs);
   }

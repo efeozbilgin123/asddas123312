@@ -2268,7 +2268,14 @@ window.addEventListener('message', (event) => {
 
 function setActiveCameraButton(camPreset) {
   els.cameraGroup?.querySelectorAll('.seg__btn').forEach((b) => {
-    b.classList.toggle('is-active', b.dataset.cam === camPreset);
+    const active = b.dataset.cam === camPreset;
+    b.classList.toggle('is-active', active);
+    // The mobile top bar is one scrolling row; keep the active mode visible.
+    if (active) {
+      requestAnimationFrame(() => {
+        if (els.cameraGroup.offsetParent !== null) b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      });
+    }
   });
 }
 
@@ -3154,18 +3161,27 @@ function renderSpectatorBar(room, game) {
   if (myAct !== 'spectator' || scene3d.cameraMode === 'freeroam' || scene3d.cameraMode === 'billiard') {
     els.spectatorBar.hidden = true;
     els.spectatorBar.innerHTML = '';
+    delete els.spectatorBar.dataset.renderKey;
     return;
   }
 
+  const watchIdx = room.watchSeatIndex ?? null;
+  const openSeat = (room.seats || []).some(
+    (s) => s.type === 'empty' || (s.type === 'human' && !s.connected) || (room.isLocal && s.type === 'bot')
+  );
+
+  // The bar is re-rendered on every state tick; rebuilding identical buttons
+  // would swallow clicks that are in flight, so only rebuild on real changes.
+  const barKey = JSON.stringify([watchIdx, openSeat, (game?.seats || []).map((seat) => seat?.name || '')]);
   els.spectatorBar.hidden = false;
+  if (els.spectatorBar.dataset.renderKey === barKey && els.spectatorBar.childElementCount > 0) return;
+  els.spectatorBar.dataset.renderKey = barKey;
   els.spectatorBar.innerHTML = '';
 
   const label = document.createElement('span');
   label.className = 'spectator-bar__label';
   label.textContent = 'Yancı Modu';
   els.spectatorBar.appendChild(label);
-
-  const watchIdx = room.watchSeatIndex ?? null;
 
   const overBtn = document.createElement('button');
   overBtn.type = 'button';
@@ -3191,9 +3207,6 @@ function renderSpectatorBar(room, game) {
     els.spectatorBar.appendChild(seatBtn);
   });
 
-  const openSeat = (room.seats || []).some(
-    (s) => s.type === 'empty' || (s.type === 'human' && !s.connected) || (room.isLocal && s.type === 'bot')
-  );
   if (openSeat) {
     const takeBtn = document.createElement('button');
     takeBtn.type = 'button';

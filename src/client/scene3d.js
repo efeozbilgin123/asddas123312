@@ -7,6 +7,7 @@ import { KAHVE_CATS, RACK_THEMES, TILE_THEMES } from '../../shared/presets.js';
 import { SIDE_TABLE_DEFS } from '../../shared/sideGames.js';
 import { isOkeyTile } from '../../shared/tiles.js';
 import { BILLIARD_WORLD_POS, BilliardTable3D } from './billiard3d.js';
+import { buildKahveCharacter } from './playerVisuals.js';
 import { SideTables3D } from './sideTables3d.js';
 import { soundFX } from './sound.js';
 import {
@@ -58,9 +59,9 @@ const CAMERA_PRESETS = {
     fov: 44
   },
   billiard: {
-    pos: new THREE.Vector3(BILLIARD_WORLD_POS.x - 8.2, 7.6, BILLIARD_WORLD_POS.z + 8.4),
+    pos: new THREE.Vector3(BILLIARD_WORLD_POS.x - 11.8, 11.2, BILLIARD_WORLD_POS.z + 12.2),
     target: new THREE.Vector3(BILLIARD_WORLD_POS.x, 0.2, BILLIARD_WORLD_POS.z),
-    fov: 50
+    fov: 52
   }
 };
 
@@ -433,6 +434,9 @@ export class OkeyTable3D {
     this.mySideSeatIndex = null;
     this.activeSideTableTarget = null;
     this.sideTablesViewerCtx = {};
+    this.hoveredSideMesh = null;
+    this.ceilingFans = [];
+    this.lobbyDisposableMats = [];
     this.billiardSeatIndex = null;
     this.billiardState = null;
     this.localPlayerId = null;
@@ -440,7 +444,7 @@ export class OkeyTable3D {
     this.billiardAimingDrag = false;
     this._lastBilliardAimEmitAt = 0;
     this.freeroamState = {
-      pos: new THREE.Vector3(0, 3.2, 32),
+      pos: new THREE.Vector3(18, 3.2, 20),
       yaw: 0,
       pitch: -0.06,
       keys: new Set(),
@@ -658,23 +662,28 @@ export class OkeyTable3D {
       const child = this.sideTablesDynamicGroup.children[0];
       this.sideTablesDynamicGroup.remove(child);
     }
+    for (const m of this.lobbyDisposableMats) {
+      m?.map?.dispose?.();
+      m?.dispose?.();
+    }
+    this.lobbyDisposableMats.length = 0;
 
     const tableCoords = [
-      { x: 18, z: -32, rotY: 0.14 },
-      { x: -18, z: -32, rotY: -0.18 },
-      { x: 35, z: 26, rotY: 0.2 },
-      { x: -37, z: 30, rotY: -0.16 }
+      { x: -53, z: -24, rotY: 0.14 },
+      { x: 89, z: -24, rotY: -0.18 },
+      { x: -53, z: 57, rotY: 0.2 },
+      { x: 89, z: 57, rotY: -0.16 }
     ];
     const seatLocalOffsets = [
-      { x: 0, z: 2.85, rotY: Math.PI },
-      { x: 2.85, z: 0, rotY: -Math.PI / 2 },
-      { x: 0, z: -2.85, rotY: 0 },
-      { x: -2.85, z: 0, rotY: Math.PI / 2 }
+      { x: 0, z: 3.1, rotY: Math.PI },
+      { x: 3.1, z: 0, rotY: -Math.PI / 2 },
+      { x: 0, z: -3.1, rotY: 0 },
+      { x: -3.1, z: 0, rotY: Math.PI / 2 }
     ];
 
     let ghostTopGeo = this._ghostTopGeo;
     if (!ghostTopGeo) {
-      ghostTopGeo = new THREE.CylinderGeometry(2.15, 2.15, 0.22, 16);
+      ghostTopGeo = new THREE.CylinderGeometry(2.35, 2.35, 0.22, 18);
       this._ghostTopGeo = ghostTopGeo;
       this.envDisposableGeoms.push(ghostTopGeo);
     }
@@ -708,39 +717,35 @@ export class OkeyTable3D {
       seats.forEach((s, sIdx) => {
         if (!s || s.type === 'empty' || !seatLocalOffsets[sIdx]) return;
         const off = seatLocalOffsets[sIdx];
-        const pGroup = new THREE.Group();
-        pGroup.position.set(off.x, -0.35, off.z);
-        pGroup.rotation.y = off.rotY;
-
-        const color = s.type === 'bot' ? '#43627D' : '#8A3B2E';
-        let bodyMat = this.colorMatCache.get(`side-${color}`);
-        if (!bodyMat) {
-          bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.72 });
-          this.colorMatCache.set(`side-${color}`, bodyMat);
-        }
-        const bust = new THREE.Mesh(this.bustGeom, bodyMat);
-        bust.scale.setScalar(0.84);
-        pGroup.add(bust);
-
-        const avatarTex = getAvatarTexture(s.avatar || `avatar-${(sIdx % 16) + 1}`, s.name || 'O');
-        let avMat = this.avatarMatCache.get(`side-av-${s.avatar || sIdx}`);
-        if (!avMat) {
-          avMat = new THREE.MeshBasicMaterial({ map: avatarTex });
-          this.avatarMatCache.set(`side-av-${s.avatar || sIdx}`, avMat);
-        }
-        const badge = new THREE.Mesh(new THREE.CircleGeometry(0.45, 16), avMat);
-        badge.position.set(0, 1.45, 0.32);
-        pGroup.add(badge);
-        tGroup.add(pGroup);
+        const actor = buildKahveCharacter({
+          bustGeom: this.bustGeom,
+          avatarMatCache: this.avatarMatCache,
+          avatar: s.avatar || `avatar-${(sIdx % 16) + 1}`,
+          name: s.name || 'Oyuncu',
+          vestColor: s.type === 'bot' ? '#43627D' : '#8A3B2E',
+          teamColor: '#C59A4B',
+          isBot: s.type === 'bot',
+          isActive: false,
+          seated: true,
+          medRadius: 0.72,
+          headY: 2.3,
+          showNameplate: false,
+          rearPfp: true,
+          disposableMats: this.lobbyDisposableMats
+        });
+        actor.group.position.set(off.x, -0.35, off.z);
+        actor.group.rotation.y = off.rotY;
+        tGroup.add(actor.group);
       });
 
       const rawTitle = (room.name || room.code || 'Masa').slice(0, 12);
       const signLabel = `${rawTitle} (${room.humanCount || 0}/4)`;
       const signTex = createNameplateTexture(signLabel, { isActive: room.status === 'playing' });
       const signMat = new THREE.SpriteMaterial({ map: signTex, transparent: true, depthWrite: false });
+      this.lobbyDisposableMats.push(signMat);
       const signSprite = new THREE.Sprite(signMat);
-      signSprite.position.set(0, 3.15, 0);
-      signSprite.scale.set(4.2, 1.05, 1);
+      signSprite.position.set(0, 3.65, 0);
+      signSprite.scale.set(4.4, 1.1, 1);
       tGroup.add(signSprite);
 
       this.sideTablesDynamicGroup.add(tGroup);
@@ -1008,34 +1013,44 @@ export class OkeyTable3D {
     const hemi = new THREE.HemisphereLight('#FFEBD2', '#2B1C13', 1.15);
     this.scene.add(hemi);
 
-    // Warm overhead pendant key lights per social zone + shadow-casting directional light
-    const pendantLight = new THREE.PointLight('#FFD18C', 56, 62, 1.2);
-    pendantLight.position.set(0, 9.8, 0.5);
+    // Balanced overhead warm lights covering all 8 bays + Ocakbasi bar
+    const pendantLight = new THREE.PointLight('#FFD18C', 48, 52, 1.2);
+    pendantLight.position.set(0, 10.5, 0);
     this.scene.add(pendantLight);
 
-    const billiardLight = new THREE.PointLight('#FFDF9E', 42, 34, 1.3);
-    billiardLight.position.set(BILLIARD_WORLD_POS.x, 7.6, BILLIARD_WORLD_POS.z);
+    const westNorthLight = new THREE.PointLight('#FFD08E', 44, 48, 1.2);
+    westNorthLight.position.set(-36, 10.5, 0);
+    this.scene.add(westNorthLight);
+
+    const eastNorthLight = new THREE.PointLight('#FFD08E', 44, 48, 1.2);
+    eastNorthLight.position.set(36, 10.5, 0);
+    this.scene.add(eastNorthLight);
+
+    const billiardLight = new THREE.PointLight('#FFDF9E', 48, 44, 1.25);
+    billiardLight.position.set(BILLIARD_WORLD_POS.x, 8.8, BILLIARD_WORLD_POS.z);
     this.scene.add(billiardLight);
 
-    const westWingLight = new THREE.PointLight('#FFD08E', 38, 44, 1.25);
-    westWingLight.position.set(-27, 9.2, 0);
-    this.scene.add(westWingLight);
+    const southWestLight = new THREE.PointLight('#FFCC88', 46, 54, 1.2);
+    southWestLight.position.set(-18, 10.5, 38);
+    this.scene.add(southWestLight);
 
-    const southLoungeLight = new THREE.PointLight('#FFCC88', 34, 42, 1.25);
-    southLoungeLight.position.set(0, 9.2, 25);
-    this.scene.add(southLoungeLight);
+    const southEastLight = new THREE.PointLight('#FFCC88', 46, 54, 1.2);
+    southEastLight.position.set(54, 10.5, 38);
+    this.scene.add(southEastLight);
 
-    const barLight = new THREE.PointLight('#FFE0A8', 26, 28, 1.3);
-    barLight.position.set(0, 7.2, -33);
+    const barLight = new THREE.PointLight('#FFE0A8', 34, 36, 1.25);
+    barLight.position.set(18, 7.6, -33);
     this.scene.add(barLight);
 
     const keyLight = new THREE.DirectionalLight('#FFF0D4', 1.28);
-    keyLight.position.set(8, 22, 12);
+    keyLight.position.set(18, 28, 14);
+    keyLight.target.position.set(18, 0, 14);
+    this.scene.add(keyLight.target);
     keyLight.castShadow = true;
-    keyLight.shadow.mapSize.set(1024, 1024);
+    keyLight.shadow.mapSize.set(2048, 2048);
     keyLight.shadow.camera.near = 2;
-    keyLight.shadow.camera.far = 72;
-    const d = 34;
+    keyLight.shadow.camera.far = 96;
+    const d = 88;
     keyLight.shadow.camera.left = -d;
     keyLight.shadow.camera.right = d;
     keyLight.shadow.camera.top = d;
@@ -1044,15 +1059,17 @@ export class OkeyTable3D {
     this.scene.add(keyLight);
 
     const rimLight = new THREE.DirectionalLight('#CBD8FF', 0.35);
-    rimLight.position.set(-18, 12, -20);
+    rimLight.position.set(-40, 14, -30);
     this.scene.add(rimLight);
 
     this.envLights = {
       hemi,
       pendantLight,
+      westNorthLight,
+      eastNorthLight,
       billiardLight,
-      westWingLight,
-      southLoungeLight,
+      southWestLight,
+      southEastLight,
       barLight,
       keyLight,
       rimLight
@@ -1060,15 +1077,19 @@ export class OkeyTable3D {
 
     const staticEnvGroup = new THREE.Group();
 
-    const roomHalfX = 48;
-    const roomHalfZ = 42;
-    const roomW = roomHalfX * 2;
-    const roomD = roomHalfZ * 2;
+    const roomMinX = -64;
+    const roomMaxX = 100;
+    const roomMinZ = -42;
+    const roomMaxZ = 70;
+    const roomW = roomMaxX - roomMinX; // 164
+    const roomD = roomMaxZ - roomMinZ; // 112
+    const centerX = (roomMinX + roomMaxX) / 2; // 18
+    const centerZ = (roomMinZ + roomMaxZ) / 2; // 14
 
-    // Walnut parquet floor (96 x 84) + ornate central rug
+    // Walnut parquet floor (164 x 112)
     const parquetTex = getParquetTexture().clone();
     parquetTex.needsUpdate = true;
-    parquetTex.repeat.set(16, 14);
+    parquetTex.repeat.set(28, 19);
     const floorMat = new THREE.MeshStandardMaterial({
       map: parquetTex,
       roughness: 0.62,
@@ -1076,27 +1097,50 @@ export class OkeyTable3D {
     });
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(roomW, roomD), floorMat);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.y = -2.35;
+    floor.position.set(centerX, -2.35, centerZ);
     floor.receiveShadow = true;
     this.scene.add(floor);
 
+    // Equal ornate 22x22 Turkish rugs beneath ALL 8 Grand Salon table bays + Promenade Carpet Runner
     const rugOuterMat = new THREE.MeshStandardMaterial({ color: '#612119', roughness: 0.92, metalness: 0.02 });
-    const rugOuter = new THREE.Mesh(new THREE.BoxGeometry(21.5, 0.04, 21.5), rugOuterMat);
-    rugOuter.position.y = -2.33;
-    rugOuter.receiveShadow = true;
-    this.scene.add(rugOuter);
-
     const rugBorderMat = new THREE.MeshStandardMaterial({ color: '#8F642B', roughness: 0.88, metalness: 0.04 });
-    const rugBorder = new THREE.Mesh(new THREE.BoxGeometry(18.8, 0.045, 18.8), rugBorderMat);
-    rugBorder.position.y = -2.326;
-    staticEnvGroup.add(rugBorder);
-
     const rugInnerMat = new THREE.MeshStandardMaterial({ color: '#4E1A15', roughness: 0.92, metalness: 0.02 });
-    const rugInner = new THREE.Mesh(new THREE.BoxGeometry(17.6, 0.05, 17.6), rugInnerMat);
-    rugInner.position.y = -2.322;
-    staticEnvGroup.add(rugInner);
+    const rugOuterGeo = new THREE.BoxGeometry(22.2, 0.04, 22.2);
+    const rugBorderGeo = new THREE.BoxGeometry(19.6, 0.045, 19.6);
+    const rugInnerGeo = new THREE.BoxGeometry(18.2, 0.05, 18.2);
+    this.envDisposableGeoms.push(rugOuterGeo, rugBorderGeo, rugInnerGeo);
 
-    // Pedestal table leg under main center okey table
+    const salonBayCoords = [
+      [-36, 0], [0, 0], [36, 0], [72, 0],
+      [-36, 38], [0, 38], [36, 38], [72, 38]
+    ];
+    for (const [rx, rz] of salonBayCoords) {
+      const rugOuter = new THREE.Mesh(rugOuterGeo, rugOuterMat);
+      rugOuter.position.set(rx, -2.33, rz);
+      rugOuter.receiveShadow = true;
+      this.scene.add(rugOuter);
+
+      const rugBorder = new THREE.Mesh(rugBorderGeo, rugBorderMat);
+      rugBorder.position.set(rx, -2.326, rz);
+      staticEnvGroup.add(rugBorder);
+
+      const rugInner = new THREE.Mesh(rugInnerGeo, rugInnerMat);
+      rugInner.position.set(rx, -2.322, rz);
+      staticEnvGroup.add(rugInner);
+    }
+
+    // Grand Central Promenade Carpet Runner (z = 19, connecting all 8 bays West-to-East)
+    const runnerOuter = new THREE.Mesh(new THREE.BoxGeometry(128, 0.042, 6.8), rugOuterMat);
+    runnerOuter.position.set(centerX, -2.329, 19);
+    staticEnvGroup.add(runnerOuter);
+    const runnerBorder = new THREE.Mesh(new THREE.BoxGeometry(126, 0.046, 5.6), rugBorderMat);
+    runnerBorder.position.set(centerX, -2.325, 19);
+    staticEnvGroup.add(runnerBorder);
+    const runnerInner = new THREE.Mesh(new THREE.BoxGeometry(124.5, 0.05, 4.8), rugInnerMat);
+    runnerInner.position.set(centerX, -2.321, 19);
+    staticEnvGroup.add(runnerInner);
+
+    // Pedestal table leg under center Okey table (0, 0)
     const legMat = new THREE.MeshStandardMaterial({
       map: getWoodTexture(),
       color: '#633D26',
@@ -1131,10 +1175,10 @@ export class OkeyTable3D {
     const sconceMat = new THREE.MeshBasicMaterial({ color: '#FFD88A' });
 
     const wallSpecs = [
-      { pos: [0, 6.825, -roomHalfZ], rotY: 0, span: roomW, idx: 0 },
-      { pos: [0, 6.825, roomHalfZ], rotY: Math.PI, span: roomW, idx: 1 },
-      { pos: [-roomHalfX, 6.825, 0], rotY: Math.PI / 2, span: roomD, idx: 2 },
-      { pos: [roomHalfX, 6.825, 0], rotY: -Math.PI / 2, span: roomD, idx: 3 }
+      { pos: [centerX, 6.825, roomMinZ], rotY: 0, span: roomW, idx: 0 },
+      { pos: [centerX, 6.825, roomMaxZ], rotY: Math.PI, span: roomW, idx: 1 },
+      { pos: [roomMinX, 6.825, centerZ], rotY: Math.PI / 2, span: roomD, idx: 2 },
+      { pos: [roomMaxX, 6.825, centerZ], rotY: -Math.PI / 2, span: roomD, idx: 3 }
     ];
 
     wallSpecs.forEach((ws) => {
@@ -1153,17 +1197,19 @@ export class OkeyTable3D {
       rail.position.set(0, -3.55, 0.2);
       wallGroup.add(rail);
 
-      const pilasterXs = ws.idx < 2 ? [-36, -24, -12, 12, 24, 36] : [-30, -18, -6, 6, 18, 30];
+      const pilasterXs = ws.idx < 2
+        ? [-72, -54, -36, -18, 18, 36, 54, 72]
+        : [-42, -26, -10, 10, 26, 42];
       for (const px of pilasterXs) {
         const pilaster = new THREE.Mesh(new THREE.BoxGeometry(0.7, 18.0, 0.4), wainscotMat);
         pilaster.position.set(px, 0, 0.18);
         wallGroup.add(pilaster);
       }
 
-      const framePositions = ws.idx < 2 ? [-30, -16, 0, 16, 30] : [-12, 12];
+      const framePositions = ws.idx < 2 ? [-62, -42, -22, 0, 22, 42, 62] : [-17, 17];
       framePositions.forEach((px, pIdx) => {
         if (ws.idx === 0 && px === 0) return;
-        if (ws.idx === 0 && px === 16) {
+        if (ws.idx === 0 && px === 22) {
           const mFrame = new THREE.Mesh(new THREE.BoxGeometry(4.8, 5.8, 0.2), wainscotMat);
           mFrame.position.set(px, 1.45, 0.12);
           wallGroup.add(mFrame);
@@ -1182,7 +1228,9 @@ export class OkeyTable3D {
         wallGroup.add(art);
       });
 
-      const sconceXs = ws.idx < 2 ? [-36, -12, 12, 36] : [-30, -6, 6, 30];
+      const sconceXs = ws.idx < 2
+        ? [-72, -54, -36, -18, 18, 36, 54, 72]
+        : [-42, -26, -10, 10, 26, 42];
       sconceXs.forEach((sx) => {
         const sconce = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 6), sconceMat);
         sconce.position.set(sx, 2.5, 0.45);
@@ -1194,7 +1242,7 @@ export class OkeyTable3D {
 
     // Ticking Round Wall Clock on North back wall (left of TV)
     const clockGroup = new THREE.Group();
-    clockGroup.position.set(-14.5, 11.4, -roomHalfZ + 0.24);
+    clockGroup.position.set(centerX - 14.5, 11.4, roomMinZ + 0.24);
     const clockCase = new THREE.Mesh(
       new THREE.CylinderGeometry(1.3, 1.38, 0.26, 20),
       wainscotMat
@@ -1206,10 +1254,10 @@ export class OkeyTable3D {
     clockGroup.add(clockFace);
     this.scene.add(clockGroup);
 
-    // Large centered Kahvehane TV on North back wall (clickable)
+    // Large centered Kahvehane TV on North back wall (centered above Ocakbasi bar)
     this.tvUpdater = createTvScreenTexture();
     const tvGroup = new THREE.Group();
-    tvGroup.position.set(0, 10.2, -roomHalfZ + 0.32);
+    tvGroup.position.set(centerX, 10.2, roomMinZ + 0.32);
     const tvChassisMat = new THREE.MeshStandardMaterial({ color: '#181412', roughness: 0.5, metalness: 0.2 });
     const tvBezel = new THREE.Mesh(new THREE.BoxGeometry(19.0, 10.9, 0.28), tvChassisMat);
     tvGroup.add(tvBezel);
@@ -1243,9 +1291,9 @@ export class OkeyTable3D {
     );
     this.scene.add(tvGroup);
 
-    this.tvWallWorldZ = -roomHalfZ + 0.48;
+    this.tvWallWorldZ = roomMinZ + 0.48;
     if (this.tvWallCssObj) {
-      this.tvWallCssObj.position.set(0, 10.2, this.tvWallWorldZ);
+      this.tvWallCssObj.position.set(centerX, 10.2, this.tvWallWorldZ);
       this.tvWallCssObj.scale.set(18.4 / this.tvWallWidthPx, 10.35 / this.tvWallHeightPx, 1);
       this.css3dScene.add(this.tvWallCssObj);
     }
@@ -1262,9 +1310,10 @@ export class OkeyTable3D {
     let rainIdx = 0;
 
     [-1, 1].forEach((side) => {
-      [-24, 0, 24].forEach((wz) => {
+      const wallX = side < 0 ? roomMinX : roomMaxX;
+      [-20, 14, 48].forEach((wz) => {
         const winGroup = new THREE.Group();
-        winGroup.position.set(side * (roomHalfX - 0.18), 2.4, wz);
+        winGroup.position.set(wallX - side * 0.18, 2.4, wz);
         winGroup.rotation.y = side === -1 ? Math.PI / 2 : -Math.PI / 2;
 
         const pane = new THREE.Mesh(new THREE.PlaneGeometry(4.8, 6.2), windowMat);
@@ -1294,7 +1343,7 @@ export class OkeyTable3D {
         for (let r = 0; r < 10; r += 1) {
           const localX = ((r * 37) % 44) / 10 - 2.2;
           const baseY = ((r * 19) % 52) / 10 - 2.6;
-          const dx = side * (roomHalfX - 0.32);
+          const dx = wallX - side * 0.32;
           const dy = 2.4 + baseY;
           const dz = wz + (side === -1 ? -localX : localX);
           this._rainDummyMatrix.makeTranslation(dx, dy, dz);
@@ -1312,7 +1361,7 @@ export class OkeyTable3D {
 
     // Cozy Kuzine / Fireplace in Back-Left Corner
     const hearthGroup = new THREE.Group();
-    hearthGroup.position.set(-41.5, -2.35, -35.5);
+    hearthGroup.position.set(-57.5, -2.35, -35.5);
     hearthGroup.rotation.y = Math.PI / 4;
     const stoveMat = new THREE.MeshStandardMaterial({ color: '#1B1918', roughness: 0.55, metalness: 0.4 });
     const stoveBody = new THREE.Mesh(new THREE.BoxGeometry(2.4, 3.1, 1.6), stoveMat);
@@ -1336,22 +1385,22 @@ export class OkeyTable3D {
     this.envDisposableMats.push(stoveMat, emberMat);
     this.scene.add(hearthGroup);
 
-    // Ceiling (y = 16.0) & Exposed Timber Beams
+    // Ceiling (y = 16.0) & Exposed Timber Beams spanning full 164m salon
     const ceilingMat = new THREE.MeshStandardMaterial({ color: '#1F130D', roughness: 0.9 });
     const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(roomW + 2, roomD + 2), ceilingMat);
     ceiling.rotation.x = Math.PI / 2;
-    ceiling.position.y = 16.0;
+    ceiling.position.set(centerX, 16.0, centerZ);
     staticEnvGroup.add(ceiling);
 
-    [-32, -20, -8, 4, 16, 28, 38].forEach((bz) => {
+    [-32, -20, -8, 4, 16, 28, 40, 52, 62].forEach((bz) => {
       const beam = new THREE.Mesh(new THREE.BoxGeometry(roomW, 0.65, 0.78), wainscotMat);
-      beam.position.set(0, 15.65, bz);
+      beam.position.set(centerX, 15.65, bz);
       staticEnvGroup.add(beam);
     });
 
-    // Kahvehane Ocakbasi (Tea Counter at z = -37.2)
+    // Kahvehane Ocakbasi (Tea Counter centered along North Wall at x = 18, z = -37.2)
     const barGroup = new THREE.Group();
-    barGroup.position.set(0, -2.35, -37.2);
+    barGroup.position.set(centerX, -2.35, -37.2);
     const counter = new THREE.Mesh(new THREE.BoxGeometry(14.0, 2.75, 2.6), wainscotMat);
     counter.position.y = 1.38;
     barGroup.add(counter);
@@ -1397,11 +1446,11 @@ export class OkeyTable3D {
     }
     staticEnvGroup.add(barGroup);
 
-    // 2 Decorative Lounge Sofas along East Lounge Wall (clear of billiard & tables)
+    // 2 Decorative Velvet Lounge Sofas along West & East Promenade ends
     const sofaVelvetMat = new THREE.MeshStandardMaterial({ color: '#5F2323', roughness: 0.84 });
     [
-      { x: 43.0, z: -13.5, rotY: -Math.PI / 2 },
-      { x: 43.0, z: 12.5, rotY: -Math.PI / 2 }
+      { x: -58.5, z: 19.0, rotY: Math.PI / 2 },
+      { x: 94.5, z: 19.0, rotY: -Math.PI / 2 }
     ].forEach((sf) => {
       const sofa = new THREE.Group();
       sofa.position.set(sf.x, -2.35, sf.z);
@@ -1436,19 +1485,62 @@ export class OkeyTable3D {
       trunkMat: new THREE.MeshStandardMaterial({ color: '#4A3122', roughness: 0.86 }),
       leafMat: new THREE.MeshStandardMaterial({ color: '#295732', roughness: 0.74 })
     };
-    this.buildPottedPlant(-44.8, -38.5, 1.25, staticEnvGroup, plantShared);
-    this.buildPottedPlant(44.8, -38.5, 1.25, staticEnvGroup, plantShared);
-    this.buildPottedPlant(-44.8, 38.5, 1.2, staticEnvGroup, plantShared);
-    this.buildPottedPlant(44.8, 38.5, 1.2, staticEnvGroup, plantShared);
-    this.buildPottedPlant(-10.5, -38.5, 1.0, staticEnvGroup, plantShared);
-    this.buildPottedPlant(10.5, -38.5, 1.0, staticEnvGroup, plantShared);
+    this.buildPottedPlant(-60.8, -38.5, 1.25, staticEnvGroup, plantShared);
+    this.buildPottedPlant(96.8, -38.5, 1.25, staticEnvGroup, plantShared);
+    this.buildPottedPlant(-60.8, 66.5, 1.2, staticEnvGroup, plantShared);
+    this.buildPottedPlant(96.8, 66.5, 1.2, staticEnvGroup, plantShared);
+    this.buildPottedPlant(7.5, -38.5, 1.0, staticEnvGroup, plantShared);
+    this.buildPottedPlant(28.5, -38.5, 1.0, staticEnvGroup, plantShared);
 
-    // Center Brass Mosaic Pendant Lamp over Okey Table
+    // Equal Mosaic Brass Chandeliers over ALL table bays (except Billiards which has its 3-shade Tiffany fixture) + Promenade
     const lampShared = {
       brassMat: trimBrassMat,
       globeMat: new THREE.MeshBasicMaterial({ color: '#FFE6A8' })
     };
     this.buildPendantLamp(0, 10.8, 0, 1.32, false, staticEnvGroup, lampShared);
+    this.buildPendantLamp(-36, 10.8, 0, 1.26, false, staticEnvGroup, lampShared);
+    this.buildPendantLamp(36, 10.8, 0, 1.26, false, staticEnvGroup, lampShared);
+    this.buildPendantLamp(-36, 10.8, 38, 1.26, false, staticEnvGroup, lampShared);
+    this.buildPendantLamp(0, 10.8, 38, 1.26, false, staticEnvGroup, lampShared);
+    this.buildPendantLamp(36, 10.8, 38, 1.26, false, staticEnvGroup, lampShared);
+    this.buildPendantLamp(72, 10.8, 38, 1.26, false, staticEnvGroup, lampShared);
+    this.buildPendantLamp(centerX, 11.2, 19, 1.34, false, staticEnvGroup, lampShared);
+    this.buildPendantLamp(centerX, 10.6, -24, 1.18, false, staticEnvGroup, lampShared);
+
+    // 2 Animated Spinning Vintage Brass & Walnut Ceiling Fans along the Promenade
+    this.ceilingFans = [];
+    const fanShaftGeo = new THREE.CylinderGeometry(0.11, 0.14, 1.1, 10);
+    const fanMotorGeo = new THREE.CylinderGeometry(0.48, 0.44, 0.36, 14);
+    const fanBladeGeo = new THREE.BoxGeometry(2.6, 0.04, 0.42);
+    this.envDisposableGeoms.push(fanShaftGeo, fanMotorGeo, fanBladeGeo);
+
+    for (const fx of [-18, 54]) {
+      const fanRoot = new THREE.Group();
+      fanRoot.position.set(fx, 15.85, 19);
+
+      const shaft = new THREE.Mesh(fanShaftGeo, trimBrassMat);
+      shaft.position.y = -0.55;
+      fanRoot.add(shaft);
+
+      const spinner = new THREE.Group();
+      spinner.position.y = -1.12;
+      const motor = new THREE.Mesh(fanMotorGeo, trimBrassMat);
+      spinner.add(motor);
+
+      for (let b = 0; b < 4; b += 1) {
+        const bladeHolder = new THREE.Group();
+        bladeHolder.rotation.y = (b * Math.PI) / 2;
+        const blade = new THREE.Mesh(fanBladeGeo, wainscotMat);
+        blade.position.set(1.55, -0.02, 0);
+        blade.rotation.x = 0.14;
+        bladeHolder.add(blade);
+        spinner.add(bladeHolder);
+      }
+
+      fanRoot.add(spinner);
+      this.scene.add(fanRoot);
+      this.ceilingFans.push(spinner);
+    }
 
     this.envDisposableMats.push(
       ceilingMat,
@@ -3527,10 +3619,16 @@ export class OkeyTable3D {
     );
     const activeKeys = new Set(list.map((r) => r.key));
 
-    // Remove departed roamers
-    for (const [key, actor] of this.roamerActors.entries()) {
+    // Remove departed roamers and clean up their materials
+    for (const [key, entry] of this.roamerActors.entries()) {
       if (!activeKeys.has(key)) {
-        this.roamerGroup.remove(actor.group);
+        this.roamerGroup.remove(entry.group);
+        if (Array.isArray(entry.disposableMats)) {
+          for (const m of entry.disposableMats) {
+            m?.map?.dispose?.();
+            m?.dispose?.();
+          }
+        }
         const npMat = this.roamerNameMats.get(key);
         if (npMat) {
           npMat.map?.dispose();
@@ -3542,52 +3640,49 @@ export class OkeyTable3D {
     }
 
     for (const r of list) {
-      let actor = this.roamerActors.get(r.key);
-      if (!actor) {
-        const group = new THREE.Group();
-        group.position.set(Number(r.x) || 0, -0.35, Number(r.z) || 0);
-        group.rotation.y = (Number(r.yaw) || 0) + Math.PI;
-
-        let vestMat = this.colorMatCache.get('roamer-vest');
-        if (!vestMat) {
-          vestMat = new THREE.MeshStandardMaterial({ color: '#395C58', roughness: 0.72 });
-          this.colorMatCache.set('roamer-vest', vestMat);
-        }
-        const bust = new THREE.Mesh(this.bustGeom, vestMat);
-        bust.scale.setScalar(0.88);
-        group.add(bust);
-
-        const avKey = `roam-av-${r.avatar || 'avatar-1'}`;
-        let avMat = this.avatarMatCache.get(avKey);
-        if (!avMat) {
-          avMat = new THREE.MeshBasicMaterial({ map: getAvatarTexture(r.avatar || 'avatar-1', r.name || 'G') });
-          this.avatarMatCache.set(avKey, avMat);
-        }
-        const badge = new THREE.Mesh(new THREE.CircleGeometry(0.45, 16), avMat);
-        badge.position.set(0, 1.48, 0.34);
-        group.add(badge);
-
-        const npMat = new THREE.SpriteMaterial({
-          map: createNameplateTexture(`${r.name || 'Gezgin'}`, { isActive: false }),
-          transparent: true,
-          depthWrite: false
+      let entry = this.roamerActors.get(r.key);
+      if (!entry) {
+        const disposableMats = [];
+        const charActor = buildKahveCharacter({
+          bustGeom: this.bustGeom,
+          avatarMatCache: this.avatarMatCache,
+          avatar: r.avatar || 'avatar-1',
+          name: r.name || 'Gezgin',
+          vestColor: '#395C58',
+          teamColor: '#C59A4B',
+          isBot: false,
+          isActive: false,
+          seated: false,
+          medRadius: 0.92,
+          headY: 2.65,
+          showNameplate: true,
+          nameplateY: 4.18,
+          rearPfp: true,
+          disposableMats
         });
-        this.roamerNameMats.set(r.key, npMat);
-        const np = new THREE.Sprite(npMat);
-        np.position.set(0, 2.55, 0);
-        np.scale.set(3.0, 0.75, 1);
-        group.add(np);
 
-        this.roamerGroup.add(group);
-        actor = {
-          group,
-          targetPos: new THREE.Vector3(Number(r.x) || 0, -0.35, Number(r.z) || 0),
-          targetYaw: (Number(r.yaw) || 0) + Math.PI
+        const rx = Number(r.x) || 0;
+        const rz = Number(r.z) || 0;
+        charActor.group.position.set(rx, -0.39, rz);
+        charActor.group.rotation.y = (Number(r.yaw) || 0) + Math.PI;
+        if (charActor.nameplateMat) {
+          this.roamerNameMats.set(r.key, charActor.nameplateMat);
+        }
+
+        this.roamerGroup.add(charActor.group);
+        entry = {
+          group: charActor.group,
+          actor: charActor,
+          disposableMats,
+          targetPos: new THREE.Vector3(rx, -0.39, rz),
+          targetYaw: (Number(r.yaw) || 0) + Math.PI,
+          walkPhase: Math.random() * Math.PI * 2,
+          prevPos: new THREE.Vector3(rx, -0.39, rz)
         };
-        this.roamerActors.set(r.key, actor);
+        this.roamerActors.set(r.key, entry);
       } else {
-        actor.targetPos.set(Number(r.x) || 0, -0.35, Number(r.z) || 0);
-        actor.targetYaw = (Number(r.yaw) || 0) + Math.PI;
+        entry.targetPos.set(Number(r.x) || 0, -0.39, Number(r.z) || 0);
+        entry.targetYaw = (Number(r.yaw) || 0) + Math.PI;
       }
     }
   }
@@ -4144,7 +4239,9 @@ export class OkeyTable3D {
       }
       const hits = this.raycaster.intersectObjects(this._hoverTargets, false);
       if (hits.length > 0) {
-        const hitKind = hits[0].object?.userData?.kind;
+        const hitObj = hits[0].object;
+        const hitKind = hitObj?.userData?.kind;
+        this.hoveredSideMesh = (hitKind === 'sideAction' || hitKind === 'sideSetup') ? hitObj : null;
         if (hitKind === 'billiardFelt') {
           this.canvas.style.cursor = this.isMyBilliardTurn()
             ? 'crosshair'
@@ -4153,6 +4250,7 @@ export class OkeyTable3D {
           this.canvas.style.cursor = 'pointer';
         }
       } else {
+        this.hoveredSideMesh = null;
         this.canvas.style.cursor = this.cameraMode === 'freeroam'
           ? (this.isPointerLocked ? 'none' : 'grab')
           : 'default';
@@ -5022,21 +5120,51 @@ export class OkeyTable3D {
       }
     }
 
-    // Tick 3D Billiard Table animations & cue stick
+    // Tick 3D Billiard Table, Side Card Tables & Spinning Salon Ceiling Fans
     this.billiard3d?.tick(dt, {
       isMyBilliardTurn: this.isMyBilliardTurn(),
       localPlayerId: this.localPlayerId
     });
+    this.sideTables3d?.tick(dt, this.hoveredSideMesh);
+    if (!this.reducedMotion && this.ceilingFans?.length > 0) {
+      for (const fan of this.ceilingFans) {
+        fan.rotation.y += dt * 1.45;
+      }
+    }
 
-    // Smoothly interpolate live roaming spectator avatars
+    // Smoothly interpolate live roaming avatars + natural walking arm/leg stride
     if (this.roamerActors.size > 0) {
       const rDamp = this.reducedMotion ? 1 : Math.min(1, dt * 10);
-      for (const actor of this.roamerActors.values()) {
-        actor.group.position.lerp(actor.targetPos, rDamp);
-        let diff = actor.targetYaw - actor.group.rotation.y;
+      for (const entry of this.roamerActors.values()) {
+        entry.group.position.lerp(entry.targetPos, rDamp);
+        let diff = entry.targetYaw - entry.group.rotation.y;
         while (diff > Math.PI) diff -= Math.PI * 2;
         while (diff < -Math.PI) diff += Math.PI * 2;
-        actor.group.rotation.y += diff * rDamp;
+        entry.group.rotation.y += diff * rDamp;
+
+        const stepDist = entry.prevPos ? entry.group.position.distanceTo(entry.prevPos) : 0;
+        const speed = dt > 0.001 ? stepDist / dt : 0;
+        if (entry.prevPos) entry.prevPos.copy(entry.group.position);
+
+        const a = entry.actor;
+        if (a) {
+          if (!this.reducedMotion && speed > 0.12) {
+            entry.walkPhase = (entry.walkPhase || 0) + dt * Math.min(12, 4.5 + speed * 0.9);
+            const swing = Math.sin(entry.walkPhase) * 0.48;
+            if (a.leftLegPivot) a.leftLegPivot.rotation.x = swing;
+            if (a.rightLegPivot) a.rightLegPivot.rotation.x = -swing;
+            if (a.leftArmPivot) a.leftArmPivot.rotation.x = -0.14 - swing * 0.65;
+            if (a.rightArmPivot) a.rightArmPivot.rotation.x = -0.14 + swing * 0.65;
+            if (a.bodyGroup) a.bodyGroup.position.y = Math.abs(Math.cos(entry.walkPhase)) * 0.055;
+          } else {
+            const reset = Math.min(1, dt * 8);
+            if (a.leftLegPivot) a.leftLegPivot.rotation.x *= 1 - reset;
+            if (a.rightLegPivot) a.rightLegPivot.rotation.x *= 1 - reset;
+            if (a.leftArmPivot) a.leftArmPivot.rotation.x += (-0.14 - a.leftArmPivot.rotation.x) * reset;
+            if (a.rightArmPivot) a.rightArmPivot.rotation.x += (-0.14 - a.rightArmPivot.rotation.x) * reset;
+            if (a.bodyGroup) a.bodyGroup.position.y *= 1 - reset;
+          }
+        }
       }
     }
 
@@ -5233,9 +5361,14 @@ export class OkeyTable3D {
       this.tableFeltMat,
       ...this.sideFeltMats,
       ...this.confettiMats,
-      ...this.envDisposableMats
+      ...this.envDisposableMats,
+      ...this.lobbyDisposableMats
     ];
-    for (const m of staticMats) m?.dispose();
+    for (const m of staticMats) {
+      m?.map?.dispose?.();
+      m?.dispose?.();
+    }
+    this.lobbyDisposableMats.length = 0;
 
     this.clockUpdater?.texture?.dispose();
     this.tvUpdater?.texture?.dispose();
@@ -5246,6 +5379,14 @@ export class OkeyTable3D {
     }
     this.speechBubbles.clear();
 
+    for (const entry of this.roamerActors.values()) {
+      if (Array.isArray(entry.disposableMats)) {
+        for (const m of entry.disposableMats) {
+          m?.map?.dispose?.();
+          m?.dispose?.();
+        }
+      }
+    }
     for (const mat of this.roamerNameMats.values()) {
       mat?.map?.dispose();
       mat?.dispose();

@@ -485,8 +485,8 @@ export class RoomManager {
         avatar: hostAvatar,
         activity: 'spectator',
         active: true,
-        x: 0,
-        z: 32,
+        x: 18,
+        z: 19,
         yaw: 0,
         updatedAt: Date.now()
       });
@@ -741,8 +741,8 @@ export class RoomManager {
       avatar: normalizeAvatar(playerAvatar, room.spectators.size),
       activity: 'spectator',
       active: true,
-      x: 0,
-      z: 32,
+      x: 18,
+      z: 19,
       yaw: 0,
       updatedAt: Date.now()
     });
@@ -815,22 +815,22 @@ export class RoomManager {
       room.spectators = new Map();
     }
 
-    let startPos = { x: 0, z: 10.5, yaw: 0 };
+    let startPos = { x: 0, z: 12.2, yaw: 0 };
     if (participant.seat) {
       this.vacateOkeySeatForSwitch(room, participant.seat, { putBot: true });
     }
     if (participant.billiardSeat && room.billiard) {
       room.billiard.standHuman(playerId, { convertToBotIfActive: true });
-      startPos = { x: 21.5, z: -2.0, yaw: -Math.PI / 2 };
+      startPos = { x: 60.5, z: 0, yaw: -Math.PI / 2 };
     }
     if (participant.sideTable) {
       const tbl = participant.sideTable;
       tbl.standHuman(playerId, { convertToBotIfActive: true });
-      const offsetZ = tbl.z > 0 ? -7.6 : 7.6;
+      const offsetZ = tbl.z > 15 ? -13.2 : 13.2;
       startPos = {
         x: Math.round(tbl.x * 100) / 100,
         z: Math.round((tbl.z + offsetZ) * 100) / 100,
-        yaw: tbl.z > 0 ? 0 : Math.PI
+        yaw: tbl.z > 15 ? 0 : Math.PI
       };
     }
 
@@ -1201,8 +1201,8 @@ export class RoomManager {
       return { ok: true };
     }
 
-    const clampedX = Math.max(-45.5, Math.min(45.5, Number(x) || 0));
-    const clampedZ = Math.max(-39.5, Math.min(39.5, Number(z) || 0));
+    const clampedX = Math.max(-61.5, Math.min(97.5, Number(x) || 0));
+    const clampedZ = Math.max(-39.5, Math.min(67.5, Number(z) || 0));
     const cleanYaw = Number.isFinite(Number(yaw)) ? Number(yaw) : 0;
     const key = this.ensureRoamerKey(room, playerId);
 

@@ -967,7 +967,7 @@ test('SideTableSession supports Pişti, Papaz Kaçtı, Poker, Batak, and Chat ha
   assert.equal(chat.startMatch().ok, false);
 });
 
-test('RoomManager & LocalSingleplayerClient run Okey, Billiards, and Side Tables simultaneously with 96x84 roam bounds', async (ctx) => {
+test('RoomManager & LocalSingleplayerClient run Okey, Billiards, and Side Tables simultaneously with 164x112 Grand Salon roam bounds', async (ctx) => {
   const io = createMockIo();
   const rm = new RoomManager(io);
 
@@ -979,11 +979,20 @@ test('RoomManager & LocalSingleplayerClient run Okey, Billiards, and Side Tables
   assert.equal(rm.joinRoom({ roomCode: code, playerId: 'b1', playerName: 'Bilardocu', activity: 'billiard' }).ok, true);
   assert.equal(rm.joinRoom({ roomCode: code, playerId: 's1', playerName: 'PiştiSever', activity: 'spectator' }).ok, true);
 
-  // Expanded hall roam bounds up to +-45.5 x +-39.5
-  const roamOk = rm.roamMove({ roomCode: code, playerId: 's1', x: 42.2, z: -34.6, yaw: 1.2, active: true });
+  // Expanded Grand Salon roam bounds: x in [-61.5..97.5], z in [-39.5..67.5]
+  const roamOk = rm.roamMove({ roomCode: code, playerId: 's1', x: 88.5, z: 58.0, yaw: 1.2, active: true });
   assert.equal(roamOk.ok, true);
-  assert.equal(created.room.roamStates.get('s1').x, 42.2);
-  assert.equal(created.room.roamStates.get('s1').z, -34.6);
+  assert.equal(created.room.roamStates.get('s1').x, 88.5);
+  assert.equal(created.room.roamStates.get('s1').z, 58.0);
+
+  const roamWest = rm.roamMove({ roomCode: code, playerId: 's1', x: -55.0, z: -34.0, yaw: 0.4, active: true });
+  assert.equal(roamWest.ok, true);
+  assert.equal(created.room.roamStates.get('s1').x, -55.0);
+  assert.equal(created.room.roamStates.get('s1').z, -34.0);
+
+  rm.roamMove({ roomCode: code, playerId: 's1', x: 999, z: -999, yaw: 0, active: true });
+  assert.equal(created.room.roamStates.get('s1').x, 97.5);
+  assert.equal(created.room.roamStates.get('s1').z, -39.5);
 
   // Join side table 'pisti', start with bot, play card, then stand up
   assert.equal(rm.sideTableJoin({ roomCode: code, playerId: 's1', tableId: 'pisti' }).ok, true);
@@ -1108,13 +1117,13 @@ test('SideTableSession papazkacti exposes drawTargetSeatIndex and enlarged SIDE_
   for (let i = 0; i < SIDE_TABLE_DEFS.length; i += 1) {
     const a = SIDE_TABLE_DEFS[i];
     const distOkey = Math.hypot(a.x, a.z);
-    assert.ok(distOkey >= 26.0, `Side table ${a.id} too close to Okey (${distOkey.toFixed(2)})`);
-    const distBilliard = Math.hypot(a.x - 28, a.z);
-    assert.ok(distBilliard >= 20.0, `Side table ${a.id} too close to Billiards (${distBilliard.toFixed(2)})`);
+    assert.ok(distOkey >= 32.0, `Side table ${a.id} too close to Okey (${distOkey.toFixed(2)})`);
+    const distBilliard = Math.hypot(a.x - 72, a.z);
+    assert.ok(distBilliard >= 32.0, `Side table ${a.id} too close to Billiards (${distBilliard.toFixed(2)})`);
     for (let j = i + 1; j < SIDE_TABLE_DEFS.length; j += 1) {
       const b = SIDE_TABLE_DEFS[j];
       const distPair = Math.hypot(a.x - b.x, a.z - b.z);
-      assert.ok(distPair >= 18.0, `Side tables ${a.id} & ${b.id} overlap (${distPair.toFixed(2)})`);
+      assert.ok(distPair >= 32.0, `Side tables ${a.id} & ${b.id} overlap (${distPair.toFixed(2)})`);
     }
   }
 });

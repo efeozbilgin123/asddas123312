@@ -54,7 +54,31 @@ export function getKahveBackdropTexture() {
   return tex;
 }
 
-export function getAvatarTexture(avatarId = 'avatar-1') {
+function createAvatarFallbackCanvas(label = 'O') {
+  const ch = String(label || 'O').trim().charAt(0).toUpperCase() || 'O';
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createRadialGradient(128, 100, 12, 128, 128, 140);
+  grad.addColorStop(0, '#4E3422');
+  grad.addColorStop(1, '#22150D');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 256, 256);
+  ctx.strokeStyle = '#D4A84F';
+  ctx.lineWidth = 10;
+  ctx.beginPath();
+  ctx.arc(128, 128, 114, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = '#FFE8B8';
+  ctx.font = '800 112px "Plus Jakarta Sans", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(ch, 128, 134);
+  return canvas;
+}
+
+export function getAvatarTexture(avatarId = 'avatar-1', fallbackLabel = 'O') {
   const raw = String(avatarId || '').trim();
   const isDataUrl = /^data:image\/(?:jpeg|jpg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(raw);
   const key = isDataUrl
@@ -66,11 +90,21 @@ export function getAvatarTexture(avatarId = 'avatar-1') {
   if (avatarCache.has(key)) return avatarCache.get(key);
 
   const src = isDataUrl ? key : `/assets/${key}.jpg`;
-  const tex = textureLoader.load(src, (loaded) => {
-    loaded.needsUpdate = true;
-  });
+  const tex = textureLoader.load(
+    src,
+    (loaded) => {
+      loaded.needsUpdate = true;
+    },
+    undefined,
+    () => {
+      tex.image = createAvatarFallbackCanvas(fallbackLabel);
+      tex.needsUpdate = true;
+    }
+  );
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
   avatarCache.set(key, tex);
   return tex;
 }
@@ -1357,4 +1391,156 @@ export function getSidePlaqueTexture(title, subtitle = '', { tone = 'gold', high
   return tex;
 }
 
+export function getBilliardFeltTexture() {
+  if (interiorCache.has('billiard-felt')) return interiorCache.get('billiard-felt');
+  const w = 512;
+  const h = 1024;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
 
+  const grad = ctx.createRadialGradient(w / 2, h / 2, 40, w / 2, h / 2, 580);
+  grad.addColorStop(0, '#1A8554');
+  grad.addColorStop(0.65, '#136B43');
+  grad.addColorStop(1, '#0D4B2F');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  // Fine tournament baize grain
+  for (let i = 0; i < 6500; i += 1) {
+    const x = Math.random() * w;
+    const y = Math.random() * h;
+    ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.045)';
+    ctx.fillRect(x, y, 2, 2);
+  }
+
+  // Crisp chalked head string (baulk line at bottom quarter z = +1.325)
+  ctx.strokeStyle = 'rgba(244, 240, 224, 0.36)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(28, h * 0.75);
+  ctx.lineTo(w - 28, h * 0.75);
+  ctx.stroke();
+
+  // Subtle head spot & foot spot
+  for (const sy of [h * 0.25, h * 0.75]) {
+    ctx.fillStyle = 'rgba(248, 244, 232, 0.6)';
+    ctx.beginPath();
+    ctx.arc(w / 2, sy, 6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  interiorCache.set('billiard-felt', tex);
+  return tex;
+}
+
+export function getPokerFeltTexture() {
+  if (interiorCache.has('poker-felt')) return interiorCache.get('poker-felt');
+  const w = 1024;
+  const h = 768;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+
+  const grad = ctx.createRadialGradient(w / 2, h / 2, 40, w / 2, h / 2, 540);
+  grad.addColorStop(0, '#1B744E');
+  grad.addColorStop(0.6, '#125A3C');
+  grad.addColorStop(1, '#0B3B27');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  for (let i = 0; i < 5200; i += 1) {
+    const x = Math.random() * w;
+    const y = Math.random() * h;
+    ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.05)';
+    ctx.fillRect(x, y, 2, 2);
+  }
+
+  // Gold stitched casino betting line oval
+  ctx.strokeStyle = 'rgba(232, 198, 114, 0.44)';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.roundRect(120, 118, w - 240, h - 236, 260);
+  ctx.stroke();
+
+  ctx.strokeStyle = 'rgba(232, 198, 114, 0.2)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(140, 138, w - 280, h - 276, 240);
+  ctx.stroke();
+
+  // Center Hold'em emblem
+  ctx.fillStyle = 'rgba(245, 214, 130, 0.16)';
+  ctx.font = '800 34px "Plus Jakarta Sans", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText("KAHVE HOLD'EM", w / 2, h / 2 - 122);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  interiorCache.set('poker-felt', tex);
+  return tex;
+}
+
+export function getTavlaBoardTexture() {
+  if (interiorCache.has('tavla-board')) return interiorCache.get('tavla-board');
+  const w = 1024;
+  const h = 768;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+
+  // Rich inlaid mahogany outer & cream board interior
+  ctx.fillStyle = '#3F2314';
+  ctx.fillRect(0, 0, w, h);
+
+  // Left and right playing fields
+  const drawHalf = (x0, fw) => {
+    ctx.fillStyle = '#EAD8B7';
+    ctx.fillRect(x0, 42, fw, h - 84);
+    const pointW = fw / 6;
+    const triH = 265;
+    for (let i = 0; i < 6; i += 1) {
+      const xStart = x0 + i * pointW;
+      // Top points
+      ctx.fillStyle = i % 2 === 0 ? '#6E261E' : '#1E1B18';
+      ctx.beginPath();
+      ctx.moveTo(xStart, 42);
+      ctx.lineTo(xStart + pointW, 42);
+      ctx.lineTo(xStart + pointW / 2, 42 + triH);
+      ctx.closePath();
+      ctx.fill();
+
+      // Bottom points
+      ctx.fillStyle = i % 2 === 0 ? '#1E1B18' : '#6E261E';
+      ctx.beginPath();
+      ctx.moveTo(xStart, h - 42);
+      ctx.lineTo(xStart + pointW, h - 42);
+      ctx.lineTo(xStart + pointW / 2, h - 42 - triH);
+      ctx.closePath();
+      ctx.fill();
+    }
+  };
+  drawHalf(48, 434);
+  drawHalf(542, 434);
+
+  // Center walnut bar & brass hinges
+  ctx.fillStyle = '#2F190D';
+  ctx.fillRect(482, 0, 60, h);
+  ctx.fillStyle = '#C99B42';
+  ctx.fillRect(496, 120, 32, 48);
+  ctx.fillRect(496, h - 168, 32, 48);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  interiorCache.set('tavla-board', tex);
+  return tex;
+}

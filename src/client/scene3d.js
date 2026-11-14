@@ -3367,6 +3367,13 @@ export class OkeyTable3D {
     this.targetFov = preset.fov || 44;
   }
 
+  setBottomInset(px) {
+    const next = Math.max(0, Math.round(Number(px) || 0));
+    if (next === (this.bottomInset || 0)) return;
+    this.bottomInset = next;
+    this.onResize?.();
+  }
+
   // Presets are framed for landscape screens. On a narrow (portrait phone)
   // viewport the same vertical FOV would crop the rack and the table sides,
   // so widen it to keep the horizontal field of view the presets were tuned for.
@@ -4599,7 +4606,13 @@ export class OkeyTable3D {
       const rect = this.canvas.getBoundingClientRect();
       const w = rect.width || window.innerWidth;
       const h = rect.height || window.innerHeight;
-      this.camera.aspect = w / h;
+      // A bottom inset (tall HUD on short screens) frames the scene in the
+      // area above it and renders the remainder underneath the HUD.
+      const inset = Math.min(Math.max(0, this.bottomInset || 0), h * 0.4);
+      const framedH = h - inset;
+      this.camera.aspect = w / framedH;
+      if (inset > 0) this.camera.setViewOffset(w, framedH, 0, 0, w, h);
+      else if (this.camera.view) this.camera.clearViewOffset();
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(w, h, false);
       this.css3dRenderer?.setSize(w, h);

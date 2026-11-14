@@ -5896,3 +5896,66 @@ socket.on('room:sideTables', (sideTables) => {
     syncActiveActivityHuds(currentRoom);
   }
 });
+
+// Publish the top bar's real bottom edge so panels below it never overlap.
+const topbarEl = document.querySelector('.topbar');
+function syncTopbarBottom() {
+  if (!topbarEl) return;
+  const bottom = Math.round(topbarEl.getBoundingClientRect().bottom);
+  document.documentElement.style.setProperty('--topbar-bottom', `${bottom}px`);
+}
+if (topbarEl && window.ResizeObserver) new ResizeObserver(syncTopbarBottom).observe(topbarEl);
+window.addEventListener('resize', syncTopbarBottom);
+syncTopbarBottom();
+
+// ── Phone orientation: landscape-first layout ─────────────────────────────
+const coarsePointerQuery = window.matchMedia('(pointer: coarse)');
+
+async function requestLandscapeFullscreen() {
+  // Orientation can only be locked while fullscreen, and only some mobile
+  // browsers allow it at all; the rotate hint covers the rest.
+  try {
+    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+      await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+    }
+    await screen.orientation?.lock?.('landscape');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function syncShortScreenInset() {
+  const dock = els.okeyBottomDock;
+  const shortLandscape = window.innerHeight <= 520 && window.innerWidth > window.innerHeight;
+  const dockVisible = dock && !dock.hidden && !els.viewGame.hidden && dock.offsetParent !== null;
+  scene3d.setBottomInset(
+    shortLandscape && dockVisible ? window.innerHeight - dock.getBoundingClientRect().top : 0
+  );
+}
+
+function syncInGameState() {
+  const inGame = !els.viewGame.hidden;
+  const entered = inGame && !document.body.classList.contains('is-in-game');
+  document.body.classList.toggle('is-in-game', inGame);
+  if (entered && coarsePointerQuery.matches && window.innerHeight > window.innerWidth) {
+    requestLandscapeFullscreen();
+  }
+  syncShortScreenInset();
+}
+
+new MutationObserver(syncInGameState).observe(els.viewGame, { attributes: true, attributeFilter: ['hidden'] });
+if (els.okeyBottomDock) {
+  new MutationObserver(syncShortScreenInset).observe(els.okeyBottomDock, { attributes: true, attributeFilter: ['hidden'] });
+  if (window.ResizeObserver) new ResizeObserver(syncShortScreenInset).observe(els.okeyBottomDock);
+}
+window.addEventListener('resize', syncShortScreenInset);
+syncInGameState();
+
+document.getElementById('btn-rotate-fullscreen')?.addEventListener('click', async () => {
+  const locked = await requestLandscapeFullscreen();
+  if (!locked) showNotice('Tarayıcı otomatik çeviremedi; telefonu elle yan çevir.');
+});
+document.getElementById('btn-rotate-dismiss')?.addEventListener('click', () => {
+  document.body.classList.add('rotate-dismissed');
+});

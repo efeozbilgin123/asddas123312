@@ -416,6 +416,17 @@
     </section>
 
     <!-- Active 3D Game HUD -->
+    <div id="rotate-hint" class="rotate-hint" role="dialog" aria-labelledby="rotate-hint-title">
+      <svg class="rotate-hint__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="7" y="2.5" width="10" height="19" rx="2.2"></rect>
+        <path d="M11 18.5h2"></path>
+      </svg>
+      <p id="rotate-hint-title" class="rotate-hint__title">Telefonu yan çevir</p>
+      <p class="rotate-hint__text">Masa ve ıstaka yatay ekrana göre dizildi. En iyi görüntü için telefonu yatay tut.</p>
+      <button type="button" id="btn-rotate-fullscreen" class="btn btn--primary">Tam Ekran Yatay Aç</button>
+      <button type="button" id="btn-rotate-dismiss" class="btn btn--quiet btn--sm">Dikey devam et</button>
+    </div>
+
     <section id="view-game" class="game-hud" hidden aria-label="Oyun arayüzü">
       <div id="game-alert-toast" class="game-alert-toast" role="alert" aria-live="assertive" hidden></div>
       <div id="hud-speech-bubble" class="hud-speech-bubble" role="status" aria-live="polite" hidden></div>

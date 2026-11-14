@@ -2946,6 +2946,155 @@ body {
   }
 }
 
+/* Phones held sideways: very little height, so every bar becomes one slim row. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .topbar {
+    flex-wrap: nowrap;
+    align-items: center;
+    top: 4px;
+  }
+  .topbar__actions {
+    width: auto;
+    flex: 1 1 0;
+    min-width: 0;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    padding-bottom: 5px;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  }
+  .topbar__actions::-webkit-scrollbar {
+    display: none;
+  }
+  .topbar__actions > * {
+    flex: 0 0 auto;
+  }
+  .topbar .btn--sm,
+  .wordmark {
+    min-height: 32px;
+  }
+  .bottom-dock {
+    bottom: max(3px, env(safe-area-inset-bottom));
+    gap: 2px;
+  }
+  .action-bar,
+  .action-bar__left,
+  .action-bar__right {
+    flex-wrap: nowrap;
+  }
+  .action-bar {
+    padding: 3px 6px;
+  }
+  .action-bar .btn,
+  .billiard-hud .btn,
+  .freeroam-hud .btn,
+  .side-game-hud .btn {
+    min-height: 32px;
+  }
+  .dock-meta {
+    width: auto;
+  }
+  .billiard-hud,
+  .freeroam-hud {
+    padding-block: 3px;
+    gap: 4px;
+  }
+  .mobile-joystick {
+    bottom: max(52px, calc(env(safe-area-inset-bottom) + 46px));
+    width: 104px;
+    height: 104px;
+  }
+  .proximity-prompt {
+    bottom: 56px;
+  }
+  .cat-toast,
+  .cat-menu {
+    bottom: 60px;
+  }
+  .lobby-shell,
+  .waiting-shell {
+    padding-top: 52px;
+  }
+}
+
+/* Panels anchored under the top bar follow its measured height (--topbar-bottom
+   is set from JS): the bar wraps to a second row on mid-width screens and used
+   to cover these panels and swallow their clicks. */
+.music-dock,
+.tv-dock,
+.chat-drawer,
+.spectator-bar,
+.side-game-hud,
+.game-alert-toast {
+  top: calc(var(--topbar-bottom, 56px) + 6px);
+}
+
+/* Only the buttons themselves take clicks, not the empty part of the bar. */
+.topbar__brand,
+.topbar__actions {
+  pointer-events: none;
+}
+
+.topbar__brand > *,
+.topbar__actions > * {
+  pointer-events: auto;
+}
+
+/* Portrait phones: the table is laid out for a wide screen, ask to rotate. */
+.rotate-hint {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-lg);
+  background: rgba(14, 9, 6, 0.94);
+  color: var(--color-ink);
+  text-align: center;
+}
+
+.rotate-hint__icon {
+  width: 72px;
+  height: 72px;
+  color: var(--color-accent);
+  animation: rotate-hint-turn 2.4s var(--ease-snap, ease-in-out) infinite;
+}
+
+.rotate-hint__title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 800;
+}
+
+.rotate-hint__text {
+  max-width: 30ch;
+  font-size: var(--text-sm);
+  color: var(--color-ink-2);
+}
+
+@keyframes rotate-hint-turn {
+  0%, 20% { rotate: 0deg; }
+  60%, 100% { rotate: -90deg; }
+}
+
+@media (orientation: portrait) and (pointer: coarse) and (max-width: 60rem) {
+  body.is-in-game:not(.rotate-dismissed) .rotate-hint {
+    display: flex;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rotate-hint__icon {
+    animation: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .skeleton-row {
     animation: none;

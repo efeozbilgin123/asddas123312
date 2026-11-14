@@ -139,7 +139,8 @@ export class BilliardTable3D {
     this.disposableGeoms.push(apronMainGeo, apronSkirtGeo, brassBeltGeo);
 
     const apronMain = new THREE.Mesh(apronMainGeo, darkWalnutMat);
-    apronMain.position.y = -0.18;
+    // Top sits just below the felt surface (y = 0); coplanar faces z-fought into dark stair-step patches.
+    apronMain.position.y = -0.2;
     apronMain.castShadow = true;
     apronMain.receiveShadow = true;
     this.root.add(apronMain);

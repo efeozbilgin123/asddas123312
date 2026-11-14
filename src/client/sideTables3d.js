@@ -951,9 +951,15 @@ export class SideTables3D {
               payload: {}
             });
 
-            const spacing = 2.42;
+            // The viewer's two hole cards sit in the middle of the near edge, so the
+            // buttons fan out to both sides of them instead of hiding behind them.
+            const spacing = 2.3;
+            const innerX = 2.85;
+            const leftCount = Math.ceil(actions.length / 2);
             actions.forEach((act, aIdx) => {
-              const ax = (aIdx - (actions.length - 1) / 2) * spacing;
+              const ax = aIdx < leftCount
+                ? -innerX - (leftCount - 1 - aIdx) * spacing
+                : innerX + (aIdx - leftCount) * spacing;
               const plaque = this.createPlaqueMesh(act.title, act.sub, {
                 tone: act.tone,
                 highlighted: true,
@@ -1093,7 +1099,8 @@ export class SideTables3D {
           const n = myHand.length;
           if (n > 0) {
             const maxSpan = n <= 4 ? 5.6 : 9.4;
-            const step = n > 1 ? Math.min(1.58, maxSpan / (n - 1)) : 0;
+            const isPokerHand = t.kind === 'poker';
+            const step = n > 1 ? Math.min(isPokerHand ? 1.12 : 1.58, maxSpan / (n - 1)) : 0;
             myHand.forEach((card, cIdx) => {
               const offset = cIdx - (n - 1) / 2;
               const isLegal = !canPlayHandCard || legalSet.has(card.id);
@@ -1101,7 +1108,7 @@ export class SideTables3D {
                 faceUp: true,
                 legal: isLegal,
                 dimmed: canPlayHandCard && !isLegal,
-                scale: n <= 4 ? 1.56 : 1.38
+                scale: isPokerHand ? 1.08 : n <= 4 ? 1.56 : 1.38
               });
               cardMesh.rotation.order = 'YXZ';
               const baseY = 1.05 + cIdx * 0.006 + (canPlayHandCard && isLegal ? 0.18 : 0);

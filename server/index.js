@@ -193,7 +193,8 @@ io.on('connection', (socket) => {
       roomName: data?.roomName,
       options: data?.options,
       quickStart: Boolean(data?.quickStart),
-      seatIndex: data?.seatIndex
+      seatIndex: data?.seatIndex,
+      entryActivity: data?.entryActivity
     });
     if (res.ok) {
       const payload = roomManager.getRoomPayloadForPlayer(res.room, playerId);

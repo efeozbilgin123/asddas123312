@@ -6,8 +6,8 @@ export const SIDE_TABLE_DEFS = Object.freeze([
     kind: 'pisti',
     title: 'Pişti Masası',
     subtitle: '2-4 Kişilik Pişti',
-    x: -27,
-    z: -18,
+    x: -29,
+    z: -21,
     rotY: 0.14,
     maxSeats: 4,
     minPlayers: 2,
@@ -19,7 +19,7 @@ export const SIDE_TABLE_DEFS = Object.freeze([
     kind: 'papazkacti',
     title: 'Papaz Kaçtı',
     subtitle: 'Kimde K♠ Kalacak?',
-    x: -27,
+    x: -29,
     z: 0,
     rotY: 0,
     maxSeats: 4,
@@ -32,8 +32,8 @@ export const SIDE_TABLE_DEFS = Object.freeze([
     kind: 'chat',
     title: 'Sohbet Masası 1',
     subtitle: 'Çay & Muhabbet Köşesi',
-    x: -27,
-    z: 18,
+    x: -29,
+    z: 21,
     rotY: -0.15,
     maxSeats: 4,
     minPlayers: 0,
@@ -45,8 +45,8 @@ export const SIDE_TABLE_DEFS = Object.freeze([
     kind: 'batak',
     title: 'Batak Masası',
     subtitle: '4 Kişilik Koz Maça',
-    x: -11,
-    z: 25,
+    x: -10,
+    z: 26,
     rotY: 0.08,
     maxSeats: 4,
     minPlayers: 4,
@@ -59,7 +59,7 @@ export const SIDE_TABLE_DEFS = Object.freeze([
     title: 'Tavla & Çay Köşesi',
     subtitle: 'Serbest Takılma Masası',
     x: 11,
-    z: 25,
+    z: 26,
     rotY: -0.12,
     maxSeats: 4,
     minPlayers: 0,
@@ -71,8 +71,8 @@ export const SIDE_TABLE_DEFS = Object.freeze([
     kind: 'poker',
     title: "Texas Hold'em Poker",
     subtitle: '2-4 Kişilik Masa',
-    x: 27,
-    z: -20,
+    x: 28,
+    z: -21,
     rotY: -0.18,
     maxSeats: 4,
     minPlayers: 2,
@@ -1043,6 +1043,7 @@ export class SideTableSession {
     const mySeatIndex = viewerSeat ? viewerSeat.seatIndex : null;
     const isMyTurn = Boolean(viewerSeat && this.phase === 'playing' && this.currentSeat === viewerSeat.seatIndex);
 
+    let drawTargetSeatIndex = null;
     let drawTargetCount = 0;
     let drawTargetName = '';
     if (this.kind === 'papazkacti' && this.phase === 'playing' && viewerSeat) {
@@ -1051,6 +1052,7 @@ export class SideTableSession {
         (s) => s.type !== 'empty' && s.seatIndex !== viewerSeat.seatIndex && s.hand.length > 0
       );
       if (tIdx !== null) {
+        drawTargetSeatIndex = tIdx;
         drawTargetCount = this.seats[tIdx].hand.length;
         drawTargetName = this.seats[tIdx].name || '';
       }
@@ -1083,6 +1085,7 @@ export class SideTableSession {
       centerTopCard: this.centerCards.length > 0 ? this.centerCards[this.centerCards.length - 1] : null,
       communityCards: this.kind === 'poker' ? this.centerCards : [],
       trickCards: this.trickCards.map((t) => ({ seatIndex: t.seatIndex, card: t.card })),
+      drawTargetSeatIndex,
       drawTargetCount,
       drawTargetName,
       myHand: viewerSeat ? viewerSeat.hand : [],

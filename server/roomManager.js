@@ -388,7 +388,7 @@ export class RoomManager {
     return list;
   }
 
-  createRoom({ playerId, playerName, playerAvatar, roomName, options = {}, quickStart = false, seatIndex = 0 }) {
+  createRoom({ playerId, playerName, playerAvatar, roomName, options = {}, quickStart = false, seatIndex = 0, entryActivity = 'okey' }) {
     this.leaveCurrentRoom(playerId);
 
     const code = generateRoomCode(this.rooms);
@@ -396,10 +396,11 @@ export class RoomManager {
     const cleanRoomName =
       (typeof roomName === 'string' ? roomName.trim().slice(0, 32) : '') || `${cleanName} Masası`;
     const opts = options && typeof options === 'object' ? options : {};
+    const startInHall = entryActivity === 'spectator';
     const preferredSeat = [0, 1, 2, 3].includes(Number(seatIndex)) ? Number(seatIndex) : 0;
 
     const seats = [0, 1, 2, 3].map((idx) => (
-      idx === preferredSeat
+      !startInHall && idx === preferredSeat
         ? { seatIndex: idx, type: 'human', playerId, name: cleanName, avatar: normalizeAvatar(playerAvatar, idx), connected: true }
         : { seatIndex: idx, type: 'empty', playerId: null, name: null, avatar: `avatar-${(idx % PRESET_AVATAR_COUNT) + 1}`, connected: false }
     ));
@@ -466,6 +467,47 @@ export class RoomManager {
           }
         })
     );
+
+    if (startInHall) {
+      const hostAvatar = normalizeAvatar(playerAvatar, 0);
+      room.spectators.set(playerId, {
+        playerId,
+        name: cleanName,
+        avatar: hostAvatar,
+        connected: true,
+        watchSeatIndex: null,
+        joinedAt: Date.now()
+      });
+      const rKey = this.ensureRoamerKey(room, playerId);
+      room.roamStates.set(playerId, {
+        key: rKey,
+        name: cleanName,
+        avatar: hostAvatar,
+        activity: 'spectator',
+        active: true,
+        x: 0,
+        z: 32,
+        yaw: 0,
+        updatedAt: Date.now()
+      });
+
+      if (quickStart) {
+        room.billiard.assignBot(0);
+        room.billiard.assignBot(1);
+        for (const tbl of room.sideTables) {
+          if (tbl.kind === 'pisti' || tbl.kind === 'papazkacti') {
+            tbl.assignBot(1);
+          } else if (tbl.kind === 'poker') {
+            tbl.assignBot(1);
+            tbl.assignBot(2);
+          } else if (tbl.kind === 'batak') {
+            tbl.assignBot(1);
+            tbl.assignBot(2);
+            tbl.assignBot(3);
+          }
+        }
+      }
+    }
 
     this.rooms.set(code, room);
     this.playerToRoom.set(playerId, code);
@@ -691,7 +733,19 @@ export class RoomManager {
       watchSeatIndex: null,
       joinedAt: Date.now()
     });
-    this.ensureRoamerKey(room, playerId);
+    const rKey = this.ensureRoamerKey(room, playerId);
+    if (!(room.roamStates instanceof Map)) room.roamStates = new Map();
+    room.roamStates.set(playerId, {
+      key: rKey,
+      name: cleanName,
+      avatar: normalizeAvatar(playerAvatar, room.spectators.size),
+      activity: 'spectator',
+      active: true,
+      x: 0,
+      z: 32,
+      yaw: 0,
+      updatedAt: Date.now()
+    });
     this.playerToRoom.set(playerId, code);
 
     this.broadcastRoomState(room);
@@ -772,9 +826,10 @@ export class RoomManager {
     if (participant.sideTable) {
       const tbl = participant.sideTable;
       tbl.standHuman(playerId, { convertToBotIfActive: true });
+      const offsetZ = tbl.z > 0 ? -7.6 : 7.6;
       startPos = {
-        x: Math.round(tbl.x * 0.82 * 100) / 100,
-        z: Math.round((tbl.z + (tbl.z > 0 ? -4.5 : 4.5)) * 100) / 100,
+        x: Math.round(tbl.x * 100) / 100,
+        z: Math.round((tbl.z + offsetZ) * 100) / 100,
         yaw: tbl.z > 0 ? 0 : Math.PI
       };
     }
@@ -1495,7 +1550,10 @@ export class RoomManager {
   startGame(roomCode, hostPlayerId) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false, error: 'Masa bulunamadı.' };
-    if (room.hostPlayerId !== hostPlayerId) {
+    const isHost = room.hostPlayerId === hostPlayerId;
+    const isSeatedOkey = room.seats.some((s) => s.type === 'human' && s.playerId === hostPlayerId);
+    const hostAtOkey = room.seats.some((s) => s.type === 'human' && s.playerId === room.hostPlayerId);
+    if (!isHost && (!isSeatedOkey || hostAtOkey)) {
       return { ok: false, error: 'Oyunu yalnızca masa kurucusu başlatabilir.' };
     }
     if (room.status !== 'waiting') {

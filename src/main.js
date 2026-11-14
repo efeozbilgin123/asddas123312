@@ -106,7 +106,7 @@ const els = {
   joinCodeForm: document.getElementById('join-code-form'),
   joinCode: document.getElementById('join-code'),
   btnJoinBilliard: document.getElementById('btn-join-billiard'),
-  btnJoinSpectator: document.getElementById('btn-join-spectator'),
+  btnJoinOkey: document.getElementById('btn-join-okey'),
   joinHelp: document.getElementById('join-help'),
 
   btnRefreshRooms: document.getElementById('btn-refresh-rooms'),
@@ -174,12 +174,15 @@ const els = {
   sideGameTitle: document.getElementById('side-game-title'),
   sideGameStatus: document.getElementById('side-game-status'),
   sideGameSeats: document.getElementById('side-game-seats'),
-  sideGameCenter: document.getElementById('side-game-center'),
-  sideGameHand: document.getElementById('side-game-hand'),
-  sideGameActions: document.getElementById('side-game-actions'),
   btnSideBot: document.getElementById('btn-side-bot'),
   btnSideStart: document.getElementById('btn-side-start'),
   btnSideStand: document.getElementById('btn-side-stand'),
+
+  okeyWaitHud: document.getElementById('okey-wait-hud'),
+  okeyWaitStatus: document.getElementById('okey-wait-status'),
+  btnOkeyWaitStart: document.getElementById('btn-okey-wait-start'),
+  btnOkeyWaitSettings: document.getElementById('btn-okey-wait-settings'),
+  btnOkeyWaitStand: document.getElementById('btn-okey-wait-stand'),
 
   freeroamHud: document.getElementById('freeroam-hud'),
   freeroamHint: document.getElementById('freeroam-hint'),
@@ -351,7 +354,10 @@ const cleanUrlRoom = rawUrlRoom
   .replace(/[^A-Z0-9]/g, '')
   .slice(0, 6);
 const rawUrlMode = (urlParams.get('mode') || '').trim().toLowerCase();
-const pendingInviteMode = rawUrlMode === 'billiard' || rawUrlMode === 'spectator' ? rawUrlMode : 'auto';
+const pendingInviteMode =
+  rawUrlMode === 'okey' || rawUrlMode === 'billiard' || rawUrlMode === 'spectator'
+    ? rawUrlMode
+    : 'spectator';
 let pendingInviteRoomCode = cleanUrlRoom || null;
 if (cleanUrlRoom) {
   els.joinCode.value = cleanUrlRoom;
@@ -468,7 +474,8 @@ let lastRoundModalNumber = 0;
 let lastTurnSeatSeen = null;
 let lastTurnRoundSeen = null;
 let lastWatchSeatRendered = undefined;
-let viewIn3dHall = false;
+let viewIn3dHall = true;
+let waitingOverlayRequested = false;
 let lastMyActivity = null;
 let lastSideTableKey = null;
 let currentProximityTarget = null;
@@ -673,6 +680,30 @@ const scene3d = new OkeyTable3D(els.canvas, {
   onFreeroamMove: (payload) => {
     if (!currentRoom) return;
     sendGameAction('room:roamMove', payload);
+  },
+  onSideTableAction: (tableId, action, payload) => {
+    if (!currentRoom) return;
+    sendGameAction('room:sideAction', { tableId, action, payload: payload || {} }, (res) => {
+      if (!res?.ok && res?.error) showNotice(res.error);
+    });
+  },
+  onSideTableSetup: (tableId, command) => {
+    if (!currentRoom || !tableId) return;
+    if (command === 'start') {
+      sendGameAction('room:sideStart', { tableId, autoFillBot: true }, (res) => {
+        if (!res?.ok && res?.error) showNotice(res.error);
+      });
+    } else if (command === 'toggleBot') {
+      const table = (currentRoom.sideTables || []).find((t) => t.id === tableId);
+      if (!table) return;
+      const botSeat = table.seats?.find((s) => s.type === 'bot');
+      const emptySeat = table.seats?.find((s) => s.type === 'empty');
+      const targetSeat = botSeat || emptySeat;
+      if (!targetSeat) return;
+      sendGameAction('room:sideToggleBot', { tableId, seatIndex: targetSeat.seatIndex }, (res) => {
+        if (!res?.ok && res?.error) showNotice(res.error);
+      });
+    }
   }
 });
 
@@ -1279,7 +1310,8 @@ function startSingleplayer() {
   updateChatUnreadBadge();
   lastRoundModalNumber = 0;
   lastMyActivity = null;
-  viewIn3dHall = false;
+  viewIn3dHall = true;
+  waitingOverlayRequested = false;
   stagedGroups = [];
 
   const lobbyOpts = readLobbyOptions();
@@ -1288,6 +1320,7 @@ function startSingleplayer() {
     playerAvatar: selectedAvatar,
     seatIndex: Number(els.optSeat?.value || 0),
     options: lobbyOpts,
+    entryActivity: 'spectator',
     onState: (room) => {
       switchView(room);
     }
@@ -1307,6 +1340,9 @@ function createRoom(quickStart) {
     els.playerNameHelp.textContent = 'Sunucu bağlantısı bekleniyor, lütfen tekrar deneyin.';
     return;
   }
+
+  waitingOverlayRequested = false;
+  viewIn3dHall = true;
 
   const btn = quickStart ? els.btnQuickPlay : els.btnCreateRoom;
   btn.setAttribute('aria-busy', 'true');
@@ -1328,6 +1364,7 @@ function createRoom(quickStart) {
       playerAvatar: selectedAvatar,
       roomName: els.roomName.value.trim(),
       quickStart,
+      entryActivity: 'spectator',
       seatIndex: Number(els.optSeat?.value || 0),
       options: readLobbyOptions()
     },
@@ -2420,21 +2457,6 @@ function handleProximityInteract() {
   }
 }
 
-function createSideCardEl(card, { interactive = false, disabled = false, mini = false, onClick = null } = {}) {
-  const el = document.createElement(interactive ? 'button' : 'span');
-  if (interactive) el.type = 'button';
-  const isRed = card?.suit === 'hearts' || card?.suit === 'diamonds';
-  el.className = `side-card ${isRed ? 'side-card--red' : 'side-card--black'}${mini ? ' side-card--mini' : ''}`;
-  el.textContent = card?.label || '';
-  if (interactive) {
-    el.disabled = Boolean(disabled);
-    if (!disabled && typeof onClick === 'function') {
-      el.addEventListener('click', onClick);
-    }
-  }
-  return el;
-}
-
 function renderSideGameHud(room) {
   if (!els.sideGameHud || !room) return;
   const tables = Array.isArray(room.sideTables) ? room.sideTables : [];
@@ -2447,11 +2469,18 @@ function renderSideGameHud(room) {
   if (els.sideGameTitle) {
     els.sideGameTitle.textContent = table.title || 'Masa';
   }
+  const isChat = table.kind === 'chat';
   if (els.sideGameStatus) {
-    els.sideGameStatus.textContent = table.statusMessage || table.subtitle || '';
+    const baseMsg = table.statusMessage || table.subtitle || '';
+    if (isChat) {
+      els.sideGameStatus.textContent = 'Sohbet ve çay köşesi · C tuşu ile sohbet açabilirsiniz';
+    } else if (table.phase === 'playing' && table.isMyTurn) {
+      els.sideGameStatus.textContent = `${baseMsg} · Masa üzerinden 3D oyna`;
+    } else {
+      els.sideGameStatus.textContent = baseMsg;
+    }
   }
 
-  const isChat = table.kind === 'chat';
   const canStart = Boolean(
     !isChat &&
     table.phase !== 'playing' &&
@@ -2511,202 +2540,16 @@ function renderSideGameHud(room) {
       els.sideGameSeats.appendChild(pill);
     });
   }
+}
 
-  if (els.sideGameCenter) {
-    els.sideGameCenter.innerHTML = '';
-    if (isChat) {
-      els.sideGameCenter.hidden = false;
-      const info = document.createElement('span');
-      info.className = 'side-game-center__label';
-      info.textContent = 'Sohbet ve çay için rahat köşe · C tuşu veya Sohbet butonundan yazabilirsiniz.';
-      els.sideGameCenter.appendChild(info);
-    } else if (table.kind === 'pisti') {
-      els.sideGameCenter.hidden = false;
-      const lbl = document.createElement('span');
-      lbl.className = 'side-game-center__label';
-      lbl.textContent = `Deste: ${table.deckCount ?? 0} · Orta (${table.centerCount ?? 0} kart):`;
-      els.sideGameCenter.appendChild(lbl);
-      if (table.centerTopCard) {
-        els.sideGameCenter.appendChild(createSideCardEl(table.centerTopCard, { mini: true }));
-      } else {
-        const emptyLbl = document.createElement('span');
-        emptyLbl.className = 'pill';
-        emptyLbl.textContent = 'Orta boş';
-        els.sideGameCenter.appendChild(emptyLbl);
-      }
-    } else if (table.kind === 'poker') {
-      els.sideGameCenter.hidden = false;
-      const lbl = document.createElement('span');
-      lbl.className = 'side-game-center__label';
-      lbl.textContent = `Pot: ${table.pot ?? 0} · Bahis: ${table.currentBet ?? 0}`;
-      els.sideGameCenter.appendChild(lbl);
-      (table.communityCards || []).forEach((c) => {
-        els.sideGameCenter.appendChild(createSideCardEl(c, { mini: true }));
-      });
-      if (table.phase === 'gameOver') {
-        (table.seats || []).forEach((s) => {
-          if (Array.isArray(s.revealedHand) && s.revealedHand.length > 0) {
-            const tag = document.createElement('span');
-            tag.className = 'side-game-center__label';
-            tag.textContent = `${s.name}: ${s.revealedHand.map((c) => c.label).join(' ')}${s.handEvalName ? ` (${s.handEvalName})` : ''}`;
-            els.sideGameCenter.appendChild(tag);
-          }
-        });
-      }
-    } else if (table.kind === 'batak') {
-      els.sideGameCenter.hidden = false;
-      const lbl = document.createElement('span');
-      lbl.className = 'side-game-center__label';
-      lbl.textContent = 'Koz: Maça (♠) · Masa:';
-      els.sideGameCenter.appendChild(lbl);
-      if (Array.isArray(table.trickCards) && table.trickCards.length > 0) {
-        table.trickCards.forEach((entry) => {
-          const seatName = table.seats?.[entry.seatIndex]?.name || `K${entry.seatIndex + 1}`;
-          const wrap = document.createElement('span');
-          wrap.className = 'side-game-center__label';
-          wrap.textContent = `${seatName}:`;
-          els.sideGameCenter.appendChild(wrap);
-          els.sideGameCenter.appendChild(createSideCardEl(entry.card, { mini: true }));
-        });
-      } else {
-        const waitLbl = document.createElement('span');
-        waitLbl.className = 'pill';
-        waitLbl.textContent = table.batakSubPhase === 'bidding' ? 'İhale sürüyor' : 'Kart bekleniyor';
-        els.sideGameCenter.appendChild(waitLbl);
-      }
-    } else if (table.kind === 'papazkacti') {
-      if (table.phase === 'playing' && table.drawTargetCount > 0) {
-        els.sideGameCenter.hidden = false;
-        const lbl = document.createElement('span');
-        lbl.className = 'side-game-center__label';
-        lbl.textContent = table.isMyTurn
-          ? `${table.drawTargetName} elinden kart çek (${table.drawTargetCount}):`
-          : `${table.drawTargetName} kart sayısı: ${table.drawTargetCount}`;
-        els.sideGameCenter.appendChild(lbl);
-        if (table.isMyTurn) {
-          for (let i = 0; i < table.drawTargetCount; i += 1) {
-            const backBtn = document.createElement('button');
-            backBtn.type = 'button';
-            backBtn.className = 'side-card side-card--back side-card--mini';
-            backBtn.textContent = '?';
-            backBtn.title = `${i + 1}. kartı çek`;
-            backBtn.addEventListener('click', () => {
-              sendGameAction(
-                'room:sideAction',
-                { tableId: table.id, action: 'drawCard', payload: { pickIndex: i } },
-                (res) => {
-                  if (!res?.ok && res?.error) showNotice(res.error);
-                }
-              );
-            });
-            els.sideGameCenter.appendChild(backBtn);
-          }
-        }
-      } else {
-        els.sideGameCenter.hidden = false;
-        const info = document.createElement('span');
-        info.className = 'side-game-center__label';
-        info.textContent = table.winnerText || 'Tek kalan papazı elinde tutan kaybeder.';
-        els.sideGameCenter.appendChild(info);
-      }
-    } else {
-      els.sideGameCenter.hidden = true;
-    }
+function renderOkeyWaitHud(room) {
+  if (!els.okeyWaitHud || !room) return;
+  const okeyHumans = (room.seats || []).filter((s) => s.type === 'human').length;
+  if (els.okeyWaitStatus) {
+    els.okeyWaitStatus.textContent = `Okey Koltukları: ${okeyHumans}/4 · Başlatınca boş koltuklara bot oturur`;
   }
-
-  if (els.sideGameHand) {
-    els.sideGameHand.innerHTML = '';
-    const myHand = Array.isArray(table.myHand) ? table.myHand : [];
-    if (myHand.length === 0) {
-      els.sideGameHand.hidden = true;
-    } else {
-      els.sideGameHand.hidden = false;
-      const canPlayCard =
-        table.isMyTurn &&
-        (table.kind === 'pisti' || (table.kind === 'batak' && table.batakSubPhase === 'playing'));
-      const legalSet = new Set(Array.isArray(table.legalCardIds) ? table.legalCardIds : []);
-      myHand.forEach((card) => {
-        const isLegal = !canPlayCard || legalSet.has(card.id);
-        const cardEl = createSideCardEl(card, {
-          interactive: canPlayCard,
-          disabled: canPlayCard && !isLegal,
-          onClick: () => {
-            sendGameAction(
-              'room:sideAction',
-              { tableId: table.id, action: 'playCard', payload: { cardId: card.id } },
-              (res) => {
-                if (!res?.ok && res?.error) showNotice(res.error);
-              }
-            );
-          }
-        });
-        els.sideGameHand.appendChild(cardEl);
-      });
-    }
-  }
-
-  if (els.sideGameActions) {
-    els.sideGameActions.innerHTML = '';
-    if (table.isMyTurn && table.kind === 'batak' && table.batakSubPhase === 'bidding') {
-      els.sideGameActions.hidden = false;
-      const lbl = document.createElement('span');
-      lbl.className = 'side-game-center__label';
-      lbl.textContent = 'El Tahmini:';
-      els.sideGameActions.appendChild(lbl);
-
-      const grid = document.createElement('div');
-      grid.className = 'side-bid-grid';
-      for (let bid = 1; bid <= 13; bid += 1) {
-        const bBtn = document.createElement('button');
-        bBtn.type = 'button';
-        bBtn.className = 'btn btn--quiet btn--sm side-bid-btn';
-        bBtn.textContent = String(bid);
-        bBtn.addEventListener('click', () => {
-          sendGameAction(
-            'room:sideAction',
-            { tableId: table.id, action: 'bid', payload: { bid } },
-            (res) => {
-              if (!res?.ok && res?.error) showNotice(res.error);
-            }
-          );
-        });
-        grid.appendChild(bBtn);
-      }
-      els.sideGameActions.appendChild(grid);
-    } else if (table.isMyTurn && table.kind === 'poker') {
-      els.sideGameActions.hidden = false;
-      const mySeat = table.seats?.[table.mySeatIndex];
-      const toCall = Math.max(0, (table.currentBet || 0) - (mySeat?.bet || 0));
-
-      const addActBtn = (label, action, payload = {}, cls = 'btn btn--quiet btn--sm') => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = cls;
-        btn.textContent = label;
-        btn.addEventListener('click', () => {
-          sendGameAction('room:sideAction', { tableId: table.id, action, payload }, (res) => {
-            if (!res?.ok && res?.error) showNotice(res.error);
-          });
-        });
-        els.sideGameActions.appendChild(btn);
-      };
-
-      addActBtn(
-        toCall > 0 ? `Gör (${toCall})` : 'Pas',
-        toCall > 0 ? 'call' : 'check',
-        {},
-        'btn btn--primary btn--sm'
-      );
-      if ((mySeat?.chips || 0) > toCall + 10) {
-        addActBtn('+20 Artır', 'raise', { amount: 20 });
-      }
-      if ((mySeat?.chips || 0) > toCall + 40) {
-        addActBtn('+50 Artır', 'raise', { amount: 50 });
-      }
-      addActBtn('Çekil', 'fold');
-    } else {
-      els.sideGameActions.hidden = true;
-    }
+  if (els.btnOkeyWaitStart) {
+    els.btnOkeyWaitStart.hidden = !(room.isHost || room.myActivity === 'okey');
   }
 }
 
@@ -2729,7 +2572,7 @@ function renderFreeroamHud(room) {
     els.btnRoamStartOkey.hidden = !(room.status === 'waiting' && room.isHost);
   }
   if (els.btnRoamBackWait) {
-    els.btnRoamBackWait.hidden = !(room.status === 'waiting' && room.myActivity === 'okey');
+    els.btnRoamBackWait.hidden = room.status !== 'waiting';
   }
   updateFpCrosshairAndHint();
   renderProximityPrompt();
@@ -2740,21 +2583,24 @@ function syncActiveActivityHuds(room) {
   const cam = scene3d.cameraMode;
   const myAct = room.myActivity || (room.isSpectator ? 'spectator' : 'okey');
   let showFreeroam = cam === 'freeroam';
-  const showSideTable = !showFreeroam && (cam === 'sideTable' || myAct === 'sideTable');
+  const showSideTable = !showFreeroam && cam !== 'billiard' && myAct === 'sideTable';
   const showBilliard = !showFreeroam && !showSideTable && (cam === 'billiard' || myAct === 'billiard');
+  const showOkeyWait = !showFreeroam && !showSideTable && !showBilliard && myAct === 'okey' && room.status === 'waiting';
   const showOkey = !showFreeroam && !showSideTable && !showBilliard && room.status === 'playing' && Boolean(room.game);
 
-  if (!showFreeroam && !showSideTable && !showBilliard && !showOkey) {
+  if (!showFreeroam && !showSideTable && !showBilliard && !showOkeyWait && !showOkey) {
     showFreeroam = true;
   }
 
   if (els.okeyBottomDock) els.okeyBottomDock.hidden = !showOkey;
+  if (els.okeyWaitHud) els.okeyWaitHud.hidden = !showOkeyWait;
   if (els.billiardHud) els.billiardHud.hidden = !showBilliard;
   if (els.sideGameHud) els.sideGameHud.hidden = !showSideTable;
   if (els.freeroamHud) els.freeroamHud.hidden = !showFreeroam;
   if (els.mobileJoystick) els.mobileJoystick.hidden = !showFreeroam;
 
   if (showSideTable) renderSideGameHud(room);
+  if (showOkeyWait) renderOkeyWaitHud(room);
   if (showBilliard) renderBilliardHud(room);
   if (showFreeroam) {
     renderFreeroamHud(room);
@@ -2875,7 +2721,8 @@ function switchView(room) {
   if (!room) {
     closeCatMenu();
     exitPointerLockIfActive();
-    viewIn3dHall = false;
+    viewIn3dHall = true;
+    waitingOverlayRequested = false;
     lastMyActivity = null;
     lastSideTableKey = null;
     currentProximityTarget = null;
@@ -2895,6 +2742,7 @@ function switchView(room) {
     if (els.spectatorBar) els.spectatorBar.hidden = true;
     if (els.billiardHud) els.billiardHud.hidden = true;
     if (els.sideGameHud) els.sideGameHud.hidden = true;
+    if (els.okeyWaitHud) els.okeyWaitHud.hidden = true;
     if (els.freeroamHud) els.freeroamHud.hidden = true;
     if (els.fpCrosshair) els.fpCrosshair.hidden = true;
     if (els.proximityPrompt) els.proximityPrompt.hidden = true;
@@ -2952,9 +2800,15 @@ function switchView(room) {
     applyRoomTv(null);
     applyAmbiancePlayback('none');
     applyRoomAmbianceTrack(null);
-    scene3d.setActivityContext({ myActivity: 'okey', billiardSeatIndex: null, localPlayerId: playerId });
+    scene3d.setActivityContext({
+      myActivity: 'okey',
+      billiardSeatIndex: null,
+      localPlayerId: playerId,
+      mySideTableId: null,
+      mySideSeatIndex: null
+    });
     scene3d.updateBilliardState(null);
-    scene3d.updateSideTablesState([]);
+    scene3d.updateSideTablesState([], { mySideTableId: null, mySideSeatIndex: null });
     scene3d.renderRoamers([], null);
     scene3d.setRoomAtmosphere(els.optAtmosphere?.value || 'rainy');
     scene3d.setRoomOrders(null, 0);
@@ -2970,16 +2824,23 @@ function switchView(room) {
 
   const myActivity = room.myActivity || (room.isSpectator ? 'spectator' : 'okey');
   const myId = localClient ? 'local-human' : playerId;
+  const sideViewerCtx = {
+    mySideTableId: room.mySideTableId ?? null,
+    mySideSeatIndex: room.mySideSeatIndex ?? null
+  };
   scene3d.setActivityContext({
     myActivity,
     billiardSeatIndex: room.billiardSeatIndex ?? null,
-    localPlayerId: myId
+    localPlayerId: myId,
+    mySideTableId: sideViewerCtx.mySideTableId,
+    mySideSeatIndex: sideViewerCtx.mySideSeatIndex
   });
   scene3d.updateBilliardState(room.billiard || null);
-  scene3d.updateSideTablesState(room.sideTables || []);
+  scene3d.updateSideTablesState(room.sideTables || [], sideViewerCtx);
   scene3d.renderRoamers(room.roamers || [], room.myRoamerKey || null);
 
-  if (myActivity !== 'okey' || room.status === 'playing') {
+  if (room.status === 'playing' && prevRoom?.status === 'waiting') {
+    waitingOverlayRequested = false;
     viewIn3dHall = true;
   }
 
@@ -3042,7 +2903,7 @@ function switchView(room) {
       myActivity === 'billiard'
         ? 'billiard'
         : myActivity === 'sideTable'
-          ? 'sideTable'
+          ? 'fp'
           : myActivity === 'spectator'
             ? 'freeroam'
             : (room.status === 'playing' ? 'fp' : 'table');
@@ -3052,7 +2913,10 @@ function switchView(room) {
         ? { tableId: room.mySideTableId, seatIndex: room.mySideSeatIndex ?? 0 }
         : {}
     );
-    setActiveCameraButton(defaultCam === 'sideTable' ? 'table' : defaultCam);
+    setActiveCameraButton(defaultCam);
+  } else if (prevRoom?.status === 'waiting' && room.status === 'playing' && myActivity === 'okey') {
+    scene3d.setCameraPreset('fp');
+    setActiveCameraButton('fp');
   } else if (myActivity !== 'spectator') {
     lastWatchSeatRendered = undefined;
   } else if (room.status === 'playing' && room.watchSeatIndex !== lastWatchSeatRendered) {
@@ -3065,7 +2929,7 @@ function switchView(room) {
     }
   }
 
-  const showWaitingPanel = room.status === 'waiting' && myActivity === 'okey' && !viewIn3dHall;
+  const showWaitingPanel = Boolean(waitingOverlayRequested && room.status === 'waiting' && !viewIn3dHall);
   if (showWaitingPanel) {
     exitPointerLockIfActive();
     els.viewLobby.hidden = true;
@@ -3078,6 +2942,7 @@ function switchView(room) {
     if (els.spectatorBar) els.spectatorBar.hidden = true;
     if (els.billiardHud) els.billiardHud.hidden = true;
     if (els.sideGameHud) els.sideGameHud.hidden = true;
+    if (els.okeyWaitHud) els.okeyWaitHud.hidden = true;
     if (els.freeroamHud) els.freeroamHud.hidden = true;
     if (els.fpCrosshair) els.fpCrosshair.hidden = true;
     if (els.proximityPrompt) els.proximityPrompt.hidden = true;
@@ -3114,7 +2979,7 @@ function renderWaitingRoom(room) {
   els.waitRoomTitle.textContent = room.name;
   els.waitRoomCode.textContent = room.code;
   els.waitHostControls.hidden = !room.isHost;
-  els.btnStartMatch.hidden = !room.isHost;
+  els.btnStartMatch.hidden = !(room.isHost || room.myActivity === 'okey');
 
   els.waitTeamMode.value = room.options.teamMode === 'paired' ? 'paired' : 'solo';
   els.waitKatlamali.value = room.options.katlamali ? '1' : '0';
@@ -4125,13 +3990,13 @@ els.btnCreateRoom.addEventListener('click', () => createRoom(false));
 
 els.joinCodeForm.addEventListener('submit', (e) => {
   e.preventDefault();
-  joinRoomByCode(els.joinCode.value, { activity: 'okey' });
+  joinRoomByCode(els.joinCode.value, { asSpectator: true, activity: 'spectator' });
 });
 els.btnJoinBilliard?.addEventListener('click', () => {
   joinRoomByCode(els.joinCode.value, { activity: 'billiard' });
 });
-els.btnJoinSpectator?.addEventListener('click', () => {
-  joinRoomByCode(els.joinCode.value, { asSpectator: true, activity: 'spectator' });
+els.btnJoinOkey?.addEventListener('click', () => {
+  joinRoomByCode(els.joinCode.value, { activity: 'okey' });
 });
 
 els.btnRefreshRooms.addEventListener('click', refreshRooms);
@@ -4149,6 +4014,7 @@ els.btnRoundLeave.addEventListener('click', leaveCurrentMatch);
 
 els.btnEnter3dHall?.addEventListener('click', () => {
   if (!currentRoom) return;
+  waitingOverlayRequested = false;
   viewIn3dHall = true;
   if (scene3d.cameraMode === 'fp' || scene3d.cameraMode === 'table') {
     scene3d.setCameraPreset('freeroam');
@@ -4533,6 +4399,27 @@ els.btnSideBot?.addEventListener('click', () => {
   });
 });
 
+els.btnOkeyWaitStart?.addEventListener('click', () => {
+  if (!currentRoom) return;
+  socket.emit('room:start', {}, (res) => {
+    if (!res?.ok && res?.error) showNotice(res.error);
+  });
+});
+
+els.btnOkeyWaitSettings?.addEventListener('click', () => {
+  if (!currentRoom) return;
+  waitingOverlayRequested = true;
+  viewIn3dHall = false;
+  switchView(currentRoom);
+});
+
+els.btnOkeyWaitStand?.addEventListener('click', () => {
+  if (!currentRoom) return;
+  sendGameAction('room:standUp', {}, (res) => {
+    if (!res?.ok && res?.error) showNotice(res.error);
+  });
+});
+
 els.btnRoamStartOkey?.addEventListener('click', () => {
   if (!currentRoom) return;
   socket.emit('room:start', {}, (res) => {
@@ -4542,6 +4429,7 @@ els.btnRoamStartOkey?.addEventListener('click', () => {
 
 els.btnRoamBackWait?.addEventListener('click', () => {
   if (!currentRoom) return;
+  waitingOverlayRequested = true;
   viewIn3dHall = false;
   switchView(currentRoom);
 });
@@ -5988,7 +5876,10 @@ socket.on('room:roamers', (roamers) => {
 socket.on('room:sideTables', (sideTables) => {
   if (!localClient && currentRoom) {
     currentRoom.sideTables = Array.isArray(sideTables) ? sideTables : [];
-    scene3d.updateSideTablesState(currentRoom.sideTables);
+    scene3d.updateSideTablesState(currentRoom.sideTables, {
+      mySideTableId: currentRoom.mySideTableId ?? null,
+      mySideSeatIndex: currentRoom.mySideSeatIndex ?? null
+    });
     syncActiveActivityHuds(currentRoom);
   }
 });

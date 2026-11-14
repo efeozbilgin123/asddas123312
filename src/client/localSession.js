@@ -17,7 +17,7 @@ import { SIDE_TABLE_DEFS, SideTableSession } from '../../shared/sideGames.js';
 const LOCAL_QUICK_CHAT_MAP = new Map(KAHVE_QUICK_CHATS.map((q) => [q.id, q]));
 
 export class LocalSingleplayerClient {
-  constructor({ playerName, playerAvatar, seatIndex = 0, options, onState }) {
+  constructor({ playerName, playerAvatar, seatIndex = 0, options, entryActivity = 'okey', onState }) {
     this.onState = onState;
     this.playerId = 'local-human';
     this.music = null;
@@ -38,9 +38,10 @@ export class LocalSingleplayerClient {
     this.lastNudgeAt = 0;
     this.playerName = (typeof playerName === 'string' ? playerName.trim().slice(0, 20) : '') || 'Oyuncu';
     this.playerAvatar = playerAvatar || 'avatar-1';
+    const startInHall = entryActivity === 'spectator';
     this.viewerSeatIndex = [0, 1, 2, 3].includes(Number(seatIndex)) ? Number(seatIndex) : 0;
-    this.okeyHumanSeatIndex = this.viewerSeatIndex;
-    this.myActivity = 'okey'; // 'okey' | 'billiard' | 'sideTable' | 'spectator'
+    this.okeyHumanSeatIndex = startInHall ? null : this.viewerSeatIndex;
+    this.myActivity = startInHall ? 'spectator' : 'okey'; // 'okey' | 'billiard' | 'sideTable' | 'spectator'
     this.watchSeatIndex = null;
     this.billiardSeatIndex = null;
     this.mySideTableId = null;
@@ -51,7 +52,7 @@ export class LocalSingleplayerClient {
     const usedNames = [this.playerName];
     const usedAvatars = [humanAvatar];
     const seatsConfig = [0, 1, 2, 3].map((idx) => {
-      if (idx === this.viewerSeatIndex) {
+      if (!startInHall && idx === this.viewerSeatIndex) {
         return {
           playerId: this.playerId,
           name: this.playerName,

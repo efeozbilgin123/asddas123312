@@ -429,6 +429,10 @@ export class OkeyTable3D {
 
     this.cameraMode = 'table';
     this.myActivity = 'okey';
+    this.mySideTableId = null;
+    this.mySideSeatIndex = null;
+    this.activeSideTableTarget = null;
+    this.sideTablesViewerCtx = {};
     this.billiardSeatIndex = null;
     this.billiardState = null;
     this.localPlayerId = null;
@@ -436,9 +440,9 @@ export class OkeyTable3D {
     this.billiardAimingDrag = false;
     this._lastBilliardAimEmitAt = 0;
     this.freeroamState = {
-      pos: new THREE.Vector3(0, 3.2, 10.6),
+      pos: new THREE.Vector3(0, 3.2, 32),
       yaw: 0,
-      pitch: -0.14,
+      pitch: -0.06,
       keys: new Set(),
       lookDrag: null,
       touchLook: null,
@@ -481,9 +485,15 @@ export class OkeyTable3D {
     this.animate();
   }
 
-  updateSideTablesState(sideTables = []) {
+  updateSideTablesState(sideTables = [], viewerCtx = null) {
     this.sideTablesState = Array.isArray(sideTables) ? sideTables : [];
-    this.sideTables3d?.updateStates(this.sideTablesState);
+    if (viewerCtx && typeof viewerCtx === 'object') {
+      this.sideTablesViewerCtx = viewerCtx;
+    }
+    this.sideTables3d?.updateStates(this.sideTablesState, {
+      mySideTableId: this.sideTablesViewerCtx.mySideTableId ?? this.mySideTableId,
+      mySideSeatIndex: this.sideTablesViewerCtx.mySideSeatIndex ?? this.mySideSeatIndex
+    });
   }
 
   applyEffectivePixelRatio() {
@@ -3163,26 +3173,39 @@ export class OkeyTable3D {
 
   setCameraPreset(presetName, payload = null) {
     const prevMode = this.cameraMode;
+    if (payload?.tableId) {
+      this.activeSideTableTarget = {
+        tableId: payload.tableId,
+        seatIndex: payload.seatIndex ?? 0
+      };
+    }
+
     if (presetName === 'freeroam') {
       this.cameraMode = 'freeroam';
       this.orbitDrag = null;
       this.billiardAimingDrag = false;
       if (prevMode !== 'freeroam') {
-        if (prevMode === 'billiard') {
+        const sideRefId = payload?.tableId || this.activeSideTableTarget?.tableId || this.mySideTableId;
+        if (prevMode === 'billiard' || this.myActivity === 'billiard') {
           this.freeroamState.pos.set(BILLIARD_WORLD_POS.x - 6.8, 3.2, BILLIARD_WORLD_POS.z);
           this.freeroamState.yaw = -Math.PI / 2;
           this.freeroamState.pitch = -0.18;
-        } else if (prevMode === 'sideTable' && payload?.tableId) {
-          const def = SIDE_TABLE_DEFS.find((d) => d.id === payload.tableId);
+        } else if (sideRefId) {
+          const def = SIDE_TABLE_DEFS.find((d) => d.id === sideRefId);
           if (def) {
-            this.freeroamState.pos.set(def.x, 3.2, def.z + 5.2);
-            this.freeroamState.yaw = 0;
-            this.freeroamState.pitch = -0.16;
+            const offsetZ = def.z > 0 ? -7.6 : 7.6;
+            this.freeroamState.pos.set(def.x, 3.2, def.z + offsetZ);
+            this.freeroamState.yaw = def.z > 0 ? Math.PI : 0;
+            this.freeroamState.pitch = -0.12;
           } else {
-            this.freeroamState.pos.set(0, 3.2, 12.2);
+            this.freeroamState.pos.set(0, 3.2, 32);
             this.freeroamState.yaw = 0;
-            this.freeroamState.pitch = -0.14;
+            this.freeroamState.pitch = -0.06;
           }
+        } else if (this.myActivity === 'spectator') {
+          this.freeroamState.pos.set(0, 3.2, 32);
+          this.freeroamState.yaw = 0;
+          this.freeroamState.pitch = -0.06;
         } else {
           this.freeroamState.pos.set(0, 3.2, 12.2);
           this.freeroamState.yaw = 0;
@@ -3223,13 +3246,24 @@ export class OkeyTable3D {
       this.callbacks.onFreeroamMove?.({ active: false });
     }
 
-    if (presetName === 'sideTable') {
-      this.cameraMode = 'sideTable';
-      const pose = this.sideTables3d?.getSeatCameraPose(payload?.tableId, payload?.seatIndex ?? 0);
+    const sideTarget =
+      this.activeSideTableTarget ||
+      (this.myActivity === 'sideTable' && this.mySideTableId
+        ? { tableId: this.mySideTableId, seatIndex: this.mySideSeatIndex ?? 0 }
+        : null);
+
+    if (
+      presetName === 'sideTable' ||
+      (this.myActivity === 'sideTable' && sideTarget && (presetName === 'fp' || presetName === 'table' || presetName === 'top'))
+    ) {
+      const target = payload?.tableId ? { tableId: payload.tableId, seatIndex: payload.seatIndex ?? 0 } : sideTarget;
+      const sideMode = presetName === 'sideTable' ? 'fp' : presetName;
+      const pose = target ? this.sideTables3d?.getSeatCameraPose(target.tableId, target.seatIndex ?? 0, sideMode) : null;
       if (pose) {
+        this.cameraMode = sideMode;
         this.targetCamLook.copy(pose.target);
         this.targetSpherical.setFromVector3(pose.pos.clone().sub(pose.target));
-        this.targetFov = pose.fov || 54;
+        this.targetFov = pose.fov || 62;
         return;
       }
     }
@@ -3250,7 +3284,12 @@ export class OkeyTable3D {
     };
     const sideDef = SIDE_TABLE_DEFS.find((d) => d.id === zone);
     const z = sideDef
-      ? { x: sideDef.x, z: sideDef.z + 5.2, yaw: 0, pitch: -0.16 }
+      ? {
+          x: sideDef.x,
+          z: sideDef.z + (sideDef.z > 0 ? -7.6 : 7.6),
+          yaw: sideDef.z > 0 ? Math.PI : 0,
+          pitch: -0.12
+        }
       : (zones[zone] || zones.okey);
     this.cameraMode = 'freeroam';
     this.orbitDrag = null;
@@ -3321,12 +3360,12 @@ export class OkeyTable3D {
       pos.z = -34.0;
     }
 
-    // Push out from all 6 social / card side tables
+    // Push out from all 6 enlarged social / card side tables
     for (const def of SIDE_TABLE_DEFS) {
       const dx = pos.x - def.x;
       const dz = pos.z - def.z;
       const dist = Math.hypot(dx, dz);
-      const minR = 3.6;
+      const minR = def.shape === 'oval' ? 7.6 : 6.9;
       if (dist < minR && dist > 0.001) {
         pos.x = def.x + (dx / dist) * minR;
         pos.z = def.z + (dz / dist) * minR;
@@ -3369,14 +3408,14 @@ export class OkeyTable3D {
 
     for (const def of SIDE_TABLE_DEFS) {
       const tDist = Math.hypot(px - def.x, pz - def.z);
-      if (tDist < 6.4) {
+      if (tDist < 10.6) {
         candidates.push({
           id: `side:${def.id}`,
           type: 'sideTable',
           tableId: def.id,
           kind: def.kind,
           label: `${def.title} Masasına Otur`,
-          dist: Math.max(0, tDist - 2.6)
+          dist: Math.max(0, tDist - 6.0)
         });
       }
     }
@@ -3430,10 +3469,17 @@ export class OkeyTable3D {
     return this.billiardState.currentSeat === this.billiardSeatIndex && !this.billiard3d?.isAnimatingShot;
   }
 
-  setActivityContext({ myActivity, billiardSeatIndex, localPlayerId } = {}) {
-    if (myActivity) this.myActivity = myActivity;
+  setActivityContext({ myActivity, billiardSeatIndex, localPlayerId, mySideTableId, mySideSeatIndex } = {}) {
+    if (myActivity) {
+      this.myActivity = myActivity;
+      if (myActivity !== 'sideTable') {
+        this.activeSideTableTarget = null;
+      }
+    }
     if (billiardSeatIndex !== undefined) this.billiardSeatIndex = billiardSeatIndex;
     if (localPlayerId !== undefined) this.localPlayerId = localPlayerId;
+    if (mySideTableId !== undefined) this.mySideTableId = mySideTableId;
+    if (mySideSeatIndex !== undefined) this.mySideSeatIndex = mySideSeatIndex;
   }
 
   updateBilliardState(billiardState) {
@@ -3784,6 +3830,7 @@ export class OkeyTable3D {
       this.raycaster.setFromCamera(this.pointer, this.camera);
       const clickTargets = [
         ...this.interactables,
+        ...(this.sideTables3d?.getInteractables() || []),
         ...(this.myDrinkHitMesh ? [this.myDrinkHitMesh] : []),
         ...this.envInteractables
       ];
@@ -3795,6 +3842,16 @@ export class OkeyTable3D {
 
       const hit = hits[0].object;
       const data = hit.userData;
+
+      if (data.kind === 'sideAction') {
+        this.callbacks.onSideTableAction?.(data.tableId, data.action, data.payload || {});
+        return;
+      }
+
+      if (data.kind === 'sideSetup') {
+        this.callbacks.onSideTableSetup?.(data.tableId, data.command);
+        return;
+      }
 
       if (data.kind === 'billiardFelt') {
         if (this.isMyBilliardTurn()) {
@@ -4074,6 +4131,10 @@ export class OkeyTable3D {
       this._hoverTargets.length = 0;
       for (let i = 0; i < this.interactables.length; i += 1) {
         this._hoverTargets.push(this.interactables[i]);
+      }
+      const sideInteractables = this.sideTables3d?.getInteractables() || [];
+      for (let i = 0; i < sideInteractables.length; i += 1) {
+        this._hoverTargets.push(sideInteractables[i]);
       }
       if (this.myDrinkHitMesh) {
         this._hoverTargets.push(this.myDrinkHitMesh);

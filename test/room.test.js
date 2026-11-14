@@ -1019,3 +1019,103 @@ test('RoomManager & LocalSingleplayerClient run Okey, Billiards, and Side Tables
   local.action('room:sideLeave', {}, (res) => assert.equal(res.ok, true));
   assert.equal(states[states.length - 1].myActivity, 'spectator');
 });
+
+test('Hall-first entry decouples rooms from Okey and allows seated non-host Okey start', async (ctx) => {
+  const io = createMockIo();
+  const rm = new RoomManager(io);
+
+  // 1. quickStart with entryActivity: 'spectator'
+  const quickRes = rm.createRoom({
+    playerId: 'qh1',
+    playerName: 'SalonKurucu',
+    roomName: 'Hazır Salon',
+    quickStart: true,
+    entryActivity: 'spectator'
+  });
+  assert.equal(quickRes.ok, true);
+  const qRoom = quickRes.room;
+  ctx.after(() => {
+    rm.leaveCurrentRoom('qh1');
+  });
+
+  const qView = rm.getRoomPayloadForPlayer(qRoom, 'qh1');
+  assert.equal(qView.myActivity, 'spectator');
+  assert.equal(qRoom.spectators.has('qh1'), true);
+  assert.equal(qRoom.status, 'playing');
+  assert.equal(qRoom.seats.filter((s) => s.type === 'bot').length, 4);
+  assert.equal(qRoom.billiard.seats.filter((s) => s.type === 'bot').length, 2);
+  assert.ok(qRoom.sideTables.some((t) => t.seats.some((s) => s.type === 'bot')));
+
+  rm.leaveCurrentRoom('qh1');
+  assert.equal(rm.getRoom(qRoom.code), null);
+
+  // 2. Manual room with entryActivity: 'spectator' leaves Okey waiting with 0 humans and lets a seated guest start Okey
+  const waitRes = rm.createRoom({
+    playerId: 'wh1',
+    playerName: 'KafeSahibi',
+    roomName: 'Açık Salon',
+    quickStart: false,
+    entryActivity: 'spectator'
+  });
+  assert.equal(waitRes.ok, true);
+  const wRoom = waitRes.room;
+  ctx.after(() => {
+    rm.leaveCurrentRoom('wh1');
+    rm.leaveCurrentRoom('wg1');
+  });
+
+  assert.equal(wRoom.status, 'waiting');
+  assert.equal(wRoom.seats.filter((s) => s.type === 'human').length, 0);
+  assert.equal(rm.getRoomPayloadForPlayer(wRoom, 'wh1').myActivity, 'spectator');
+
+  // Guest joins Okey while host stays roaming/spectating, and guest can start Okey
+  assert.equal(rm.joinRoom({ roomCode: wRoom.code, playerId: 'wg1', playerName: 'Okeyci', activity: 'okey' }).ok, true);
+  assert.equal(rm.startGame(wRoom.code, 'wg1').ok, true);
+  assert.equal(wRoom.status, 'playing');
+
+  // LocalSingleplayerClient with entryActivity: 'spectator'
+  const { LocalSingleplayerClient } = await import('../src/client/localSession.js');
+  const states = [];
+  const soloHall = new LocalSingleplayerClient({
+    playerName: 'Efe',
+    playerAvatar: 'avatar-1',
+    seatIndex: 0,
+    options: { teamMode: 'solo', katlamali: false, maxRounds: 5, turnSeconds: 60 },
+    entryActivity: 'spectator',
+    onState: (s) => states.push(s)
+  });
+  ctx.after(() => soloHall.destroy());
+  soloHall.emitRoomState();
+  const s0 = states[states.length - 1];
+  assert.equal(s0.myActivity, 'spectator');
+  assert.equal(s0.seats.filter((s) => s.type === 'bot').length, 4);
+  soloHall.action('room:sideJoin', { tableId: 'poker' }, (res) => assert.equal(res.ok, true));
+  assert.equal(states[states.length - 1].mySideTableId, 'poker');
+});
+
+test('SideTableSession papazkacti exposes drawTargetSeatIndex and enlarged SIDE_TABLE_DEFS have non-overlapping spacing', async (ctx) => {
+  const { SideTableSession, SIDE_TABLE_DEFS, SIDE_TABLE_MAP } = await import('../shared/sideGames.js');
+
+  const papaz = new SideTableSession(SIDE_TABLE_MAP.get('papazkacti'));
+  ctx.after(() => papaz.destroy());
+  assert.equal(papaz.sitHuman({ playerId: 'pk1', playerName: 'Efe' }).ok, true);
+  assert.equal(papaz.startMatch({ autoFillBot: true }).ok, true);
+  const view = papaz.getClientView('pk1');
+  assert.equal(view.phase, 'playing');
+  assert.ok(view.drawTargetSeatIndex !== null && view.drawTargetSeatIndex !== undefined);
+  assert.notEqual(view.drawTargetSeatIndex, view.mySeatIndex);
+
+  for (let i = 0; i < SIDE_TABLE_DEFS.length; i += 1) {
+    const a = SIDE_TABLE_DEFS[i];
+    const distOkey = Math.hypot(a.x, a.z);
+    assert.ok(distOkey >= 26.0, `Side table ${a.id} too close to Okey (${distOkey.toFixed(2)})`);
+    const distBilliard = Math.hypot(a.x - 28, a.z);
+    assert.ok(distBilliard >= 20.0, `Side table ${a.id} too close to Billiards (${distBilliard.toFixed(2)})`);
+    for (let j = i + 1; j < SIDE_TABLE_DEFS.length; j += 1) {
+      const b = SIDE_TABLE_DEFS[j];
+      const distPair = Math.hypot(a.x - b.x, a.z - b.z);
+      assert.ok(distPair >= 18.0, `Side tables ${a.id} & ${b.id} overlap (${distPair.toFixed(2)})`);
+    }
+  }
+});
+

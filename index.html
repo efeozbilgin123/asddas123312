@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Yüzbir 3D: Çok Oyunculu 101 Okey</title>
-  <meta name="description" content="Tarayıcıda gerçek zamanlı, 3 boyutlu çok oyunculu 101 Okey masası.">
+  <title>Kahvehane 3D: Bilardo, Okey, Pişti, Poker, Batak</title>
+  <meta name="description" content="Tarayıcıda gerçek zamanlı, 3 boyutlu çok oyunculu Kahvehane salonu: Bilardo, 101 Okey, Pişti, Poker, Batak ve Papaz Kaçtı.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
@@ -13,7 +13,7 @@
 <body>
   <header class="topbar">
     <div class="topbar__brand">
-      <a href="/" class="wordmark" aria-label="Yüzbir 3D ana ekran">Yüzbir 3D</a>
+      <a href="/" class="wordmark" aria-label="Kahvehane 3D ana ekran">Kahvehane 3D</a>
       <span id="connection-badge" class="pill" role="status">Bağlanıyor</span>
       <span id="room-pill" class="pill pill--mono" hidden></span>
     </div>
@@ -93,14 +93,14 @@
   </header>
 
   <main class="stage">
-    <canvas id="table-canvas" aria-label="3 boyutlu Yüzbir Okey oyun masası"></canvas>
+    <canvas id="table-canvas" aria-label="3 boyutlu Kahvehane oyun salonu"></canvas>
 
     <!-- Lobby View -->
     <section id="view-lobby" class="lobby-shell" aria-label="Oyun lobisi">
       <div class="lobby-panel">
         <div class="lobby-panel__head">
-          <h1>101 Okey Kahvehanesi</h1>
-          <p class="lead">Profil fotoğrafını seç veya yükle, tekli ya da eşli masa kur, ortak müzik aç.</p>
+          <h1>Kahvehane 3D Salonu</h1>
+          <p class="lead">İçeri gir ve salonda serbestçe dolaş: Bilardo, 101 Okey, Pişti, Poker, Batak, Papaz Kaçtı veya sohbet masalarına otur.</p>
         </div>
 
         <form id="lobby-form" class="lobby-form" novalidate>
@@ -111,8 +111,8 @@
               <p id="player-name-help" class="field__help" aria-live="polite"></p>
             </div>
             <div class="field">
-              <label for="room-name">Masa adı (kurulumda)</label>
-              <input id="room-name" name="roomName" type="text" maxlength="32" placeholder="Örn. Akşam Masası">
+              <label for="room-name">Salon adı (kurulumda)</label>
+              <input id="room-name" name="roomName" type="text" maxlength="32" placeholder="Örn. Akşam Kahvesi">
               <p class="field__help"></p>
             </div>
           </div>
@@ -182,47 +182,6 @@
 
           <div class="options-bar">
             <div class="field field--inline">
-              <label for="opt-team-mode">Oyun tipi</label>
-              <select id="opt-team-mode">
-                <option value="solo" selected>Tekli (Herkes Tek)</option>
-                <option value="paired">Eşli (2v2 Çapraz)</option>
-              </select>
-            </div>
-            <div class="field field--inline">
-              <label for="opt-katlamali">Açılış kuralı</label>
-              <select id="opt-katlamali">
-                <option value="0" selected>Katlamasız</option>
-                <option value="1">Katlamalı</option>
-              </select>
-            </div>
-            <div class="field field--inline">
-              <label for="opt-max-rounds">Tur sayısı</label>
-              <select id="opt-max-rounds">
-                <option value="3">3 El</option>
-                <option value="5" selected>5 El</option>
-                <option value="7">7 El</option>
-                <option value="9">9 El</option>
-                <option value="0">Sınırsız</option>
-              </select>
-            </div>
-            <div class="field field--inline">
-              <label for="opt-timer">Hamle süresi</label>
-              <select id="opt-timer">
-                <option value="45">45 sn</option>
-                <option value="60" selected>60 sn</option>
-                <option value="90">90 sn</option>
-              </select>
-            </div>
-            <div class="field field--inline">
-              <label for="opt-seat">Başlangıç koltuğu</label>
-              <select id="opt-seat">
-                <option value="0" selected>Güney (1. Takım)</option>
-                <option value="1">Doğu (2. Takım)</option>
-                <option value="2">Kuzey (1. Takım)</option>
-                <option value="3">Batı (2. Takım)</option>
-              </select>
-            </div>
-            <div class="field field--inline">
               <label for="opt-table-theme">Masa çuhası</label>
               <select id="opt-table-theme">
                 <option value="green" selected>Yeşil Çuha</option>
@@ -247,16 +206,63 @@
                 <option value="none">Sessiz</option>
               </select>
             </div>
-            <label class="check">
-              <input id="opt-islek" type="checkbox" checked>
-              <span>İşlek taş cezası (+101)</span>
-            </label>
           </div>
 
+          <details class="okey-options-details">
+            <summary>Okey Masası Kuralları (İsteğe Bağlı)</summary>
+            <div class="options-bar">
+              <div class="field field--inline">
+                <label for="opt-team-mode">Oyun tipi</label>
+                <select id="opt-team-mode">
+                  <option value="solo" selected>Tekli (Herkes Tek)</option>
+                  <option value="paired">Eşli (2v2 Çapraz)</option>
+                </select>
+              </div>
+              <div class="field field--inline">
+                <label for="opt-katlamali">Açılış kuralı</label>
+                <select id="opt-katlamali">
+                  <option value="0" selected>Katlamasız</option>
+                  <option value="1">Katlamalı</option>
+                </select>
+              </div>
+              <div class="field field--inline">
+                <label for="opt-max-rounds">Tur sayısı</label>
+                <select id="opt-max-rounds">
+                  <option value="3">3 El</option>
+                  <option value="5" selected>5 El</option>
+                  <option value="7">7 El</option>
+                  <option value="9">9 El</option>
+                  <option value="0">Sınırsız</option>
+                </select>
+              </div>
+              <div class="field field--inline">
+                <label for="opt-timer">Hamle süresi</label>
+                <select id="opt-timer">
+                  <option value="45">45 sn</option>
+                  <option value="60" selected>60 sn</option>
+                  <option value="90">90 sn</option>
+                </select>
+              </div>
+              <div class="field field--inline">
+                <label for="opt-seat">Okey koltuğu</label>
+                <select id="opt-seat">
+                  <option value="0" selected>Güney (1. Takım)</option>
+                  <option value="1">Doğu (2. Takım)</option>
+                  <option value="2">Kuzey (1. Takım)</option>
+                  <option value="3">Batı (2. Takım)</option>
+                </select>
+              </div>
+              <label class="check">
+                <input id="opt-islek" type="checkbox" checked>
+                <span>İşlek taş cezası (+101)</span>
+              </label>
+            </div>
+          </details>
+
           <div class="lobby-actions">
-            <button type="button" id="btn-quick-play" class="btn btn--primary">Hızlı Başlat (Botlarla)</button>
-            <button type="button" id="btn-singleplayer" class="btn">Tek Kişilik Mod (Çevrimdışı Test)</button>
-            <button type="button" id="btn-create-room" class="btn">Çok Oyunculu Oda Kur</button>
+            <button type="button" id="btn-quick-play" class="btn btn--primary">Salona Gir (Botlarla Hazır)</button>
+            <button type="button" id="btn-singleplayer" class="btn">Tek Kişilik Salon (Çevrimdışı)</button>
+            <button type="button" id="btn-create-room" class="btn">Çok Oyunculu Salon Kur</button>
           </div>
         </form>
 
@@ -266,9 +272,9 @@
               <label for="join-code">Oda koduyla katıl</label>
               <div class="join-row">
                 <input id="join-code" name="roomCode" type="text" maxlength="6" placeholder="4K9M" autocomplete="off">
-                <button type="submit" class="btn">Okey Masasına Gir</button>
+                <button type="submit" class="btn btn--primary">Salona Gir</button>
                 <button type="button" id="btn-join-billiard" class="btn btn--quiet">Bilardo Oyna</button>
-                <button type="button" id="btn-join-spectator" class="btn btn--quiet">Gezin / İzle</button>
+                <button type="button" id="btn-join-okey" class="btn btn--quiet">Okey Masasına Geç</button>
               </div>
               <p id="join-help" class="field__help" aria-live="polite"></p>
             </div>
@@ -513,8 +519,8 @@
         <div id="mobile-joystick-knob" class="mobile-joystick__knob"></div>
       </div>
 
-      <!-- Side Table Card & Social Hangout HUD -->
-      <div id="side-game-hud" class="side-game-hud" hidden aria-label="Yan masa oyunu kontrolleri">
+      <!-- Side Table Slim 3D Status & Seat Strip (No 2D Gameplay Controls) -->
+      <div id="side-game-hud" class="side-game-hud" hidden aria-label="Yan masa durumu">
         <div class="side-game-hud__head">
           <div class="side-game-hud__title-wrap">
             <strong id="side-game-title" class="side-game-hud__title">Masa</strong>
@@ -527,9 +533,19 @@
           </div>
         </div>
         <div id="side-game-seats" class="side-game-seats"></div>
-        <div id="side-game-center" class="side-game-center"></div>
-        <div id="side-game-hand" class="side-game-hand"></div>
-        <div id="side-game-actions" class="side-game-actions"></div>
+      </div>
+
+      <!-- Slim Okey Waiting Strip when seated at Okey before Okey match starts -->
+      <div id="okey-wait-hud" class="freeroam-hud" hidden aria-label="Okey masası hazırlığı">
+        <div class="freeroam-hud__info">
+          <span class="freeroam-hud__hint">Okey Masası Bekliyor</span>
+          <span id="okey-wait-status" class="freeroam-hud__status"></span>
+        </div>
+        <div class="freeroam-hud__actions">
+          <button type="button" id="btn-okey-wait-start" class="btn btn--primary btn--sm" hidden>Okeyi Başlat</button>
+          <button type="button" id="btn-okey-wait-settings" class="btn btn--quiet btn--sm">Oda Ayarları</button>
+          <button type="button" id="btn-okey-wait-stand" class="btn btn--quiet btn--sm">Masadan Kalk</button>
+        </div>
       </div>
 
       <!-- Freeroam / Spectator Walk Bar -->
@@ -540,7 +556,7 @@
         </div>
         <div class="freeroam-hud__actions">
           <button type="button" id="btn-roam-start-okey" class="btn btn--primary btn--sm" hidden>Okeyi Başlat</button>
-          <button type="button" id="btn-roam-back-wait" class="btn btn--quiet btn--sm" hidden>Bekleme Odası</button>
+          <button type="button" id="btn-roam-back-wait" class="btn btn--quiet btn--sm">Oda Ayarları</button>
         </div>
       </div>
     </section>

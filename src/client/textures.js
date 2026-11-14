@@ -1114,4 +1114,247 @@ export function getWindowNightTexture() {
   return getWindowAtmosphereTexture('rainy');
 }
 
+const SUIT_SYMBOLS_TEX = {
+  spades: '♠',
+  hearts: '♥',
+  diamonds: '♦',
+  clubs: '♣'
+};
+
+const RANK_LABELS_TEX = {
+  11: 'J',
+  12: 'Q',
+  13: 'K',
+  14: 'A'
+};
+
+const playingCardCache = new Map();
+
+export function getPlayingCardTexture(card, { legal = true, dimmed = false, selected = false } = {}) {
+  const suit = card?.suit || 'spades';
+  const rank = Number(card?.rank) || 2;
+  const key = `${suit}:${rank}:${legal ? 1 : 0}:${dimmed ? 1 : 0}:${selected ? 1 : 0}`;
+  if (playingCardCache.has(key)) return playingCardCache.get(key);
+  if (playingCardCache.size > 260) {
+    const oldest = playingCardCache.keys().next().value;
+    playingCardCache.get(oldest)?.dispose();
+    playingCardCache.delete(oldest);
+  }
+
+  const w = 256;
+  const h = 360;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+
+  ctx.clearRect(0, 0, w, h);
+
+  // Outer card body
+  ctx.fillStyle = dimmed ? '#D8D1C2' : '#FCF7EC';
+  ctx.beginPath();
+  ctx.roundRect(6, 6, w - 12, h - 12, 22);
+  ctx.fill();
+
+  // Border
+  ctx.lineWidth = selected ? 10 : (legal && !dimmed ? 6 : 4);
+  ctx.strokeStyle = selected
+    ? '#F5C842'
+    : dimmed
+      ? '#8A8172'
+      : '#2B2520';
+  ctx.beginPath();
+  ctx.roundRect(6, 6, w - 12, h - 12, 22);
+  ctx.stroke();
+
+  const isRed = suit === 'hearts' || suit === 'diamonds';
+  const ink = isRed ? '#D41628' : '#18181B';
+  const rankStr = RANK_LABELS_TEX[rank] || String(rank);
+  const suitStr = SUIT_SYMBOLS_TEX[suit] || '♠';
+
+  // Subtle inner frame
+  ctx.strokeStyle = isRed ? 'rgba(212, 22, 40, 0.16)' : 'rgba(24, 24, 27, 0.14)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(18, 18, w - 36, h - 36, 14);
+  ctx.stroke();
+
+  // Top-left corner index
+  ctx.fillStyle = ink;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '800 48px "Plus Jakarta Sans", sans-serif';
+  ctx.fillText(rankStr, 46, 52);
+  ctx.font = '700 42px "Plus Jakarta Sans", sans-serif';
+  ctx.fillText(suitStr, 46, 94);
+
+  // Bottom-right rotated corner index
+  ctx.save();
+  ctx.translate(w - 46, h - 52);
+  ctx.rotate(Math.PI);
+  ctx.font = '800 48px "Plus Jakarta Sans", sans-serif';
+  ctx.fillText(rankStr, 0, 0);
+  ctx.font = '700 42px "Plus Jakarta Sans", sans-serif';
+  ctx.fillText(suitStr, 0, 42);
+  ctx.restore();
+
+  // Center pip / court emblem
+  if (rank >= 11) {
+    ctx.fillStyle = isRed ? 'rgba(212, 22, 40, 0.08)' : 'rgba(24, 24, 27, 0.07)';
+    ctx.beginPath();
+    ctx.roundRect(58, 92, w - 116, h - 184, 16);
+    ctx.fill();
+
+    ctx.fillStyle = ink;
+    ctx.font = '800 98px "Plus Jakarta Sans", sans-serif';
+    ctx.fillText(rankStr, w / 2, h / 2 - 22);
+    ctx.font = '700 68px "Plus Jakarta Sans", sans-serif';
+    ctx.fillText(suitStr, w / 2, h / 2 + 52);
+  } else {
+    ctx.fillStyle = ink;
+    ctx.font = '700 116px "Plus Jakarta Sans", sans-serif';
+    ctx.fillText(suitStr, w / 2, h / 2 + 4);
+  }
+
+  if (dimmed) {
+    ctx.fillStyle = 'rgba(20, 16, 12, 0.36)';
+    ctx.beginPath();
+    ctx.roundRect(6, 6, w - 12, h - 12, 22);
+    ctx.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  playingCardCache.set(key, tex);
+  return tex;
+}
+
+const playingCardBackCache = new Map();
+
+export function getPlayingCardBackTexture({ highlighted = false } = {}) {
+  const key = highlighted ? 'hl' : 'std';
+  if (playingCardBackCache.has(key)) return playingCardBackCache.get(key);
+
+  const w = 256;
+  const h = 360;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#FCF7EC';
+  ctx.beginPath();
+  ctx.roundRect(6, 6, w - 12, h - 12, 22);
+  ctx.fill();
+
+  ctx.fillStyle = highlighted ? '#8C232A' : '#731A22';
+  ctx.beginPath();
+  ctx.roundRect(18, 18, w - 36, h - 36, 14);
+  ctx.fill();
+
+  // Ornate diamond lattice pattern
+  ctx.strokeStyle = highlighted ? 'rgba(255, 226, 138, 0.42)' : 'rgba(229, 194, 103, 0.28)';
+  ctx.lineWidth = 2;
+  for (let y = 32; y < h - 32; y += 28) {
+    for (let x = 32; x < w - 32; x += 28) {
+      ctx.beginPath();
+      ctx.moveTo(x, y - 10);
+      ctx.lineTo(x + 10, y);
+      ctx.lineTo(x, y + 10);
+      ctx.lineTo(x - 10, y);
+      ctx.closePath();
+      ctx.stroke();
+    }
+  }
+
+  // Center gold medallion
+  ctx.fillStyle = highlighted ? '#F5C842' : '#D5A94E';
+  ctx.beginPath();
+  ctx.arc(w / 2, h / 2, 34, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#5B141A';
+  ctx.beginPath();
+  ctx.arc(w / 2, h / 2, 24, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#FFF3CC';
+  ctx.font = '800 28px "Plus Jakarta Sans", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('★', w / 2, h / 2 + 1);
+
+  ctx.lineWidth = highlighted ? 10 : 5;
+  ctx.strokeStyle = highlighted ? '#F5C842' : '#C9A34E';
+  ctx.beginPath();
+  ctx.roundRect(6, 6, w - 12, h - 12, 22);
+  ctx.stroke();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  playingCardBackCache.set(key, tex);
+  return tex;
+}
+
+const sidePlaqueCache = new Map();
+
+export function getSidePlaqueTexture(title, subtitle = '', { tone = 'gold', highlighted = false } = {}) {
+  const key = `${title}|${subtitle}|${tone}|${highlighted ? 1 : 0}`;
+  if (sidePlaqueCache.has(key)) return sidePlaqueCache.get(key);
+  if (sidePlaqueCache.size > 160) {
+    const oldest = sidePlaqueCache.keys().next().value;
+    sidePlaqueCache.get(oldest)?.dispose();
+    sidePlaqueCache.delete(oldest);
+  }
+
+  const w = 320;
+  const h = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+
+  const palettes = {
+    gold: { bg: '#2A1D13', border: '#E5B85B', text: '#FFF4D4', sub: '#D9BC84' },
+    emerald: { bg: '#133527', border: '#4ADE80', text: '#ECFFF4', sub: '#9FE8C1' },
+    red: { bg: '#3B1618', border: '#F87171', text: '#FFF0F0', sub: '#FCA5A5' },
+    dark: { bg: '#181411', border: '#B98C46', text: '#F6EEDF', sub: '#C7B69B' }
+  };
+  const pal = palettes[tone] || palettes.gold;
+
+  ctx.fillStyle = pal.bg;
+  ctx.beginPath();
+  ctx.roundRect(6, 6, w - 12, h - 12, 22);
+  ctx.fill();
+
+  ctx.lineWidth = highlighted ? 8 : 5;
+  ctx.strokeStyle = highlighted ? '#FFE47A' : pal.border;
+  ctx.beginPath();
+  ctx.roundRect(6, 6, w - 12, h - 12, 22);
+  ctx.stroke();
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = pal.text;
+
+  if (subtitle) {
+    ctx.font = '800 38px "Plus Jakarta Sans", sans-serif';
+    ctx.fillText(String(title || '').slice(0, 16), w / 2, 48);
+    ctx.fillStyle = pal.sub;
+    ctx.font = '700 24px "Plus Jakarta Sans", sans-serif';
+    ctx.fillText(String(subtitle || '').slice(0, 22), w / 2, 90);
+  } else {
+    const str = String(title || '').slice(0, 18);
+    ctx.font = str.length <= 3
+      ? '800 58px "Plus Jakarta Sans", sans-serif'
+      : str.length <= 10
+        ? '800 42px "Plus Jakarta Sans", sans-serif'
+        : '800 32px "Plus Jakarta Sans", sans-serif';
+    ctx.fillText(str, w / 2, h / 2 + 2);
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  sidePlaqueCache.set(key, tex);
+  return tex;
+}
+
 

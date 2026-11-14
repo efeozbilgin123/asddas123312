@@ -3279,23 +3279,23 @@ export class OkeyTable3D {
       if (prevMode !== 'freeroam') {
         const sideRefId = payload?.tableId || this.activeSideTableTarget?.tableId || this.mySideTableId;
         if (prevMode === 'billiard' || this.myActivity === 'billiard') {
-          this.freeroamState.pos.set(BILLIARD_WORLD_POS.x - 6.8, 3.2, BILLIARD_WORLD_POS.z);
+          this.freeroamState.pos.set(BILLIARD_WORLD_POS.x - 10.5, 3.2, BILLIARD_WORLD_POS.z);
           this.freeroamState.yaw = -Math.PI / 2;
           this.freeroamState.pitch = -0.18;
         } else if (sideRefId) {
           const def = SIDE_TABLE_DEFS.find((d) => d.id === sideRefId);
           if (def) {
-            const offsetZ = def.z > 0 ? -7.6 : 7.6;
+            const offsetZ = def.z > 15 ? -13.2 : 13.2;
             this.freeroamState.pos.set(def.x, 3.2, def.z + offsetZ);
-            this.freeroamState.yaw = def.z > 0 ? Math.PI : 0;
+            this.freeroamState.yaw = def.z > 15 ? Math.PI : 0;
             this.freeroamState.pitch = -0.12;
           } else {
-            this.freeroamState.pos.set(0, 3.2, 32);
+            this.freeroamState.pos.set(18, 3.2, 19);
             this.freeroamState.yaw = 0;
             this.freeroamState.pitch = -0.06;
           }
         } else if (this.myActivity === 'spectator') {
-          this.freeroamState.pos.set(0, 3.2, 32);
+          this.freeroamState.pos.set(18, 3.2, 19);
           this.freeroamState.yaw = 0;
           this.freeroamState.pitch = -0.06;
         } else {
@@ -3370,16 +3370,16 @@ export class OkeyTable3D {
   teleportFreeroam(zone = 'okey') {
     const zones = {
       okey: { x: 0, z: 12.2, yaw: 0, pitch: -0.15 },
-      billiard: { x: BILLIARD_WORLD_POS.x - 6.8, z: BILLIARD_WORLD_POS.z, yaw: -Math.PI / 2, pitch: -0.2 },
-      tea: { x: 0, z: -31.5, yaw: 0, pitch: -0.06 },
-      tv: { x: 0, z: -24.5, yaw: 0, pitch: 0.1 }
+      billiard: { x: BILLIARD_WORLD_POS.x - 10.5, z: BILLIARD_WORLD_POS.z, yaw: -Math.PI / 2, pitch: -0.2 },
+      tea: { x: 18, z: -31.5, yaw: 0, pitch: -0.06 },
+      tv: { x: 18, z: -24.5, yaw: 0, pitch: 0.1 }
     };
     const sideDef = SIDE_TABLE_DEFS.find((d) => d.id === zone);
     const z = sideDef
       ? {
           x: sideDef.x,
-          z: sideDef.z + (sideDef.z > 0 ? -7.6 : 7.6),
-          yaw: sideDef.z > 0 ? Math.PI : 0,
+          z: sideDef.z + (sideDef.z > 15 ? -13.2 : 13.2),
+          yaw: sideDef.z > 15 ? Math.PI : 0,
           pitch: -0.12
         }
       : (zones[zone] || zones.okey);
@@ -3422,12 +3422,13 @@ export class OkeyTable3D {
   }
 
   constrainFreeroamPosition(pos) {
-    pos.x = THREE.MathUtils.clamp(pos.x, -45.0, 45.0);
-    pos.z = THREE.MathUtils.clamp(pos.z, -39.0, 39.0);
+    // 164 x 112 Grand Salon outer perimeter (x in [-64, 100], z in [-42, 70])
+    pos.x = THREE.MathUtils.clamp(pos.x, -61.5, 97.5);
+    pos.z = THREE.MathUtils.clamp(pos.z, -39.5, 67.5);
     pos.y = 3.2;
 
-    // Push out from center Okey table (box around origin)
-    const okeyHalf = 7.25;
+    // Push out from center Okey table (18.8 x 18.8 + chairs around origin)
+    const okeyHalf = 10.2;
     if (Math.abs(pos.x) < okeyHalf && Math.abs(pos.z) < okeyHalf) {
       const dx = okeyHalf - Math.abs(pos.x);
       const dz = okeyHalf - Math.abs(pos.z);
@@ -3435,11 +3436,11 @@ export class OkeyTable3D {
       else pos.z = pos.z >= 0 ? okeyHalf : -okeyHalf;
     }
 
-    // Push out from scaled Billiard table
+    // Push out from scaled Billiard table (2.40x scale at (72, 0))
     const bx = BILLIARD_WORLD_POS.x;
     const bz = BILLIARD_WORLD_POS.z;
-    const bHalfW = 3.9;
-    const bHalfL = 6.2;
+    const bHalfW = 5.8;
+    const bHalfL = 9.9;
     if (Math.abs(pos.x - bx) < bHalfW && Math.abs(pos.z - bz) < bHalfL) {
       const dx = bHalfW - Math.abs(pos.x - bx);
       const dz = bHalfL - Math.abs(pos.z - bz);
@@ -3447,20 +3448,50 @@ export class OkeyTable3D {
       else pos.z = pos.z >= bz ? bz + bHalfL : bz - bHalfL;
     }
 
-    // Push out from Ocakbasi Tea Bar
-    if (Math.abs(pos.x) < 7.6 && pos.z < -34.0) {
+    // Push out from centered Ocakbasi Tea Bar (x = 18, z = -37.2, width 14.4)
+    if (Math.abs(pos.x - 18) < 8.4 && pos.z < -34.0) {
       pos.z = -34.0;
     }
 
-    // Push out from all 6 enlarged social / card side tables
+    // Push out from West & East Promenade lounge sofas
+    if (pos.x < -56.2 && Math.abs(pos.z - 19.0) < 3.2) {
+      pos.x = -56.2;
+    }
+    if (pos.x > 92.2 && Math.abs(pos.z - 19.0) < 3.2) {
+      pos.x = 92.2;
+    }
+
+    // Push out from all 6 Grand Salon side tables matching their 17.6 / 20.4x14.4 geometry
     for (const def of SIDE_TABLE_DEFS) {
       const dx = pos.x - def.x;
       const dz = pos.z - def.z;
-      const dist = Math.hypot(dx, dz);
-      const minR = def.shape === 'oval' ? 7.6 : 6.9;
-      if (dist < minR && dist > 0.001) {
-        pos.x = def.x + (dx / dist) * minR;
-        pos.z = def.z + (dz / dist) * minR;
+      if (def.shape === 'oval') {
+        const rx = 11.2;
+        const rz = 8.4;
+        const q = Math.hypot(dx / rx, dz / rz);
+        if (q < 1 && q > 0.001) {
+          pos.x = def.x + (dx / q);
+          pos.z = def.z + (dz / q);
+        } else if (q <= 0.001) {
+          pos.z = def.z + rz;
+        }
+      } else if (def.shape === 'round') {
+        const dist = Math.hypot(dx, dz);
+        const minR = 9.8;
+        if (dist < minR && dist > 0.001) {
+          pos.x = def.x + (dx / dist) * minR;
+          pos.z = def.z + (dz / dist) * minR;
+        } else if (dist <= 0.001) {
+          pos.z = def.z + minR;
+        }
+      } else {
+        const half = 9.8;
+        if (Math.abs(dx) < half && Math.abs(dz) < half) {
+          const px = half - Math.abs(dx);
+          const pz = half - Math.abs(dz);
+          if (px < pz) pos.x = def.x + (dx >= 0 ? half : -half);
+          else pos.z = def.z + (dz >= 0 ? half : -half);
+        }
       }
     }
   }
@@ -3479,40 +3510,40 @@ export class OkeyTable3D {
     const candidates = [];
 
     const okeyDist = Math.hypot(px, pz);
-    if (okeyDist < 11.2) {
+    if (okeyDist < 14.2) {
       candidates.push({
         id: 'okey',
         type: 'okey',
         label: 'Okey Masasına Otur',
-        dist: Math.max(0, okeyDist - 7.0)
+        dist: Math.max(0, okeyDist - 9.8)
       });
     }
 
     const bDist = Math.hypot(px - BILLIARD_WORLD_POS.x, pz - BILLIARD_WORLD_POS.z);
-    if (bDist < 8.6) {
+    if (bDist < 12.6) {
       candidates.push({
         id: 'billiard',
         type: 'billiard',
         label: 'Bilardo Masasına Geç',
-        dist: Math.max(0, bDist - 4.5)
+        dist: Math.max(0, bDist - 7.5)
       });
     }
 
     for (const def of SIDE_TABLE_DEFS) {
       const tDist = Math.hypot(px - def.x, pz - def.z);
-      if (tDist < 10.6) {
+      if (tDist < 14.8) {
         candidates.push({
           id: `side:${def.id}`,
           type: 'sideTable',
           tableId: def.id,
           kind: def.kind,
           label: `${def.title} Masasına Otur`,
-          dist: Math.max(0, tDist - 6.0)
+          dist: Math.max(0, tDist - 9.5)
         });
       }
     }
 
-    if (Math.abs(px) < 8.5 && pz < -31.0) {
+    if (Math.abs(px - 18) < 10.5 && pz < -30.5) {
       candidates.push({
         id: 'bar',
         type: 'bar',
@@ -3521,7 +3552,7 @@ export class OkeyTable3D {
       });
     }
 
-    if (Math.abs(px) < 12.0 && pz < -27.5) {
+    if (Math.abs(px - 18) < 13.0 && pz < -27.0) {
       candidates.push({
         id: 'tv',
         type: 'tv',

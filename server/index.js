@@ -133,6 +133,16 @@ io.on('connection', (socket) => {
         roomManager.broadcastRoomState(room);
         roomManager.broadcastRoomBilliard(room);
         syncedSeat = true;
+      } else if (roomManager.findHumanSideTable(room, playerId)) {
+        const sideHit = roomManager.findHumanSideTable(room, playerId);
+        if (room.cleanupTimer) {
+          clearTimeout(room.cleanupTimer);
+          room.cleanupTimer = null;
+        }
+        sideHit.seat.connected = true;
+        roomManager.broadcastRoomState(room);
+        roomManager.broadcastRoomSideTables(room);
+        syncedSeat = true;
       } else if (room.spectators instanceof Map && room.spectators.has(playerId)) {
         if (room.cleanupTimer) {
           clearTimeout(room.cleanupTimer);
@@ -307,6 +317,57 @@ io.on('connection', (socket) => {
       playerId,
       angle: data?.angle,
       power: data?.power
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:sideJoin', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.sideTableJoin({
+      roomCode: code,
+      playerId,
+      tableId: data?.tableId,
+      seatIndex: data?.seatIndex
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:sideLeave', (_data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.sideTableLeave({ roomCode: code, playerId });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:sideToggleBot', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.sideTableToggleBot({
+      roomCode: code,
+      playerId,
+      tableId: data?.tableId,
+      seatIndex: Number(data?.seatIndex)
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:sideStart', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.sideTableStart({
+      roomCode: code,
+      playerId,
+      tableId: data?.tableId,
+      autoFillBot: data?.autoFillBot !== false
+    });
+    if (typeof ack === 'function') ack(res);
+  });
+
+  safeOn('room:sideAction', (data, ack) => {
+    const code = roomManager.playerToRoom.get(playerId);
+    const res = roomManager.sideTableAction({
+      roomCode: code,
+      playerId,
+      tableId: data?.tableId,
+      action: data?.action,
+      payload: data?.payload || {}
     });
     if (typeof ack === 'function') ack(res);
   });

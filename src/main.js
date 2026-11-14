@@ -164,11 +164,26 @@ const els = {
   btnBilliardBot: document.getElementById('btn-billiard-bot'),
   btnBilliardStand: document.getElementById('btn-billiard-stand'),
 
+  fpCrosshair: document.getElementById('fp-crosshair'),
+  proximityPrompt: document.getElementById('proximity-prompt'),
+  proximityText: document.getElementById('proximity-text'),
+  mobileJoystick: document.getElementById('mobile-joystick'),
+  mobileJoystickKnob: document.getElementById('mobile-joystick-knob'),
+
+  sideGameHud: document.getElementById('side-game-hud'),
+  sideGameTitle: document.getElementById('side-game-title'),
+  sideGameStatus: document.getElementById('side-game-status'),
+  sideGameSeats: document.getElementById('side-game-seats'),
+  sideGameCenter: document.getElementById('side-game-center'),
+  sideGameHand: document.getElementById('side-game-hand'),
+  sideGameActions: document.getElementById('side-game-actions'),
+  btnSideBot: document.getElementById('btn-side-bot'),
+  btnSideStart: document.getElementById('btn-side-start'),
+  btnSideStand: document.getElementById('btn-side-stand'),
+
   freeroamHud: document.getElementById('freeroam-hud'),
   freeroamHint: document.getElementById('freeroam-hint'),
   freeroamStatus: document.getElementById('freeroam-status'),
-  btnRoamJoinOkey: document.getElementById('btn-roam-join-okey'),
-  btnRoamJoinBilliard: document.getElementById('btn-roam-join-billiard'),
   btnRoamStartOkey: document.getElementById('btn-roam-start-okey'),
   btnRoamBackWait: document.getElementById('btn-roam-back-wait'),
 
@@ -455,11 +470,24 @@ let lastTurnRoundSeen = null;
 let lastWatchSeatRendered = undefined;
 let viewIn3dHall = false;
 let lastMyActivity = null;
+let lastSideTableKey = null;
+let currentProximityTarget = null;
+let isFpPointerLocked = false;
 let bannerNotice = '';
 let noticeTimer = null;
 let hudBubbleTimer = null;
 let catToastTimer = null;
 let activeCatMenuIndex = null;
+
+function exitPointerLockIfActive() {
+  if (document.pointerLockElement) {
+    try {
+      document.exitPointerLock?.();
+    } catch {
+      // Ignore pointer lock exit error
+    }
+  }
+}
 
 let selectedRackTheme = localStorage.getItem('yuzbir_rack_theme') || 'walnut';
 let selectedTileTheme = localStorage.getItem('yuzbir_tile_theme') || 'ivory';
@@ -528,6 +556,7 @@ function openCatMenu(catIndex) {
   const idx = Number(catIndex);
   const cat = KAHVE_CATS[idx];
   if (!cat) return;
+  exitPointerLockIfActive();
   activeCatMenuIndex = idx;
   if (els.catMenuTitle) {
     els.catMenuTitle.textContent = cat.name;
@@ -627,6 +656,19 @@ const scene3d = new OkeyTable3D(els.canvas, {
         els.btnBilliardPlace.classList.remove('is-active');
       }
     });
+  },
+  onBilliardShotAnimEnd: () => {
+    if (currentRoom) {
+      syncActiveActivityHuds(currentRoom);
+    }
+  },
+  onPointerLockChange: (locked) => {
+    isFpPointerLocked = Boolean(locked);
+    updateFpCrosshairAndHint();
+  },
+  onProximityChange: (target) => {
+    currentProximityTarget = target || null;
+    renderProximityPrompt();
   },
   onFreeroamMove: (payload) => {
     if (!currentRoom) return;
@@ -2300,38 +2342,387 @@ function renderBilliardHud(room) {
   }
 }
 
+function updateFpCrosshairAndHint() {
+  const inFreeroam = Boolean(
+    currentRoom &&
+    !els.viewGame?.hidden &&
+    scene3d.cameraMode === 'freeroam'
+  );
+  if (els.fpCrosshair) {
+    els.fpCrosshair.hidden = !(inFreeroam && isFpPointerLocked);
+  }
+  if (els.freeroamHint) {
+    const isCoarse =
+      window.matchMedia?.('(pointer: coarse)')?.matches ||
+      Number(navigator.maxTouchPoints || 0) > 0;
+    if (isCoarse) {
+      els.freeroamHint.textContent =
+        'Sol joystick: Yürü · Ekranda sürükle: Bak · Yaklaşınca dokun: Masaya otur';
+    } else if (isFpPointerLocked) {
+      els.freeroamHint.textContent =
+        'Serbest Bakış Aktif (ESC çıkış) · WASD: Yürü · Shift: Koş · E: Etkileşim';
+    } else {
+      els.freeroamHint.textContent =
+        'Sahneye Tıkla: Serbest Bakış (ESC çıkış) · WASD: Yürü · Shift: Koş · E: Etkileşim';
+    }
+  }
+}
+
+function renderProximityPrompt() {
+  if (!els.proximityPrompt) return;
+  const inFreeroam = Boolean(
+    currentRoom &&
+    !els.viewGame?.hidden &&
+    scene3d.cameraMode === 'freeroam'
+  );
+  if (!inFreeroam || !currentProximityTarget) {
+    els.proximityPrompt.hidden = true;
+    return;
+  }
+  if (els.proximityText) {
+    els.proximityText.textContent = currentProximityTarget.label || 'Etkileşime Geç';
+  }
+  els.proximityPrompt.hidden = false;
+}
+
+function handleProximityInteract() {
+  if (!currentRoom || !currentProximityTarget) return;
+  const target = currentProximityTarget;
+  if (target.type === 'okey') {
+    exitPointerLockIfActive();
+    sendGameAction('room:takeSeat', {}, (res) => {
+      if (!res?.ok && res?.error) showNotice(res.error);
+    });
+  } else if (target.type === 'billiard') {
+    exitPointerLockIfActive();
+    sendGameAction('room:billiardJoin', {}, (res) => {
+      if (!res?.ok && res?.error) showNotice(res.error);
+    });
+  } else if (target.type === 'sideTable' && target.tableId) {
+    exitPointerLockIfActive();
+    sendGameAction('room:sideJoin', { tableId: target.tableId }, (res) => {
+      if (!res?.ok && res?.error) showNotice(res.error);
+    });
+  } else if (target.type === 'bar') {
+    exitPointerLockIfActive();
+    openOrdersDialog();
+  } else if (target.type === 'tv') {
+    if (!currentRoom.isSpectator) {
+      exitPointerLockIfActive();
+      openTvDialog();
+    } else {
+      showNotice('İzleyiciler TV kanalını değiştiremez.', 2600);
+    }
+  } else if (target.type === 'cat' && target.catIndex !== undefined) {
+    exitPointerLockIfActive();
+    scene3d.triggerCatReaction(target.catIndex);
+    openCatMenu(target.catIndex);
+  }
+}
+
+function createSideCardEl(card, { interactive = false, disabled = false, mini = false, onClick = null } = {}) {
+  const el = document.createElement(interactive ? 'button' : 'span');
+  if (interactive) el.type = 'button';
+  const isRed = card?.suit === 'hearts' || card?.suit === 'diamonds';
+  el.className = `side-card ${isRed ? 'side-card--red' : 'side-card--black'}${mini ? ' side-card--mini' : ''}`;
+  el.textContent = card?.label || '';
+  if (interactive) {
+    el.disabled = Boolean(disabled);
+    if (!disabled && typeof onClick === 'function') {
+      el.addEventListener('click', onClick);
+    }
+  }
+  return el;
+}
+
+function renderSideGameHud(room) {
+  if (!els.sideGameHud || !room) return;
+  const tables = Array.isArray(room.sideTables) ? room.sideTables : [];
+  const table = tables.find((t) => t.id === room.mySideTableId) || null;
+  if (!table) {
+    els.sideGameHud.hidden = true;
+    return;
+  }
+
+  if (els.sideGameTitle) {
+    els.sideGameTitle.textContent = table.title || 'Masa';
+  }
+  if (els.sideGameStatus) {
+    els.sideGameStatus.textContent = table.statusMessage || table.subtitle || '';
+  }
+
+  const isChat = table.kind === 'chat';
+  const canStart = Boolean(
+    !isChat &&
+    table.phase !== 'playing' &&
+    table.seats?.some((s) => s.type !== 'empty')
+  );
+  const canBot = Boolean(
+    !isChat &&
+    table.phase !== 'playing' &&
+    table.seats?.some((s) => s.type !== 'human')
+  );
+
+  if (els.btnSideStart) {
+    els.btnSideStart.hidden = !canStart;
+    els.btnSideStart.textContent = table.phase === 'gameOver' ? 'Yeni El Başlat' : 'Oyunu Başlat';
+  }
+  if (els.btnSideBot) {
+    els.btnSideBot.hidden = !canBot;
+    const hasBot = table.seats?.some((s) => s.type === 'bot');
+    els.btnSideBot.textContent = hasBot ? 'Botu Çıkar' : 'Bot Ekle';
+  }
+  if (els.btnSideStand) {
+    els.btnSideStand.hidden = false;
+  }
+
+  if (els.sideGameSeats) {
+    els.sideGameSeats.innerHTML = '';
+    (table.seats || []).forEach((s) => {
+      const isMine = table.mySeatIndex === s.seatIndex;
+      const isTurn = table.phase === 'playing' && table.currentSeat === s.seatIndex;
+      const pill = document.createElement('div');
+      pill.className = `side-seat-pill${isTurn ? ' is-turn' : ''}${isMine ? ' is-mine' : ''}${s.folded ? ' is-folded' : ''}`;
+
+      const nameSpan = document.createElement('span');
+      const seatName = s.type === 'empty' ? `Boş ${s.seatIndex + 1}` : (s.name || `Koltuk ${s.seatIndex + 1}`);
+      nameSpan.textContent = `${seatName}${isMine ? ' (Siz)' : ''}`;
+      pill.appendChild(nameSpan);
+
+      if (s.type !== 'empty') {
+        const meta = document.createElement('span');
+        meta.className = 'pill';
+        if (table.kind === 'pisti') {
+          meta.textContent = `${s.pistiPoints || 0}p · ${s.handCount || 0}k`;
+        } else if (table.kind === 'papazkacti') {
+          meta.textContent = `${s.handCount || 0} kart`;
+        } else if (table.kind === 'poker') {
+          meta.textContent = s.folded
+            ? `${s.chips ?? 0} çip · Çekildi`
+            : `${s.chips ?? 0} çip${s.bet ? ` (${s.bet})` : ''}`;
+        } else if (table.kind === 'batak') {
+          meta.textContent = `${s.tricksWon || 0}/${s.bid ?? '-'} el · ${s.score || 0}p`;
+        } else {
+          meta.textContent = 'Sohbette';
+        }
+        pill.appendChild(meta);
+      }
+
+      els.sideGameSeats.appendChild(pill);
+    });
+  }
+
+  if (els.sideGameCenter) {
+    els.sideGameCenter.innerHTML = '';
+    if (isChat) {
+      els.sideGameCenter.hidden = false;
+      const info = document.createElement('span');
+      info.className = 'side-game-center__label';
+      info.textContent = 'Sohbet ve çay için rahat köşe · C tuşu veya Sohbet butonundan yazabilirsiniz.';
+      els.sideGameCenter.appendChild(info);
+    } else if (table.kind === 'pisti') {
+      els.sideGameCenter.hidden = false;
+      const lbl = document.createElement('span');
+      lbl.className = 'side-game-center__label';
+      lbl.textContent = `Deste: ${table.deckCount ?? 0} · Orta (${table.centerCount ?? 0} kart):`;
+      els.sideGameCenter.appendChild(lbl);
+      if (table.centerTopCard) {
+        els.sideGameCenter.appendChild(createSideCardEl(table.centerTopCard, { mini: true }));
+      } else {
+        const emptyLbl = document.createElement('span');
+        emptyLbl.className = 'pill';
+        emptyLbl.textContent = 'Orta boş';
+        els.sideGameCenter.appendChild(emptyLbl);
+      }
+    } else if (table.kind === 'poker') {
+      els.sideGameCenter.hidden = false;
+      const lbl = document.createElement('span');
+      lbl.className = 'side-game-center__label';
+      lbl.textContent = `Pot: ${table.pot ?? 0} · Bahis: ${table.currentBet ?? 0}`;
+      els.sideGameCenter.appendChild(lbl);
+      (table.communityCards || []).forEach((c) => {
+        els.sideGameCenter.appendChild(createSideCardEl(c, { mini: true }));
+      });
+      if (table.phase === 'gameOver') {
+        (table.seats || []).forEach((s) => {
+          if (Array.isArray(s.revealedHand) && s.revealedHand.length > 0) {
+            const tag = document.createElement('span');
+            tag.className = 'side-game-center__label';
+            tag.textContent = `${s.name}: ${s.revealedHand.map((c) => c.label).join(' ')}${s.handEvalName ? ` (${s.handEvalName})` : ''}`;
+            els.sideGameCenter.appendChild(tag);
+          }
+        });
+      }
+    } else if (table.kind === 'batak') {
+      els.sideGameCenter.hidden = false;
+      const lbl = document.createElement('span');
+      lbl.className = 'side-game-center__label';
+      lbl.textContent = 'Koz: Maça (♠) · Masa:';
+      els.sideGameCenter.appendChild(lbl);
+      if (Array.isArray(table.trickCards) && table.trickCards.length > 0) {
+        table.trickCards.forEach((entry) => {
+          const seatName = table.seats?.[entry.seatIndex]?.name || `K${entry.seatIndex + 1}`;
+          const wrap = document.createElement('span');
+          wrap.className = 'side-game-center__label';
+          wrap.textContent = `${seatName}:`;
+          els.sideGameCenter.appendChild(wrap);
+          els.sideGameCenter.appendChild(createSideCardEl(entry.card, { mini: true }));
+        });
+      } else {
+        const waitLbl = document.createElement('span');
+        waitLbl.className = 'pill';
+        waitLbl.textContent = table.batakSubPhase === 'bidding' ? 'İhale sürüyor' : 'Kart bekleniyor';
+        els.sideGameCenter.appendChild(waitLbl);
+      }
+    } else if (table.kind === 'papazkacti') {
+      if (table.phase === 'playing' && table.drawTargetCount > 0) {
+        els.sideGameCenter.hidden = false;
+        const lbl = document.createElement('span');
+        lbl.className = 'side-game-center__label';
+        lbl.textContent = table.isMyTurn
+          ? `${table.drawTargetName} elinden kart çek (${table.drawTargetCount}):`
+          : `${table.drawTargetName} kart sayısı: ${table.drawTargetCount}`;
+        els.sideGameCenter.appendChild(lbl);
+        if (table.isMyTurn) {
+          for (let i = 0; i < table.drawTargetCount; i += 1) {
+            const backBtn = document.createElement('button');
+            backBtn.type = 'button';
+            backBtn.className = 'side-card side-card--back side-card--mini';
+            backBtn.textContent = '?';
+            backBtn.title = `${i + 1}. kartı çek`;
+            backBtn.addEventListener('click', () => {
+              sendGameAction(
+                'room:sideAction',
+                { tableId: table.id, action: 'drawCard', payload: { pickIndex: i } },
+                (res) => {
+                  if (!res?.ok && res?.error) showNotice(res.error);
+                }
+              );
+            });
+            els.sideGameCenter.appendChild(backBtn);
+          }
+        }
+      } else {
+        els.sideGameCenter.hidden = false;
+        const info = document.createElement('span');
+        info.className = 'side-game-center__label';
+        info.textContent = table.winnerText || 'Tek kalan papazı elinde tutan kaybeder.';
+        els.sideGameCenter.appendChild(info);
+      }
+    } else {
+      els.sideGameCenter.hidden = true;
+    }
+  }
+
+  if (els.sideGameHand) {
+    els.sideGameHand.innerHTML = '';
+    const myHand = Array.isArray(table.myHand) ? table.myHand : [];
+    if (myHand.length === 0) {
+      els.sideGameHand.hidden = true;
+    } else {
+      els.sideGameHand.hidden = false;
+      const canPlayCard =
+        table.isMyTurn &&
+        (table.kind === 'pisti' || (table.kind === 'batak' && table.batakSubPhase === 'playing'));
+      const legalSet = new Set(Array.isArray(table.legalCardIds) ? table.legalCardIds : []);
+      myHand.forEach((card) => {
+        const isLegal = !canPlayCard || legalSet.has(card.id);
+        const cardEl = createSideCardEl(card, {
+          interactive: canPlayCard,
+          disabled: canPlayCard && !isLegal,
+          onClick: () => {
+            sendGameAction(
+              'room:sideAction',
+              { tableId: table.id, action: 'playCard', payload: { cardId: card.id } },
+              (res) => {
+                if (!res?.ok && res?.error) showNotice(res.error);
+              }
+            );
+          }
+        });
+        els.sideGameHand.appendChild(cardEl);
+      });
+    }
+  }
+
+  if (els.sideGameActions) {
+    els.sideGameActions.innerHTML = '';
+    if (table.isMyTurn && table.kind === 'batak' && table.batakSubPhase === 'bidding') {
+      els.sideGameActions.hidden = false;
+      const lbl = document.createElement('span');
+      lbl.className = 'side-game-center__label';
+      lbl.textContent = 'El Tahmini:';
+      els.sideGameActions.appendChild(lbl);
+
+      const grid = document.createElement('div');
+      grid.className = 'side-bid-grid';
+      for (let bid = 1; bid <= 13; bid += 1) {
+        const bBtn = document.createElement('button');
+        bBtn.type = 'button';
+        bBtn.className = 'btn btn--quiet btn--sm side-bid-btn';
+        bBtn.textContent = String(bid);
+        bBtn.addEventListener('click', () => {
+          sendGameAction(
+            'room:sideAction',
+            { tableId: table.id, action: 'bid', payload: { bid } },
+            (res) => {
+              if (!res?.ok && res?.error) showNotice(res.error);
+            }
+          );
+        });
+        grid.appendChild(bBtn);
+      }
+      els.sideGameActions.appendChild(grid);
+    } else if (table.isMyTurn && table.kind === 'poker') {
+      els.sideGameActions.hidden = false;
+      const mySeat = table.seats?.[table.mySeatIndex];
+      const toCall = Math.max(0, (table.currentBet || 0) - (mySeat?.bet || 0));
+
+      const addActBtn = (label, action, payload = {}, cls = 'btn btn--quiet btn--sm') => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = cls;
+        btn.textContent = label;
+        btn.addEventListener('click', () => {
+          sendGameAction('room:sideAction', { tableId: table.id, action, payload }, (res) => {
+            if (!res?.ok && res?.error) showNotice(res.error);
+          });
+        });
+        els.sideGameActions.appendChild(btn);
+      };
+
+      addActBtn(
+        toCall > 0 ? `Gör (${toCall})` : 'Pas',
+        toCall > 0 ? 'call' : 'check',
+        {},
+        'btn btn--primary btn--sm'
+      );
+      if ((mySeat?.chips || 0) > toCall + 10) {
+        addActBtn('+20 Artır', 'raise', { amount: 20 });
+      }
+      if ((mySeat?.chips || 0) > toCall + 40) {
+        addActBtn('+50 Artır', 'raise', { amount: 50 });
+      }
+      addActBtn('Çekil', 'fold');
+    } else {
+      els.sideGameActions.hidden = true;
+    }
+  }
+}
+
 function renderFreeroamHud(room) {
   if (!els.freeroamHud || !room) return;
   const okeyHumans = (room.seats || []).filter((s) => s.type === 'human').length;
   const bSeats = room.billiard?.seats || [];
   const bHumans = bSeats.filter((s) => s.type === 'human').length;
+  const sideHumans = (room.sideTables || []).reduce(
+    (sum, t) => sum + (t.seats || []).filter((s) => s.type === 'human').length,
+    0
+  );
   const okeyStatus = room.status === 'playing' ? 'Oyunda' : 'Bekliyor';
-  const bMsg = room.billiard?.statusMessage || 'Hazır';
 
   if (els.freeroamStatus) {
-    els.freeroamStatus.textContent = `Okey (${okeyStatus}): ${okeyHumans}/4 · Bilardo: ${bHumans}/2 (${bMsg})`;
-  }
-
-  const openOkeySeat = (room.seats || []).some(
-    (s) =>
-      s.type === 'empty' ||
-      (s.type === 'human' && !s.connected) ||
-      (room.status === 'waiting' && s.type === 'bot') ||
-      (room.isLocal && s.type === 'bot')
-  );
-  if (els.btnRoamJoinOkey) {
-    els.btnRoamJoinOkey.hidden = room.myActivity === 'okey' || !openOkeySeat;
-  }
-
-  const openBilliardSeat = bSeats.some(
-    (s) =>
-      s.type === 'empty' ||
-      (s.type === 'human' && !s.connected) ||
-      (room.billiard?.phase !== 'playing' && s.type === 'bot') ||
-      (room.isLocal && s.type === 'bot')
-  );
-  if (els.btnRoamJoinBilliard) {
-    els.btnRoamJoinBilliard.hidden = room.myActivity === 'billiard' || !openBilliardSeat;
+    els.freeroamStatus.textContent = `Okey (${okeyStatus}): ${okeyHumans}/4 · Bilardo: ${bHumans}/2 · Yan Masalar: ${sideHumans}`;
   }
 
   if (els.btnRoamStartOkey) {
@@ -2340,6 +2731,8 @@ function renderFreeroamHud(room) {
   if (els.btnRoamBackWait) {
     els.btnRoamBackWait.hidden = !(room.status === 'waiting' && room.myActivity === 'okey');
   }
+  updateFpCrosshairAndHint();
+  renderProximityPrompt();
 }
 
 function syncActiveActivityHuds(room) {
@@ -2347,19 +2740,28 @@ function syncActiveActivityHuds(room) {
   const cam = scene3d.cameraMode;
   const myAct = room.myActivity || (room.isSpectator ? 'spectator' : 'okey');
   let showFreeroam = cam === 'freeroam';
-  const showBilliard = !showFreeroam && (cam === 'billiard' || myAct === 'billiard');
-  const showOkey = !showFreeroam && !showBilliard && room.status === 'playing' && Boolean(room.game);
+  const showSideTable = !showFreeroam && (cam === 'sideTable' || myAct === 'sideTable');
+  const showBilliard = !showFreeroam && !showSideTable && (cam === 'billiard' || myAct === 'billiard');
+  const showOkey = !showFreeroam && !showSideTable && !showBilliard && room.status === 'playing' && Boolean(room.game);
 
-  if (!showFreeroam && !showBilliard && !showOkey) {
+  if (!showFreeroam && !showSideTable && !showBilliard && !showOkey) {
     showFreeroam = true;
   }
 
   if (els.okeyBottomDock) els.okeyBottomDock.hidden = !showOkey;
   if (els.billiardHud) els.billiardHud.hidden = !showBilliard;
+  if (els.sideGameHud) els.sideGameHud.hidden = !showSideTable;
   if (els.freeroamHud) els.freeroamHud.hidden = !showFreeroam;
+  if (els.mobileJoystick) els.mobileJoystick.hidden = !showFreeroam;
 
+  if (showSideTable) renderSideGameHud(room);
   if (showBilliard) renderBilliardHud(room);
-  if (showFreeroam) renderFreeroamHud(room);
+  if (showFreeroam) {
+    renderFreeroamHud(room);
+  } else {
+    if (els.fpCrosshair) els.fpCrosshair.hidden = true;
+    if (els.proximityPrompt) els.proximityPrompt.hidden = true;
+  }
 
   if (els.spectatorBar) {
     if (showOkey && myAct === 'spectator' && room.status === 'playing' && room.game) {
@@ -2472,8 +2874,12 @@ function switchView(room) {
   currentRoom = room;
   if (!room) {
     closeCatMenu();
+    exitPointerLockIfActive();
     viewIn3dHall = false;
     lastMyActivity = null;
+    lastSideTableKey = null;
+    currentProximityTarget = null;
+    isFpPointerLocked = false;
     els.viewLobby.hidden = false;
     els.viewWaiting.hidden = true;
     els.viewGame.hidden = true;
@@ -2488,7 +2894,11 @@ function switchView(room) {
     if (els.hudSpeechBubble) els.hudSpeechBubble.hidden = true;
     if (els.spectatorBar) els.spectatorBar.hidden = true;
     if (els.billiardHud) els.billiardHud.hidden = true;
+    if (els.sideGameHud) els.sideGameHud.hidden = true;
     if (els.freeroamHud) els.freeroamHud.hidden = true;
+    if (els.fpCrosshair) els.fpCrosshair.hidden = true;
+    if (els.proximityPrompt) els.proximityPrompt.hidden = true;
+    if (els.mobileJoystick) els.mobileJoystick.hidden = true;
     if (els.okeyBottomDock) els.okeyBottomDock.hidden = false;
     if (els.waitSpectators) els.waitSpectators.hidden = true;
     if (els.catToast) els.catToast.hidden = true;
@@ -2544,6 +2954,7 @@ function switchView(room) {
     applyRoomAmbianceTrack(null);
     scene3d.setActivityContext({ myActivity: 'okey', billiardSeatIndex: null, localPlayerId: playerId });
     scene3d.updateBilliardState(null);
+    scene3d.updateSideTablesState([]);
     scene3d.renderRoamers([], null);
     scene3d.setRoomAtmosphere(els.optAtmosphere?.value || 'rainy');
     scene3d.setRoomOrders(null, 0);
@@ -2565,6 +2976,7 @@ function switchView(room) {
     localPlayerId: myId
   });
   scene3d.updateBilliardState(room.billiard || null);
+  scene3d.updateSideTablesState(room.sideTables || []);
   scene3d.renderRoamers(room.roamers || [], room.myRoamerKey || null);
 
   if (myActivity !== 'okey' || room.status === 'playing') {
@@ -2618,17 +3030,29 @@ function switchView(room) {
   applyRoomOrders(room.orders || null, room.lastOrder || null, room.viewerSeatIndex ?? 0);
   syncChatHistory(room.chatHistory, { announceNew: Boolean(prevRoom) });
 
-  if (lastMyActivity !== myActivity) {
+  const sideKey = myActivity === 'sideTable'
+    ? `${room.mySideTableId || ''}:${room.mySideSeatIndex ?? 0}`
+    : null;
+
+  if (lastMyActivity !== myActivity || (myActivity === 'sideTable' && lastSideTableKey !== sideKey)) {
     lastMyActivity = myActivity;
+    lastSideTableKey = sideKey;
     lastWatchSeatRendered = myActivity === 'spectator' ? (room.watchSeatIndex ?? null) : undefined;
     const defaultCam =
       myActivity === 'billiard'
         ? 'billiard'
-        : myActivity === 'spectator'
-          ? 'freeroam'
-          : (room.status === 'playing' ? 'fp' : 'table');
-    scene3d.setCameraPreset(defaultCam);
-    setActiveCameraButton(defaultCam);
+        : myActivity === 'sideTable'
+          ? 'sideTable'
+          : myActivity === 'spectator'
+            ? 'freeroam'
+            : (room.status === 'playing' ? 'fp' : 'table');
+    scene3d.setCameraPreset(
+      defaultCam,
+      myActivity === 'sideTable'
+        ? { tableId: room.mySideTableId, seatIndex: room.mySideSeatIndex ?? 0 }
+        : {}
+    );
+    setActiveCameraButton(defaultCam === 'sideTable' ? 'table' : defaultCam);
   } else if (myActivity !== 'spectator') {
     lastWatchSeatRendered = undefined;
   } else if (room.status === 'playing' && room.watchSeatIndex !== lastWatchSeatRendered) {
@@ -2643,6 +3067,7 @@ function switchView(room) {
 
   const showWaitingPanel = room.status === 'waiting' && myActivity === 'okey' && !viewIn3dHall;
   if (showWaitingPanel) {
+    exitPointerLockIfActive();
     els.viewLobby.hidden = true;
     els.viewWaiting.hidden = false;
     els.viewGame.hidden = true;
@@ -2652,7 +3077,11 @@ function switchView(room) {
     els.cameraGroup.hidden = true;
     if (els.spectatorBar) els.spectatorBar.hidden = true;
     if (els.billiardHud) els.billiardHud.hidden = true;
+    if (els.sideGameHud) els.sideGameHud.hidden = true;
     if (els.freeroamHud) els.freeroamHud.hidden = true;
+    if (els.fpCrosshair) els.fpCrosshair.hidden = true;
+    if (els.proximityPrompt) els.proximityPrompt.hidden = true;
+    if (els.mobileJoystick) els.mobileJoystick.hidden = true;
     showGameAlert('', 'islek', 0);
     renderWaitingRoom(room);
     scene3d.renderGameState(null);
@@ -3474,6 +3903,7 @@ function renderAdisyonReceipt(containerEl, room, game) {
 }
 
 function openRoundSummaryDialog(room, summary) {
+  exitPointerLockIfActive();
   const badges = [];
   if (summary.finishedFromPairs) badges.push('Çiftten');
   if (summary.finishedFromHand) badges.push('Elden');
@@ -4009,26 +4439,96 @@ els.btnBilliardStand?.addEventListener('click', () => {
   }
 });
 
-// Freeroam HUD Warps & Seat Actions
-els.freeroamHud?.querySelectorAll('[data-warp]').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    if (scene3d.cameraMode !== 'freeroam') {
-      setCameraPresetAndSync('freeroam');
-    }
-    scene3d.teleportFreeroam(btn.dataset.warp || 'okey');
-  });
+// Dynamic Proximity Prompt, Mobile Touch Joystick & Side Table Top Controls
+els.proximityPrompt?.addEventListener('click', handleProximityInteract);
+
+let joystickPointerId = null;
+function resetMobileJoystick() {
+  joystickPointerId = null;
+  if (els.mobileJoystickKnob) {
+    els.mobileJoystickKnob.style.transform = 'translate(0px, 0px)';
+  }
+  scene3d.setMobileMove(0, 0);
+}
+
+function updateMobileJoystickFromClient(clientX, clientY) {
+  if (!els.mobileJoystick) return;
+  const rect = els.mobileJoystick.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  const maxR = Math.max(24, rect.width * 0.36);
+  let dx = clientX - centerX;
+  let dy = clientY - centerY;
+  const dist = Math.hypot(dx, dy);
+  if (dist > maxR && dist > 0) {
+    dx = (dx / dist) * maxR;
+    dy = (dy / dist) * maxR;
+  }
+  if (els.mobileJoystickKnob) {
+    els.mobileJoystickKnob.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
+  }
+  scene3d.setMobileMove(dx / maxR, dy / maxR);
+}
+
+els.mobileJoystick?.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  joystickPointerId = e.pointerId;
+  try {
+    els.mobileJoystick.setPointerCapture?.(e.pointerId);
+  } catch {
+    // Ignore pointer capture errors
+  }
+  updateMobileJoystickFromClient(e.clientX, e.clientY);
 });
 
-els.btnRoamJoinOkey?.addEventListener('click', () => {
+els.mobileJoystick?.addEventListener('pointermove', (e) => {
+  if (joystickPointerId !== e.pointerId) return;
+  e.preventDefault();
+  e.stopPropagation();
+  updateMobileJoystickFromClient(e.clientX, e.clientY);
+});
+
+const handleJoystickEnd = (e) => {
+  if (joystickPointerId !== e.pointerId) return;
+  try {
+    if (els.mobileJoystick?.hasPointerCapture?.(e.pointerId)) {
+      els.mobileJoystick.releasePointerCapture(e.pointerId);
+    }
+  } catch {
+    // Ignore pointer capture errors
+  }
+  resetMobileJoystick();
+};
+els.mobileJoystick?.addEventListener('pointerup', handleJoystickEnd);
+els.mobileJoystick?.addEventListener('pointercancel', handleJoystickEnd);
+window.addEventListener('blur', resetMobileJoystick);
+
+els.btnSideStand?.addEventListener('click', () => {
   if (!currentRoom) return;
-  sendGameAction('room:takeSeat', {}, (res) => {
+  sendGameAction('room:standUp', {}, (res) => {
     if (!res?.ok && res?.error) showNotice(res.error);
   });
 });
 
-els.btnRoamJoinBilliard?.addEventListener('click', () => {
-  if (!currentRoom) return;
-  sendGameAction('room:billiardJoin', {}, (res) => {
+els.btnSideStart?.addEventListener('click', () => {
+  if (!currentRoom?.mySideTableId) return;
+  const tableId = currentRoom.mySideTableId;
+  sendGameAction('room:sideStart', { tableId, autoFillBot: true }, (res) => {
+    if (!res?.ok && res?.error) showNotice(res.error);
+  });
+});
+
+els.btnSideBot?.addEventListener('click', () => {
+  if (!currentRoom?.mySideTableId) return;
+  const tableId = currentRoom.mySideTableId;
+  const table = (currentRoom.sideTables || []).find((t) => t.id === tableId);
+  if (!table) return;
+  const botSeat = table.seats?.find((s) => s.type === 'bot');
+  const emptySeat = table.seats?.find((s) => s.type === 'empty');
+  const targetSeat = botSeat || emptySeat;
+  if (!targetSeat) return;
+  sendGameAction('room:sideToggleBot', { tableId, seatIndex: targetSeat.seatIndex }, (res) => {
     if (!res?.ok && res?.error) showNotice(res.error);
   });
 });
@@ -4096,6 +4596,7 @@ function renderMusicPresets() {
 
 function openMusicDialog({ emptyInput = Boolean(activeMusicData) } = {}) {
   if (!currentRoom) return;
+  exitPointerLockIfActive();
   if (els.musicUrlHelp) els.musicUrlHelp.textContent = '';
   if (els.musicUrlInput) {
     els.musicUrlInput.value = emptyInput ? '' : (activeMusicData?.originalUrl || '');
@@ -4411,6 +4912,7 @@ function renderOrdersMenu() {
 
 function openOrdersDialog() {
   if (!currentRoom) return;
+  exitPointerLockIfActive();
   if (els.orderStatusMsg) els.orderStatusMsg.textContent = '';
   renderOrdersTargetSelect();
   renderOrdersMenu();
@@ -4614,6 +5116,7 @@ function renderTvPresets() {
 
 function openTvDialog() {
   if (!currentRoom) return;
+  exitPointerLockIfActive();
   if (els.tvUrlHelp) els.tvUrlHelp.textContent = '';
   if (els.tvUrlInput) els.tvUrlInput.value = '';
   if (els.tvTitleInput) els.tvTitleInput.value = '';
@@ -4866,6 +5369,7 @@ function syncCozyDialogState() {
 
 function openCozyDialog() {
   if (!currentRoom) return;
+  exitPointerLockIfActive();
   if (els.cozyAmbianceHelp) els.cozyAmbianceHelp.textContent = '';
   renderCozyThemePills();
   renderCozyAmbiancePresets();
@@ -5154,11 +5658,31 @@ window.addEventListener('keydown', (e) => {
   }
   if (document.querySelector('dialog[open]')) return;
 
-  if (currentRoom && scene3d.cameraMode === 'freeroam' && FREEROAM_KEY_CODES.has(e.code)) {
-    scene3d.setFreeroamKey(e.code, true);
-    if (e.code.startsWith('Arrow')) {
+  if (currentRoom && scene3d.cameraMode === 'freeroam') {
+    if (e.code === 'KeyE') {
       e.preventDefault();
+      handleProximityInteract();
+      return;
     }
+    if (FREEROAM_KEY_CODES.has(e.code)) {
+      scene3d.setFreeroamKey(e.code, true);
+      if (e.code.startsWith('Arrow')) {
+        e.preventDefault();
+      }
+      return;
+    }
+  }
+
+  if (
+    currentRoom &&
+    (scene3d.cameraMode === 'billiard' || currentRoom.myActivity === 'billiard') &&
+    e.code === 'Space' &&
+    els.btnBilliardShoot &&
+    !els.btnBilliardShoot.hidden &&
+    !els.btnBilliardShoot.disabled
+  ) {
+    e.preventDefault();
+    els.btnBilliardShoot.click();
     return;
   }
 
@@ -5458,5 +5982,13 @@ socket.on('room:roamers', (roamers) => {
   if (!localClient && currentRoom) {
     currentRoom.roamers = Array.isArray(roamers) ? roamers : [];
     scene3d.renderRoamers(currentRoom.roamers, currentRoom.myRoamerKey || null);
+  }
+});
+
+socket.on('room:sideTables', (sideTables) => {
+  if (!localClient && currentRoom) {
+    currentRoom.sideTables = Array.isArray(sideTables) ? sideTables : [];
+    scene3d.updateSideTablesState(currentRoom.sideTables);
+    syncActiveActivityHuds(currentRoom);
   }
 });

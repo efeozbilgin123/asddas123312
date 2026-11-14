@@ -1,10 +1,13 @@
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { CSS3DObject, CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { canLayoffTile } from '../../shared/melds.js';
 import { KAHVE_CATS, RACK_THEMES, TILE_THEMES } from '../../shared/presets.js';
+import { SIDE_TABLE_DEFS } from '../../shared/sideGames.js';
 import { isOkeyTile } from '../../shared/tiles.js';
 import { BILLIARD_WORLD_POS, BilliardTable3D } from './billiard3d.js';
+import { SideTables3D } from './sideTables3d.js';
 import { soundFX } from './sound.js';
 import {
   createLiveClockTexture,
@@ -55,9 +58,9 @@ const CAMERA_PRESETS = {
     fov: 44
   },
   billiard: {
-    pos: new THREE.Vector3(BILLIARD_WORLD_POS.x - 5.4, 6.2, BILLIARD_WORLD_POS.z + 5.6),
-    target: new THREE.Vector3(BILLIARD_WORLD_POS.x, 0.18, BILLIARD_WORLD_POS.z),
-    fov: 48
+    pos: new THREE.Vector3(BILLIARD_WORLD_POS.x - 8.2, 7.6, BILLIARD_WORLD_POS.z + 8.4),
+    target: new THREE.Vector3(BILLIARD_WORLD_POS.x, 0.2, BILLIARD_WORLD_POS.z),
+    fov: 50
   }
 };
 
@@ -183,13 +186,13 @@ export class OkeyTable3D {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#160E09');
-    this.scene.fog = new THREE.FogExp2('#160E09', 0.0065);
+    this.scene.fog = new THREE.FogExp2('#160E09', 0.0038);
 
     const rect = canvas.getBoundingClientRect();
     const width = rect.width || window.innerWidth;
     const height = rect.height || window.innerHeight;
 
-    this.camera = new THREE.PerspectiveCamera(CAMERA_PRESETS.table.fov, width / height, 0.1, 130);
+    this.camera = new THREE.PerspectiveCamera(CAMERA_PRESETS.table.fov, width / height, 0.1, 190);
     this.targetFov = CAMERA_PRESETS.table.fov;
     this.camTarget = CAMERA_PRESETS.table.target.clone();
     this.camSpherical = new THREE.Spherical().setFromVector3(
@@ -209,12 +212,22 @@ export class OkeyTable3D {
     this.renderer.setPixelRatio(this.basePixelRatio);
     this.renderer.setSize(width, height, false);
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.shadowMap.autoUpdate = false;
     this.renderer.shadowMap.needsUpdate = true;
     this.shadowFramesPending = 2;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.14;
+    this.renderer.toneMappingExposure = 1.16;
+
+    try {
+      const pmrem = new THREE.PMREMGenerator(this.renderer);
+      this.envRT = pmrem.fromScene(new RoomEnvironment(), 0.04);
+      this.scene.environment = this.envRT.texture;
+      this.scene.environmentIntensity = 0.45;
+      pmrem.dispose();
+    } catch {
+      this.envRT = null;
+    }
 
     this.css3dScene = new THREE.Scene();
     this.css3dRenderer = new CSS3DRenderer();
@@ -228,7 +241,7 @@ export class OkeyTable3D {
     this.tvWallCssObj = new CSS3DObject(this.tvWallHostEl);
     this.tvWallCssObj.visible = false;
     this.tvWallVisible = false;
-    this.tvWallWorldZ = -25.08;
+    this.tvWallWorldZ = -41.52;
     this._css3dMatrixValid = false;
     this._lastCss3dWorldMatrix = new Float32Array(16);
     this._lastCss3dProjMatrix = new Float32Array(16);
@@ -428,14 +441,25 @@ export class OkeyTable3D {
       pitch: -0.14,
       keys: new Set(),
       lookDrag: null,
+      touchLook: null,
+      mobileMove: { x: 0, z: 0 },
       lastEmitAt: 0,
       lastSentX: null,
       lastSentZ: null,
       lastSentYaw: null
     };
+    this.isPointerLocked = false;
+    this.activeProximityId = null;
+    this.lastProximityCheckAt = 0;
     this._roamTmpLook = new THREE.Vector3();
 
     this.billiard3d = new BilliardTable3D(this.scene, {
+      bustGeom: this.bustGeom,
+      avatarMatCache: this.avatarMatCache,
+      onShotComplete: () => this.callbacks.onBilliardShotAnimEnd?.()
+    });
+
+    this.sideTables3d = new SideTables3D(this.scene, {
       bustGeom: this.bustGeom,
       avatarMatCache: this.avatarMatCache
     });
@@ -455,6 +479,11 @@ export class OkeyTable3D {
     this.rafId = null;
     this.animate = this.animate.bind(this);
     this.animate();
+  }
+
+  updateSideTablesState(sideTables = []) {
+    this.sideTablesState = Array.isArray(sideTables) ? sideTables : [];
+    this.sideTables3d?.updateStates(this.sideTablesState);
   }
 
   applyEffectivePixelRatio() {
@@ -501,7 +530,7 @@ export class OkeyTable3D {
         this.tvWallHostEl.style.height = `${nextH}px`;
       }
       if (this.tvWallCssObj) {
-        this.tvWallCssObj.scale.set(15.2 / nextW, 8.55 / nextH, 1);
+        this.tvWallCssObj.scale.set(18.4 / nextW, 10.35 / nextH, 1);
       }
       this._css3dMatrixValid = false;
     }
@@ -621,10 +650,10 @@ export class OkeyTable3D {
     }
 
     const tableCoords = [
-      { x: -16.2, z: -15.2, rotY: 0.18 },
-      { x: 16.2, z: -15.2, rotY: -0.22 },
-      { x: -17.4, z: 10.2, rotY: -0.15 },
-      { x: 17.4, z: 10.2, rotY: 0.2 }
+      { x: 18, z: -32, rotY: 0.14 },
+      { x: -18, z: -32, rotY: -0.18 },
+      { x: 35, z: 26, rotY: 0.2 },
+      { x: -37, z: 30, rotY: -0.16 }
     ];
     const seatLocalOffsets = [
       { x: 0, z: 2.85, rotY: Math.PI },
@@ -633,12 +662,37 @@ export class OkeyTable3D {
       { x: -2.85, z: 0, rotY: Math.PI / 2 }
     ];
 
+    let ghostTopGeo = this._ghostTopGeo;
+    if (!ghostTopGeo) {
+      ghostTopGeo = new THREE.CylinderGeometry(2.15, 2.15, 0.22, 16);
+      this._ghostTopGeo = ghostTopGeo;
+      this.envDisposableGeoms.push(ghostTopGeo);
+    }
+    let ghostLegGeo = this._ghostLegGeo;
+    if (!ghostLegGeo) {
+      ghostLegGeo = new THREE.CylinderGeometry(0.32, 0.55, 2.25, 10);
+      this._ghostLegGeo = ghostLegGeo;
+      this.envDisposableGeoms.push(ghostLegGeo);
+    }
+    let ghostWoodMat = this.colorMatCache.get('ghost-wood');
+    if (!ghostWoodMat) {
+      ghostWoodMat = new THREE.MeshStandardMaterial({ color: '#5D3822', roughness: 0.65 });
+      this.colorMatCache.set('ghost-wood', ghostWoodMat);
+    }
+
     others.forEach((room, idx) => {
       const tc = tableCoords[idx];
       if (!tc) return;
       const tGroup = new THREE.Group();
       tGroup.position.set(tc.x, 0, tc.z);
       tGroup.rotation.y = tc.rotY;
+
+      const tTop = new THREE.Mesh(ghostTopGeo, ghostWoodMat);
+      tTop.position.y = -0.1;
+      tGroup.add(tTop);
+      const tLeg = new THREE.Mesh(ghostLegGeo, ghostWoodMat);
+      tLeg.position.y = -1.22;
+      tGroup.add(tLeg);
 
       const seats = Array.isArray(room.seats) ? room.seats : [];
       seats.forEach((s, sIdx) => {
@@ -739,7 +793,7 @@ export class OkeyTable3D {
     const brassMat = sharedMats?.brassMat || new THREE.MeshLambertMaterial({ color: '#C79B42' });
     const globeMat = sharedMats?.globeMat || new THREE.MeshBasicMaterial({ color: '#FFE6A8' });
 
-    const chainHeight = Math.max(1.2, 13.4 - y);
+    const chainHeight = Math.max(1.2, 16.0 - y);
     const chain = new THREE.Mesh(
       new THREE.CylinderGeometry(0.035, 0.035, chainHeight, 6),
       brassMat
@@ -944,18 +998,34 @@ export class OkeyTable3D {
     const hemi = new THREE.HemisphereLight('#FFEBD2', '#2B1C13', 1.15);
     this.scene.add(hemi);
 
-    // Single warm kahvehane overhead key point light + shadow-casting directional
-    const pendantLight = new THREE.PointLight('#FFD18C', 52, 54, 1.25);
-    pendantLight.position.set(0, 9.6, 0.5);
+    // Warm overhead pendant key lights per social zone + shadow-casting directional light
+    const pendantLight = new THREE.PointLight('#FFD18C', 56, 62, 1.2);
+    pendantLight.position.set(0, 9.8, 0.5);
     this.scene.add(pendantLight);
 
-    const keyLight = new THREE.DirectionalLight('#FFF0D4', 1.25);
-    keyLight.position.set(6, 16, 9);
+    const billiardLight = new THREE.PointLight('#FFDF9E', 42, 34, 1.3);
+    billiardLight.position.set(BILLIARD_WORLD_POS.x, 7.6, BILLIARD_WORLD_POS.z);
+    this.scene.add(billiardLight);
+
+    const westWingLight = new THREE.PointLight('#FFD08E', 38, 44, 1.25);
+    westWingLight.position.set(-27, 9.2, 0);
+    this.scene.add(westWingLight);
+
+    const southLoungeLight = new THREE.PointLight('#FFCC88', 34, 42, 1.25);
+    southLoungeLight.position.set(0, 9.2, 25);
+    this.scene.add(southLoungeLight);
+
+    const barLight = new THREE.PointLight('#FFE0A8', 26, 28, 1.3);
+    barLight.position.set(0, 7.2, -33);
+    this.scene.add(barLight);
+
+    const keyLight = new THREE.DirectionalLight('#FFF0D4', 1.28);
+    keyLight.position.set(8, 22, 12);
     keyLight.castShadow = true;
-    keyLight.shadow.mapSize.set(512, 512);
+    keyLight.shadow.mapSize.set(1024, 1024);
     keyLight.shadow.camera.near = 2;
-    keyLight.shadow.camera.far = 38;
-    const d = 13.5;
+    keyLight.shadow.camera.far = 72;
+    const d = 34;
     keyLight.shadow.camera.left = -d;
     keyLight.shadow.camera.right = d;
     keyLight.shadow.camera.top = d;
@@ -963,51 +1033,82 @@ export class OkeyTable3D {
     keyLight.shadow.bias = -0.0005;
     this.scene.add(keyLight);
 
-    const rimLight = new THREE.DirectionalLight('#CBD8FF', 0.32);
-    rimLight.position.set(-10, 9, -12);
+    const rimLight = new THREE.DirectionalLight('#CBD8FF', 0.35);
+    rimLight.position.set(-18, 12, -20);
     this.scene.add(rimLight);
 
-    this.envLights = { hemi, pendantLight, keyLight, rimLight };
+    this.envLights = {
+      hemi,
+      pendantLight,
+      billiardLight,
+      westWingLight,
+      southLoungeLight,
+      barLight,
+      keyLight,
+      rimLight
+    };
 
     const staticEnvGroup = new THREE.Group();
 
-    // Herringbone/plank walnut parquet floor + ornate central rug
-    const floorMat = new THREE.MeshLambertMaterial({ map: getParquetTexture() });
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(58, 58), floorMat);
+    const roomHalfX = 48;
+    const roomHalfZ = 42;
+    const roomW = roomHalfX * 2;
+    const roomD = roomHalfZ * 2;
+
+    // Walnut parquet floor (96 x 84) + ornate central rug
+    const parquetTex = getParquetTexture().clone();
+    parquetTex.needsUpdate = true;
+    parquetTex.repeat.set(16, 14);
+    const floorMat = new THREE.MeshStandardMaterial({
+      map: parquetTex,
+      roughness: 0.62,
+      metalness: 0.05
+    });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(roomW, roomD), floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -2.35;
     floor.receiveShadow = true;
     this.scene.add(floor);
 
-    const rugOuterMat = new THREE.MeshLambertMaterial({ color: '#612119' });
+    const rugOuterMat = new THREE.MeshStandardMaterial({ color: '#612119', roughness: 0.92, metalness: 0.02 });
     const rugOuter = new THREE.Mesh(new THREE.BoxGeometry(21.5, 0.04, 21.5), rugOuterMat);
     rugOuter.position.y = -2.33;
     rugOuter.receiveShadow = true;
     this.scene.add(rugOuter);
 
-    const rugBorderMat = new THREE.MeshLambertMaterial({ color: '#8F642B' });
+    const rugBorderMat = new THREE.MeshStandardMaterial({ color: '#8F642B', roughness: 0.88, metalness: 0.04 });
     const rugBorder = new THREE.Mesh(new THREE.BoxGeometry(18.8, 0.045, 18.8), rugBorderMat);
     rugBorder.position.y = -2.326;
     staticEnvGroup.add(rugBorder);
 
-    const rugInnerMat = new THREE.MeshLambertMaterial({ color: '#4E1A15' });
+    const rugInnerMat = new THREE.MeshStandardMaterial({ color: '#4E1A15', roughness: 0.92, metalness: 0.02 });
     const rugInner = new THREE.Mesh(new THREE.BoxGeometry(17.6, 0.05, 17.6), rugInnerMat);
     rugInner.position.y = -2.322;
     staticEnvGroup.add(rugInner);
 
     // Pedestal table leg under main center okey table
-    const legMat = new THREE.MeshLambertMaterial({ map: getWoodTexture(), color: '#633D26' });
+    const legMat = new THREE.MeshStandardMaterial({
+      map: getWoodTexture(),
+      color: '#633D26',
+      roughness: 0.55,
+      metalness: 0.06
+    });
     const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 2.2, 2.1, 16), legMat);
     pedestal.position.y = -1.35;
     staticEnvGroup.add(pedestal);
 
     // 3D Kahvehane Interior Room (Warm Plaster, Walnut Wainscoting, Windows, Pilasters)
-    const wallPlasterMat = new THREE.MeshLambertMaterial({ color: '#3B251A' });
-    const wainscotMat = new THREE.MeshLambertMaterial({ map: getWoodTexture(), color: '#5C3722' });
+    const wallPlasterMat = new THREE.MeshStandardMaterial({ color: '#3B251A', roughness: 0.86, metalness: 0.02 });
+    const wainscotMat = new THREE.MeshStandardMaterial({
+      map: getWoodTexture(),
+      color: '#5C3722',
+      roughness: 0.56,
+      metalness: 0.06
+    });
     const trimBrassMat = new THREE.MeshStandardMaterial({
       color: '#C79B42',
-      roughness: 0.34,
-      metalness: 0.68
+      roughness: 0.3,
+      metalness: 0.72
     });
     const artMat0 = new THREE.MeshLambertMaterial({ map: getWallArtTexture(0) });
     const artMat1 = new THREE.MeshLambertMaterial({ map: getWallArtTexture(1) });
@@ -1019,93 +1120,95 @@ export class OkeyTable3D {
     const photoMat = new THREE.MeshLambertMaterial({ map: getKahveBackdropTexture() });
     const sconceMat = new THREE.MeshBasicMaterial({ color: '#FFD88A' });
 
-    const roomHalf = 25.5;
     const wallSpecs = [
-      { pos: [0, 5.4, -roomHalf], rotY: 0 },
-      { pos: [0, 5.4, roomHalf], rotY: Math.PI },
-      { pos: [-roomHalf, 5.4, 0], rotY: Math.PI / 2 },
-      { pos: [roomHalf, 5.4, 0], rotY: -Math.PI / 2 }
+      { pos: [0, 6.825, -roomHalfZ], rotY: 0, span: roomW, idx: 0 },
+      { pos: [0, 6.825, roomHalfZ], rotY: Math.PI, span: roomW, idx: 1 },
+      { pos: [-roomHalfX, 6.825, 0], rotY: Math.PI / 2, span: roomD, idx: 2 },
+      { pos: [roomHalfX, 6.825, 0], rotY: -Math.PI / 2, span: roomD, idx: 3 }
     ];
 
-    wallSpecs.forEach((ws, wallIdx) => {
+    wallSpecs.forEach((ws) => {
       const wallGroup = new THREE.Group();
       wallGroup.position.set(...ws.pos);
       wallGroup.rotation.y = ws.rotY;
 
-      const upper = new THREE.Mesh(new THREE.PlaneGeometry(52, 16), wallPlasterMat);
+      const upper = new THREE.Mesh(new THREE.PlaneGeometry(ws.span, 18.4), wallPlasterMat);
       wallGroup.add(upper);
 
-      const lowerWood = new THREE.Mesh(new THREE.BoxGeometry(52, 5.4, 0.28), wainscotMat);
-      lowerWood.position.set(0, -5.1, 0.14);
+      const lowerWood = new THREE.Mesh(new THREE.BoxGeometry(ws.span, 5.6, 0.28), wainscotMat);
+      lowerWood.position.set(0, -6.38, 0.14);
       wallGroup.add(lowerWood);
 
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(52, 0.26, 0.42), trimBrassMat);
-      rail.position.set(0, -2.35, 0.2);
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(ws.span, 0.26, 0.42), trimBrassMat);
+      rail.position.set(0, -3.55, 0.2);
       wallGroup.add(rail);
 
-      for (const px of [-20, -10, 10, 20]) {
-        const pilaster = new THREE.Mesh(new THREE.BoxGeometry(0.65, 15.6, 0.38), wainscotMat);
+      const pilasterXs = ws.idx < 2 ? [-36, -24, -12, 12, 24, 36] : [-30, -18, -6, 6, 18, 30];
+      for (const px of pilasterXs) {
+        const pilaster = new THREE.Mesh(new THREE.BoxGeometry(0.7, 18.0, 0.4), wainscotMat);
         pilaster.position.set(px, 0, 0.18);
         wallGroup.add(pilaster);
       }
 
-      [-15, 0, 15].forEach((px, pIdx) => {
-        if (wallIdx === 0 && px === 0) return;
-        if (wallIdx === 0 && px === 15) {
-          const mFrame = new THREE.Mesh(new THREE.BoxGeometry(4.6, 5.6, 0.2), wainscotMat);
+      const framePositions = ws.idx < 2 ? [-30, -16, 0, 16, 30] : [-12, 12];
+      framePositions.forEach((px, pIdx) => {
+        if (ws.idx === 0 && px === 0) return;
+        if (ws.idx === 0 && px === 16) {
+          const mFrame = new THREE.Mesh(new THREE.BoxGeometry(4.8, 5.8, 0.2), wainscotMat);
           mFrame.position.set(px, 1.45, 0.12);
           wallGroup.add(mFrame);
-          const mFace = new THREE.Mesh(new THREE.PlaneGeometry(4.1, 5.1), menuMat);
+          const mFace = new THREE.Mesh(new THREE.PlaneGeometry(4.3, 5.3), menuMat);
           mFace.position.set(px, 1.45, 0.25);
           wallGroup.add(mFace);
           return;
         }
-        const frame = new THREE.Mesh(new THREE.BoxGeometry(5.2, 3.4, 0.18), wainscotMat);
+        const frame = new THREE.Mesh(new THREE.BoxGeometry(5.4, 3.6, 0.18), wainscotMat);
         frame.position.set(px, 1.35, 0.12);
         wallGroup.add(frame);
 
-        const chosenMat = pIdx === 1 ? photoMat : (wallIdx + pIdx) % 2 === 0 ? artMat0 : artMat1;
-        const art = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 2.85), chosenMat);
+        const chosenMat = pIdx % 3 === 1 ? photoMat : (ws.idx + pIdx) % 2 === 0 ? artMat0 : artMat1;
+        const art = new THREE.Mesh(new THREE.PlaneGeometry(4.8, 3.0), chosenMat);
         art.position.set(px, 1.35, 0.24);
         wallGroup.add(art);
       });
 
-      [-10, 10].forEach((sx) => {
+      const sconceXs = ws.idx < 2 ? [-36, -12, 12, 36] : [-30, -6, 6, 30];
+      sconceXs.forEach((sx) => {
         const sconce = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 6), sconceMat);
-        sconce.position.set(sx, 2.2, 0.45);
+        sconce.position.set(sx, 2.5, 0.45);
         wallGroup.add(sconce);
       });
 
       staticEnvGroup.add(wallGroup);
     });
 
-    // Ticking Round Wall Clock on North back wall (left bay, clear of center TV)
+    // Ticking Round Wall Clock on North back wall (left of TV)
     const clockGroup = new THREE.Group();
-    clockGroup.position.set(-12.2, 10.6, -roomHalf + 0.24);
+    clockGroup.position.set(-14.5, 11.4, -roomHalfZ + 0.24);
     const clockCase = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.22, 1.3, 0.26, 20),
+      new THREE.CylinderGeometry(1.3, 1.38, 0.26, 20),
       wainscotMat
     );
     clockCase.rotation.x = Math.PI / 2;
     clockGroup.add(clockCase);
-    const clockFace = new THREE.Mesh(new THREE.CircleGeometry(1.06, 20), clockMat);
+    const clockFace = new THREE.Mesh(new THREE.CircleGeometry(1.14, 20), clockMat);
     clockFace.position.z = 0.15;
     clockGroup.add(clockFace);
     this.scene.add(clockGroup);
 
-    // Large centered Kahvehane TV on North back wall (directly opposite viewer, clickable)
+    // Large centered Kahvehane TV on North back wall (clickable)
     this.tvUpdater = createTvScreenTexture();
     const tvGroup = new THREE.Group();
-    tvGroup.position.set(0, 8.5, -roomHalf + 0.32);
-    const tvChassisMat = new THREE.MeshLambertMaterial({ color: '#181412' });
-    const tvBezel = new THREE.Mesh(new THREE.BoxGeometry(15.7, 9.05, 0.26), tvChassisMat);
+    tvGroup.position.set(0, 10.2, -roomHalfZ + 0.32);
+    const tvChassisMat = new THREE.MeshStandardMaterial({ color: '#181412', roughness: 0.5, metalness: 0.2 });
+    const tvBezel = new THREE.Mesh(new THREE.BoxGeometry(19.0, 10.9, 0.28), tvChassisMat);
     tvGroup.add(tvBezel);
-    const tvShelfTrim = new THREE.Mesh(new THREE.BoxGeometry(15.86, 0.14, 0.32), trimBrassMat);
-    tvShelfTrim.position.y = -4.58;
+    const tvShelfTrim = new THREE.Mesh(new THREE.BoxGeometry(19.16, 0.16, 0.34), trimBrassMat);
+    tvShelfTrim.position.y = -5.52;
     tvGroup.add(tvShelfTrim);
     const tvScreenMat = new THREE.MeshBasicMaterial({ map: this.tvUpdater.texture });
-    const tvScreen = new THREE.Mesh(new THREE.PlaneGeometry(15.2, 8.55), tvScreenMat);
-    tvScreen.position.z = 0.145;
+    const tvScreen = new THREE.Mesh(new THREE.PlaneGeometry(18.4, 10.35), tvScreenMat);
+    tvScreen.position.z = 0.15;
     tvScreen.userData = { kind: 'tv' };
     tvGroup.add(tvScreen);
     this.tvScreenMesh = tvScreen;
@@ -1130,18 +1233,18 @@ export class OkeyTable3D {
     );
     this.scene.add(tvGroup);
 
-    this.tvWallWorldZ = -roomHalf + 0.48;
+    this.tvWallWorldZ = -roomHalfZ + 0.48;
     if (this.tvWallCssObj) {
-      this.tvWallCssObj.position.set(0, 8.5, this.tvWallWorldZ);
-      this.tvWallCssObj.scale.set(15.2 / 960, 8.55 / 540, 1);
+      this.tvWallCssObj.position.set(0, 10.2, this.tvWallWorldZ);
+      this.tvWallCssObj.scale.set(18.4 / this.tvWallWidthPx, 10.35 / this.tvWallHeightPx, 1);
       this.css3dScene.add(this.tvWallCssObj);
     }
 
-    // Atmosphere Windows on East & West walls with velvet drapes + single-draw InstancedMesh rain
-    const curtainMat = new THREE.MeshLambertMaterial({ color: '#53191B' });
+    // 6 Atmosphere Windows on East & West walls with velvet drapes + single InstancedMesh rain
+    const curtainMat = new THREE.MeshStandardMaterial({ color: '#53191B', roughness: 0.85 });
     const rainGeo = new THREE.BoxGeometry(0.03, 0.36, 0.03);
     const rainMat = new THREE.MeshBasicMaterial({ color: '#B7D5FF', transparent: true, opacity: 0.35 });
-    const rainInstanced = new THREE.InstancedMesh(rainGeo, rainMat, 40);
+    const rainInstanced = new THREE.InstancedMesh(rainGeo, rainMat, 60);
     rainInstanced.frustumCulled = false;
     this.envDisposableGeoms.push(rainGeo);
     this.envDisposableMats.push(curtainMat, windowMat, rainMat);
@@ -1149,44 +1252,44 @@ export class OkeyTable3D {
     let rainIdx = 0;
 
     [-1, 1].forEach((side) => {
-      [-5.5, 5.5].forEach((wz) => {
+      [-24, 0, 24].forEach((wz) => {
         const winGroup = new THREE.Group();
-        winGroup.position.set(side * (roomHalf - 0.18), 2.1, wz);
+        winGroup.position.set(side * (roomHalfX - 0.18), 2.4, wz);
         winGroup.rotation.y = side === -1 ? Math.PI / 2 : -Math.PI / 2;
 
-        const pane = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 5.6), windowMat);
+        const pane = new THREE.Mesh(new THREE.PlaneGeometry(4.8, 6.2), windowMat);
         winGroup.add(pane);
 
-        const frameOuter = new THREE.Mesh(new THREE.BoxGeometry(4.9, 6.1, 0.24), wainscotMat);
+        const frameOuter = new THREE.Mesh(new THREE.BoxGeometry(5.3, 6.7, 0.24), wainscotMat);
         frameOuter.position.z = -0.14;
         winGroup.add(frameOuter);
 
-        for (const mx of [-0.75, 0.75]) {
-          const bar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 5.6, 0.16), wainscotMat);
+        for (const mx of [-0.85, 0.85]) {
+          const bar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 6.2, 0.16), wainscotMat);
           bar.position.set(mx, 0, 0.08);
           winGroup.add(bar);
         }
-        for (const my of [-0.95, 0.95]) {
-          const bar = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.12, 0.16), wainscotMat);
+        for (const my of [-1.05, 1.05]) {
+          const bar = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.12, 0.16), wainscotMat);
           bar.position.set(0, my, 0.08);
           winGroup.add(bar);
         }
 
-        for (const cx of [-2.45, 2.45]) {
-          const drape = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.4, 6.4, 8), curtainMat);
+        for (const cx of [-2.65, 2.65]) {
+          const drape = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.4, 6.9, 8), curtainMat);
           drape.position.set(cx, 0, 0.16);
           winGroup.add(drape);
         }
 
         for (let r = 0; r < 10; r += 1) {
-          const localX = ((r * 37) % 40) / 10 - 2.0;
-          const baseY = ((r * 19) % 48) / 10 - 2.4;
-          const dx = side * (roomHalf - 0.3);
-          const dy = 2.1 + baseY;
+          const localX = ((r * 37) % 44) / 10 - 2.2;
+          const baseY = ((r * 19) % 52) / 10 - 2.6;
+          const dx = side * (roomHalfX - 0.32);
+          const dy = 2.4 + baseY;
           const dz = wz + (side === -1 ? -localX : localX);
           this._rainDummyMatrix.makeTranslation(dx, dy, dz);
           rainInstanced.setMatrixAt(rainIdx, this._rainDummyMatrix);
-          this.rainDrops.push({ x: dx, y: dy, z: dz, minY: -0.4, maxY: 4.6, speed: 4.5 + (r % 3) * 1.4 });
+          this.rainDrops.push({ x: dx, y: dy, z: dz, minY: -0.4, maxY: 5.2, speed: 4.5 + (r % 3) * 1.4 });
           rainIdx += 1;
         }
 
@@ -1197,24 +1300,24 @@ export class OkeyTable3D {
     this.rainGroup = rainInstanced;
     this.scene.add(rainInstanced);
 
-    // Cozy Kuzine / Fireplace in Back-Left Corner (activated prominently in midnight/rainy)
+    // Cozy Kuzine / Fireplace in Back-Left Corner
     const hearthGroup = new THREE.Group();
-    hearthGroup.position.set(-21.2, -2.35, -19.2);
+    hearthGroup.position.set(-41.5, -2.35, -35.5);
     hearthGroup.rotation.y = Math.PI / 4;
-    const stoveMat = new THREE.MeshLambertMaterial({ color: '#1B1918' });
-    const stoveBody = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.9, 1.5), stoveMat);
-    stoveBody.position.y = 1.45;
+    const stoveMat = new THREE.MeshStandardMaterial({ color: '#1B1918', roughness: 0.55, metalness: 0.4 });
+    const stoveBody = new THREE.Mesh(new THREE.BoxGeometry(2.4, 3.1, 1.6), stoveMat);
+    stoveBody.position.y = 1.55;
     hearthGroup.add(stoveBody);
-    const stovePipe = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 12.2, 10), stoveMat);
-    stovePipe.position.set(0, 8.2, -0.2);
+    const stovePipe = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 15.0, 10), stoveMat);
+    stovePipe.position.set(0, 9.8, -0.2);
     hearthGroup.add(stovePipe);
     const emberMat = new THREE.MeshBasicMaterial({ color: '#FF6A1A' });
-    const emberGeo = new THREE.PlaneGeometry(1.1, 0.72);
+    const emberGeo = new THREE.PlaneGeometry(1.2, 0.78);
     const firebox = new THREE.Mesh(emberGeo, emberMat);
-    firebox.position.set(0, 1.05, 0.77);
+    firebox.position.set(0, 1.1, 0.82);
     hearthGroup.add(firebox);
-    const hearthLight = new THREE.PointLight('#FF772B', 8, 22, 1.5);
-    hearthLight.position.set(0, 1.35, 1.6);
+    const hearthLight = new THREE.PointLight('#FF772B', 10, 26, 1.4);
+    hearthLight.position.set(0, 1.45, 1.65);
     hearthGroup.add(hearthLight);
     this.hearthGroup = hearthGroup;
     this.hearthLight = hearthLight;
@@ -1223,115 +1326,126 @@ export class OkeyTable3D {
     this.envDisposableMats.push(stoveMat, emberMat);
     this.scene.add(hearthGroup);
 
-    // Ceiling & Exposed Timber Beams
-    const ceilingMat = new THREE.MeshLambertMaterial({ color: '#1F130D' });
-    const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(54, 54), ceilingMat);
+    // Ceiling (y = 16.0) & Exposed Timber Beams
+    const ceilingMat = new THREE.MeshStandardMaterial({ color: '#1F130D', roughness: 0.9 });
+    const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(roomW + 2, roomD + 2), ceilingMat);
     ceiling.rotation.x = Math.PI / 2;
-    ceiling.position.y = 13.4;
+    ceiling.position.y = 16.0;
     staticEnvGroup.add(ceiling);
 
-    [-18, -9, 0, 9, 18].forEach((bz) => {
-      const beam = new THREE.Mesh(new THREE.BoxGeometry(52, 0.58, 0.72), wainscotMat);
-      beam.position.set(0, 13.1, bz);
+    [-32, -20, -8, 4, 16, 28, 38].forEach((bz) => {
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(roomW, 0.65, 0.78), wainscotMat);
+      beam.position.set(0, 15.65, bz);
       staticEnvGroup.add(beam);
     });
 
-    // Kahvehane Ocakbaşı (Tea Counter + Copper/Brass Çay Kazanı & Demlik + Tea Glass Shelves)
+    // Kahvehane Ocakbasi (Tea Counter at z = -37.2)
     const barGroup = new THREE.Group();
-    barGroup.position.set(0, -2.35, -22.6);
-    const counter = new THREE.Mesh(new THREE.BoxGeometry(12.2, 2.75, 2.4), wainscotMat);
+    barGroup.position.set(0, -2.35, -37.2);
+    const counter = new THREE.Mesh(new THREE.BoxGeometry(14.0, 2.75, 2.6), wainscotMat);
     counter.position.y = 1.38;
     barGroup.add(counter);
 
-    const counterTopMat = new THREE.MeshLambertMaterial({ color: '#945F37' });
-    const counterTop = new THREE.Mesh(new THREE.BoxGeometry(12.6, 0.2, 2.65), counterTopMat);
+    const counterTopMat = new THREE.MeshStandardMaterial({ color: '#945F37', roughness: 0.45, metalness: 0.08 });
+    const counterTop = new THREE.Mesh(new THREE.BoxGeometry(14.4, 0.22, 2.85), counterTopMat);
     counterTop.position.y = 2.84;
     barGroup.add(counterTop);
 
     const copperMat = new THREE.MeshStandardMaterial({
       color: '#B86535',
-      roughness: 0.26,
-      metalness: 0.78
+      roughness: 0.24,
+      metalness: 0.8
     });
-    const kazanBody = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.7, 1.35), copperMat);
-    kazanBody.position.set(-2.4, 3.78, 0);
+    const kazanBody = new THREE.Mesh(new THREE.BoxGeometry(2.8, 1.8, 1.4), copperMat);
+    kazanBody.position.set(-2.6, 3.82, 0);
     barGroup.add(kazanBody);
 
-    const kazanRim = new THREE.Mesh(new THREE.BoxGeometry(2.74, 0.14, 1.46), trimBrassMat);
-    kazanRim.position.set(-2.4, 4.65, 0);
+    const kazanRim = new THREE.Mesh(new THREE.BoxGeometry(2.94, 0.14, 1.52), trimBrassMat);
+    kazanRim.position.set(-2.6, 4.74, 0);
     barGroup.add(kazanRim);
 
-    const demlik = new THREE.Mesh(new THREE.SphereGeometry(0.46, 10, 8), trimBrassMat);
+    const demlik = new THREE.Mesh(new THREE.SphereGeometry(0.48, 10, 8), trimBrassMat);
     demlik.scale.set(1.05, 0.88, 1.05);
-    demlik.position.set(-2.4, 5.1, 0);
+    demlik.position.set(-2.6, 5.2, 0);
     barGroup.add(demlik);
 
-    for (const sy of [4.8, 6.3]) {
-      const shelf = new THREE.Mesh(new THREE.BoxGeometry(9.6, 0.16, 0.95), wainscotMat);
-      shelf.position.set(1.0, sy, -1.7);
+    for (const sy of [4.8, 6.4]) {
+      const shelf = new THREE.Mesh(new THREE.BoxGeometry(10.8, 0.16, 0.95), wainscotMat);
+      shelf.position.set(1.0, sy, -1.9);
       barGroup.add(shelf);
     }
-    const barGlassMat = new THREE.MeshLambertMaterial({ color: '#DCE8EB', transparent: true, opacity: 0.6 });
-    for (let i = 0; i < 8; i += 1) {
+    const barGlassMat = new THREE.MeshStandardMaterial({
+      color: '#DCE8EB',
+      transparent: true,
+      opacity: 0.65,
+      roughness: 0.18
+    });
+    for (let i = 0; i < 10; i += 1) {
       const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.11, 0.34, 8), barGlassMat);
-      glass.position.set(-1.6 + i * 0.72, 5.05, -1.7);
+      glass.position.set(-2.2 + i * 0.72, 5.05, -1.9);
       barGroup.add(glass);
     }
     staticEnvGroup.add(barGroup);
 
-    // Shared materials for batched decorative corner tables, chairs, plants & lamps
-    const sideTableShared = {
-      woodMat: new THREE.MeshLambertMaterial({ map: getWoodTexture(), color: '#75492B' }),
-      darkWoodMat: new THREE.MeshLambertMaterial({ map: getWoodTexture(), color: '#52311D' }),
-      leatherMat: new THREE.MeshLambertMaterial({ color: '#2B1B14' }),
-      sideFeltMat: new THREE.MeshLambertMaterial({ map: getFeltTexture(this.tableTheme) }),
-      saucerMat: new THREE.MeshLambertMaterial({ color: '#F0EAE0' }),
-      teaMat: new THREE.MeshLambertMaterial({ color: '#8E250B' })
-    };
-    this.sideFeltMats.push(sideTableShared.sideFeltMat);
+    // 2 Decorative Lounge Sofas along East Lounge Wall (clear of billiard & tables)
+    const sofaVelvetMat = new THREE.MeshStandardMaterial({ color: '#5F2323', roughness: 0.84 });
+    [
+      { x: 43.0, z: -13.5, rotY: -Math.PI / 2 },
+      { x: 43.0, z: 12.5, rotY: -Math.PI / 2 }
+    ].forEach((sf) => {
+      const sofa = new THREE.Group();
+      sofa.position.set(sf.x, -2.35, sf.z);
+      sofa.rotation.y = sf.rotY;
 
-    // 4 Cozy Ambient Side Kahvehane Tables around the room
-    this.buildSideKahveTable(-16.2, -15.2, 0.18, false, staticEnvGroup, sideTableShared);
-    this.buildSideKahveTable(16.2, -15.2, -0.22, true, staticEnvGroup, sideTableShared);
-    this.buildSideKahveTable(-17.4, 10.2, -0.15, true, staticEnvGroup, sideTableShared);
-    this.buildSideKahveTable(17.4, 10.2, 0.2, false, staticEnvGroup, sideTableShared);
+      const base = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.75, 2.0), wainscotMat);
+      base.position.y = 0.45;
+      sofa.add(base);
 
-    // 3 Real Kahvehane Cats (Yumak, Fırtına, Kömür) on Cozy Cushions with Real-Photo Portraits
+      const seatCushion = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.35, 1.75), sofaVelvetMat);
+      seatCushion.position.set(0, 0.95, 0.08);
+      sofa.add(seatCushion);
+
+      const backRest = new THREE.Mesh(new THREE.BoxGeometry(5.1, 1.45, 0.38), sofaVelvetMat);
+      backRest.position.set(0, 1.5, -0.78);
+      sofa.add(backRest);
+
+      for (const ax of [-2.4, 2.4]) {
+        const arm = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.95, 1.95), wainscotMat);
+        arm.position.set(ax, 1.0, 0);
+        sofa.add(arm);
+      }
+      staticEnvGroup.add(sofa);
+    });
+
+    // 3 Real Kahvehane Cats (Yumak, Firtina, Komur)
     this.buildKahvehaneCats(wainscotMat, trimBrassMat);
 
-    // Potted Kahvehane Ficus Plants in Room Corners (shared materials, batched)
+    // Potted Kahvehane Ficus Plants in Room Corners & Bar Flanks
     const plantShared = {
-      potMat: new THREE.MeshLambertMaterial({ color: '#7D3B22' }),
-      trunkMat: new THREE.MeshLambertMaterial({ color: '#4A3122' }),
-      leafMat: new THREE.MeshLambertMaterial({ color: '#295732' })
+      potMat: new THREE.MeshStandardMaterial({ color: '#7D3B22', roughness: 0.78 }),
+      trunkMat: new THREE.MeshStandardMaterial({ color: '#4A3122', roughness: 0.86 }),
+      leafMat: new THREE.MeshStandardMaterial({ color: '#295732', roughness: 0.74 })
     };
-    this.buildPottedPlant(-23.2, -23.2, 1.15, staticEnvGroup, plantShared);
-    this.buildPottedPlant(23.2, -23.2, 1.1, staticEnvGroup, plantShared);
-    this.buildPottedPlant(-23.2, 22.8, 1.05, staticEnvGroup, plantShared);
-    this.buildPottedPlant(23.2, 22.8, 1.1, staticEnvGroup, plantShared);
+    this.buildPottedPlant(-44.8, -38.5, 1.25, staticEnvGroup, plantShared);
+    this.buildPottedPlant(44.8, -38.5, 1.25, staticEnvGroup, plantShared);
+    this.buildPottedPlant(-44.8, 38.5, 1.2, staticEnvGroup, plantShared);
+    this.buildPottedPlant(44.8, 38.5, 1.2, staticEnvGroup, plantShared);
+    this.buildPottedPlant(-10.5, -38.5, 1.0, staticEnvGroup, plantShared);
+    this.buildPottedPlant(10.5, -38.5, 1.0, staticEnvGroup, plantShared);
 
-    // Hanging Brass Mosaic Pendant Lamps over center & corner tables
+    // Center Brass Mosaic Pendant Lamp over Okey Table
     const lampShared = {
       brassMat: trimBrassMat,
       globeMat: new THREE.MeshBasicMaterial({ color: '#FFE6A8' })
     };
-    this.buildPendantLamp(0, 10.4, 0, 1.25, false, staticEnvGroup, lampShared);
-    this.buildPendantLamp(-16.2, 7.2, -15.2, 1.05, false, staticEnvGroup, lampShared);
-    this.buildPendantLamp(16.2, 7.2, -15.2, 1.05, false, staticEnvGroup, lampShared);
-    this.buildPendantLamp(-17.4, 7.2, 10.2, 1.0, false, staticEnvGroup, lampShared);
-    this.buildPendantLamp(17.4, 7.2, 10.2, 1.0, false, staticEnvGroup, lampShared);
+    this.buildPendantLamp(0, 10.8, 0, 1.32, false, staticEnvGroup, lampShared);
 
     this.envDisposableMats.push(
       ceilingMat,
       counterTopMat,
       copperMat,
       barGlassMat,
-      sideTableShared.woodMat,
-      sideTableShared.darkWoodMat,
-      sideTableShared.leatherMat,
-      sideTableShared.sideFeltMat,
-      sideTableShared.saucerMat,
-      sideTableShared.teaMat,
+      sofaVelvetMat,
       plantShared.potMat,
       plantShared.trunkMat,
       plantShared.leafMat,
@@ -3047,7 +3161,7 @@ export class OkeyTable3D {
     this.lastTableTileIds = nextTableTileIds;
   }
 
-  setCameraPreset(presetName) {
+  setCameraPreset(presetName, payload = null) {
     const prevMode = this.cameraMode;
     if (presetName === 'freeroam') {
       this.cameraMode = 'freeroam';
@@ -3055,13 +3169,24 @@ export class OkeyTable3D {
       this.billiardAimingDrag = false;
       if (prevMode !== 'freeroam') {
         if (prevMode === 'billiard') {
-          this.freeroamState.pos.set(BILLIARD_WORLD_POS.x - 5.2, 3.2, BILLIARD_WORLD_POS.z);
+          this.freeroamState.pos.set(BILLIARD_WORLD_POS.x - 6.8, 3.2, BILLIARD_WORLD_POS.z);
           this.freeroamState.yaw = -Math.PI / 2;
           this.freeroamState.pitch = -0.18;
+        } else if (prevMode === 'sideTable' && payload?.tableId) {
+          const def = SIDE_TABLE_DEFS.find((d) => d.id === payload.tableId);
+          if (def) {
+            this.freeroamState.pos.set(def.x, 3.2, def.z + 5.2);
+            this.freeroamState.yaw = 0;
+            this.freeroamState.pitch = -0.16;
+          } else {
+            this.freeroamState.pos.set(0, 3.2, 12.2);
+            this.freeroamState.yaw = 0;
+            this.freeroamState.pitch = -0.14;
+          }
         } else {
-          this.freeroamState.pos.set(0, 3.2, 10.6);
+          this.freeroamState.pos.set(0, 3.2, 12.2);
           this.freeroamState.yaw = 0;
-          this.freeroamState.pitch = -0.15;
+          this.freeroamState.pitch = -0.14;
         }
         this.constrainFreeroamPosition(this.freeroamState.pos);
         this.callbacks.onFreeroamMove?.({
@@ -3071,16 +3196,42 @@ export class OkeyTable3D {
           active: true
         });
       }
-      this.targetFov = 64;
-      if (this.canvas) this.canvas.style.cursor = 'grab';
+      this.targetFov = 66;
+      if (this.canvas) this.canvas.style.cursor = this.isPointerLocked ? 'none' : 'grab';
+      this.computeProximityTarget(true);
       return;
     }
 
     if (prevMode === 'freeroam') {
       this.freeroamState.keys.clear();
       this.freeroamState.lookDrag = null;
+      this.freeroamState.touchLook = null;
+      this.freeroamState.mobileMove.x = 0;
+      this.freeroamState.mobileMove.z = 0;
+      if (document.pointerLockElement === this.canvas) {
+        try {
+          document.exitPointerLock?.();
+        } catch {
+          // Ignore pointer lock exit errors
+        }
+      }
+      if (this.activeProximityId !== null) {
+        this.activeProximityId = null;
+        this.callbacks.onProximityChange?.(null);
+      }
       if (this.canvas) this.canvas.style.cursor = 'default';
       this.callbacks.onFreeroamMove?.({ active: false });
+    }
+
+    if (presetName === 'sideTable') {
+      this.cameraMode = 'sideTable';
+      const pose = this.sideTables3d?.getSeatCameraPose(payload?.tableId, payload?.seatIndex ?? 0);
+      if (pose) {
+        this.targetCamLook.copy(pose.target);
+        this.targetSpherical.setFromVector3(pose.pos.clone().sub(pose.target));
+        this.targetFov = pose.fov || 54;
+        return;
+      }
     }
 
     this.cameraMode = CAMERA_PRESETS[presetName] ? presetName : 'fp';
@@ -3092,12 +3243,15 @@ export class OkeyTable3D {
 
   teleportFreeroam(zone = 'okey') {
     const zones = {
-      okey: { x: 0, z: 10.6, yaw: 0, pitch: -0.16 },
-      billiard: { x: BILLIARD_WORLD_POS.x - 5.0, z: BILLIARD_WORLD_POS.z, yaw: -Math.PI / 2, pitch: -0.22 },
-      tea: { x: 0, z: -15.2, yaw: 0, pitch: -0.06 },
-      tv: { x: 0, z: -9.8, yaw: 0, pitch: 0.08 }
+      okey: { x: 0, z: 12.2, yaw: 0, pitch: -0.15 },
+      billiard: { x: BILLIARD_WORLD_POS.x - 6.8, z: BILLIARD_WORLD_POS.z, yaw: -Math.PI / 2, pitch: -0.2 },
+      tea: { x: 0, z: -31.5, yaw: 0, pitch: -0.06 },
+      tv: { x: 0, z: -24.5, yaw: 0, pitch: 0.1 }
     };
-    const z = zones[zone] || zones.okey;
+    const sideDef = SIDE_TABLE_DEFS.find((d) => d.id === zone);
+    const z = sideDef
+      ? { x: sideDef.x, z: sideDef.z + 5.2, yaw: 0, pitch: -0.16 }
+      : (zones[zone] || zones.okey);
     this.cameraMode = 'freeroam';
     this.orbitDrag = null;
     this.billiardAimingDrag = false;
@@ -3105,13 +3259,14 @@ export class OkeyTable3D {
     this.freeroamState.yaw = z.yaw;
     this.freeroamState.pitch = z.pitch;
     this.constrainFreeroamPosition(this.freeroamState.pos);
-    this.targetFov = 64;
+    this.targetFov = 66;
     this.callbacks.onFreeroamMove?.({
       x: this.freeroamState.pos.x,
       z: this.freeroamState.pos.z,
       yaw: this.freeroamState.yaw,
       active: true
     });
+    this.computeProximityTarget(true);
   }
 
   setFreeroamKey(key, isDown) {
@@ -3123,11 +3278,21 @@ export class OkeyTable3D {
 
   clearFreeroamKeys() {
     this.freeroamState?.keys?.clear();
+    if (this.freeroamState?.mobileMove) {
+      this.freeroamState.mobileMove.x = 0;
+      this.freeroamState.mobileMove.z = 0;
+    }
+  }
+
+  setMobileMove(vx = 0, vz = 0) {
+    if (!this.freeroamState?.mobileMove) return;
+    this.freeroamState.mobileMove.x = THREE.MathUtils.clamp(Number(vx) || 0, -1, 1);
+    this.freeroamState.mobileMove.z = THREE.MathUtils.clamp(Number(vz) || 0, -1, 1);
   }
 
   constrainFreeroamPosition(pos) {
-    pos.x = THREE.MathUtils.clamp(pos.x, -23.0, 23.0);
-    pos.z = THREE.MathUtils.clamp(pos.z, -19.2, 20.6);
+    pos.x = THREE.MathUtils.clamp(pos.x, -45.0, 45.0);
+    pos.z = THREE.MathUtils.clamp(pos.z, -39.0, 39.0);
     pos.y = 3.2;
 
     // Push out from center Okey table (box around origin)
@@ -3139,11 +3304,11 @@ export class OkeyTable3D {
       else pos.z = pos.z >= 0 ? okeyHalf : -okeyHalf;
     }
 
-    // Push out from Billiard table
+    // Push out from scaled Billiard table
     const bx = BILLIARD_WORLD_POS.x;
     const bz = BILLIARD_WORLD_POS.z;
-    const bHalfW = 2.65;
-    const bHalfL = 4.35;
+    const bHalfW = 3.9;
+    const bHalfL = 6.2;
     if (Math.abs(pos.x - bx) < bHalfW && Math.abs(pos.z - bz) < bHalfL) {
       const dx = bHalfW - Math.abs(pos.x - bx);
       const dz = bHalfL - Math.abs(pos.z - bz);
@@ -3151,23 +3316,112 @@ export class OkeyTable3D {
       else pos.z = pos.z >= bz ? bz + bHalfL : bz - bHalfL;
     }
 
-    // Push out from 4 side tables
-    const sideTables = [
-      [-16.2, -15.2],
-      [16.2, -15.2],
-      [-17.4, 10.2],
-      [17.4, 10.2]
-    ];
-    for (const [tx, tz] of sideTables) {
-      const dx = pos.x - tx;
-      const dz = pos.z - tz;
+    // Push out from Ocakbasi Tea Bar
+    if (Math.abs(pos.x) < 7.6 && pos.z < -34.0) {
+      pos.z = -34.0;
+    }
+
+    // Push out from all 6 social / card side tables
+    for (const def of SIDE_TABLE_DEFS) {
+      const dx = pos.x - def.x;
+      const dz = pos.z - def.z;
       const dist = Math.hypot(dx, dz);
-      const minR = 3.45;
+      const minR = 3.6;
       if (dist < minR && dist > 0.001) {
-        pos.x = tx + (dx / dist) * minR;
-        pos.z = tz + (dz / dist) * minR;
+        pos.x = def.x + (dx / dist) * minR;
+        pos.z = def.z + (dz / dist) * minR;
       }
     }
+  }
+
+  computeProximityTarget(forceEmit = false) {
+    if (this.cameraMode !== 'freeroam' || this.demoMode) {
+      if (this.activeProximityId !== null) {
+        this.activeProximityId = null;
+        this.callbacks.onProximityChange?.(null);
+      }
+      return null;
+    }
+
+    const px = this.freeroamState.pos.x;
+    const pz = this.freeroamState.pos.z;
+    const candidates = [];
+
+    const okeyDist = Math.hypot(px, pz);
+    if (okeyDist < 11.2) {
+      candidates.push({
+        id: 'okey',
+        type: 'okey',
+        label: 'Okey Masasına Otur',
+        dist: Math.max(0, okeyDist - 7.0)
+      });
+    }
+
+    const bDist = Math.hypot(px - BILLIARD_WORLD_POS.x, pz - BILLIARD_WORLD_POS.z);
+    if (bDist < 8.6) {
+      candidates.push({
+        id: 'billiard',
+        type: 'billiard',
+        label: 'Bilardo Masasına Geç',
+        dist: Math.max(0, bDist - 4.5)
+      });
+    }
+
+    for (const def of SIDE_TABLE_DEFS) {
+      const tDist = Math.hypot(px - def.x, pz - def.z);
+      if (tDist < 6.4) {
+        candidates.push({
+          id: `side:${def.id}`,
+          type: 'sideTable',
+          tableId: def.id,
+          kind: def.kind,
+          label: `${def.title} Masasına Otur`,
+          dist: Math.max(0, tDist - 2.6)
+        });
+      }
+    }
+
+    if (Math.abs(px) < 8.5 && pz < -31.0) {
+      candidates.push({
+        id: 'bar',
+        type: 'bar',
+        label: 'Ocakbaşından Sipariş Ver',
+        dist: Math.abs(pz + 34.0)
+      });
+    }
+
+    if (Math.abs(px) < 12.0 && pz < -27.5) {
+      candidates.push({
+        id: 'tv',
+        type: 'tv',
+        label: 'Kahve TV Kanalını Değiştir',
+        dist: Math.abs(pz + 30.0) + 1.2
+      });
+    }
+
+    for (const c of this.catModels) {
+      if (!c.mover) continue;
+      const cDist = Math.hypot(px - c.mover.position.x, pz - c.mover.position.z);
+      if (cDist < 3.8) {
+        const catName = KAHVE_CATS[c.catIndex]?.name || 'Kediyi';
+        candidates.push({
+          id: `cat:${c.catIndex}`,
+          type: 'cat',
+          catIndex: c.catIndex,
+          label: `${catName} ile İlgilen`,
+          dist: cDist
+        });
+      }
+    }
+
+    candidates.sort((a, b) => a.dist - b.dist);
+    const best = candidates[0] || null;
+    const nextId = best ? best.id : null;
+    if (forceEmit || nextId !== this.activeProximityId) {
+      this.activeProximityId = nextId;
+      this.callbacks.onProximityChange?.(best);
+    }
+    return best;
   }
 
   isMyBilliardTurn() {
@@ -3387,18 +3641,137 @@ export class OkeyTable3D {
       }
     };
 
+    this.onPointerLockChange = () => {
+      this.isPointerLocked = document.pointerLockElement === this.canvas;
+      if (this.canvas && this.cameraMode === 'freeroam') {
+        this.canvas.style.cursor = this.isPointerLocked ? 'none' : 'grab';
+      }
+      this.callbacks.onPointerLockChange?.(this.isPointerLocked);
+    };
+
+    this.onDocumentMouseMove = (e) => {
+      if (this.demoMode || this.cameraMode !== 'freeroam' || !this.isPointerLocked) return;
+      if (document.querySelector('dialog[open]')) return;
+      const dx = e.movementX || 0;
+      const dy = e.movementY || 0;
+      if (dx === 0 && dy === 0) return;
+      this.freeroamState.yaw -= dx * 0.0024;
+      this.freeroamState.pitch = THREE.MathUtils.clamp(
+        this.freeroamState.pitch - dy * 0.0022,
+        -0.78,
+        0.58
+      );
+    };
+
     this.onPointerDown = (e) => {
       if (this.demoMode) return;
       this.updatePointer(e.clientX, e.clientY);
 
+      if (this.cameraMode === 'freeroam') {
+        const clickTargets = [
+          ...this.interactables,
+          ...(this.myDrinkHitMesh ? [this.myDrinkHitMesh] : []),
+          ...this.envInteractables
+        ];
+
+        if (e.pointerType === 'touch') {
+          this.raycaster.setFromCamera(this.pointer, this.camera);
+          const hits = this.raycaster.intersectObjects(clickTargets, false);
+          if (hits.length > 0) {
+            const data = hits[0].object?.userData || {};
+            if (data.kind === 'cat') {
+              this.triggerCatReaction(data.catIndex);
+              this.callbacks.onCatClick?.(data.catIndex);
+              return;
+            }
+            if (data.kind === 'tv') {
+              this.callbacks.onTvClick?.();
+              return;
+            }
+          }
+          this.freeroamState.touchLook = {
+            pointerId: e.pointerId,
+            x: e.clientX,
+            y: e.clientY
+          };
+          try {
+            this.canvas.setPointerCapture?.(e.pointerId);
+          } catch {
+            // Ignore pointer capture errors
+          }
+          return;
+        }
+
+        if (this.isPointerLocked) {
+          this.raycaster.setFromCamera({ x: 0, y: 0 }, this.camera);
+          const hits = this.raycaster.intersectObjects(clickTargets, false);
+          if (hits.length > 0) {
+            const data = hits[0].object?.userData || {};
+            if (data.kind === 'cat') {
+              this.triggerCatReaction(data.catIndex);
+              try {
+                document.exitPointerLock?.();
+              } catch {
+                // Ignore
+              }
+              this.callbacks.onCatClick?.(data.catIndex);
+              return;
+            }
+            if (data.kind === 'tv') {
+              try {
+                document.exitPointerLock?.();
+              } catch {
+                // Ignore
+              }
+              this.callbacks.onTvClick?.();
+              return;
+            }
+          }
+          return;
+        }
+
+        if (e.button === 0) {
+          this.raycaster.setFromCamera(this.pointer, this.camera);
+          const hits = this.raycaster.intersectObjects(clickTargets, false);
+          if (hits.length > 0) {
+            const data = hits[0].object?.userData || {};
+            if (data.kind === 'cat') {
+              this.triggerCatReaction(data.catIndex);
+              this.callbacks.onCatClick?.(data.catIndex);
+              return;
+            }
+            if (data.kind === 'tv') {
+              this.callbacks.onTvClick?.();
+              return;
+            }
+          }
+          if (!document.querySelector('dialog[open]') && this.canvas.requestPointerLock) {
+            try {
+              const maybePromise = this.canvas.requestPointerLock();
+              if (maybePromise && typeof maybePromise.catch === 'function') {
+                maybePromise.catch(() => {});
+              }
+            } catch {
+              // Fallback to lookDrag below
+            }
+          }
+        }
+
+        this.cancelActiveInteractions();
+        this.freeroamState.lookDrag = { x: e.clientX, y: e.clientY };
+        this.canvas.style.cursor = 'grabbing';
+        try {
+          this.canvas.setPointerCapture?.(e.pointerId);
+          this.activePointerId = e.pointerId;
+        } catch {
+          // Ignore pointer capture errors
+        }
+        return;
+      }
+
       if (e.button === 2 || e.button === 1) {
         this.cancelActiveInteractions();
-        if (this.cameraMode === 'freeroam') {
-          this.freeroamState.lookDrag = { x: e.clientX, y: e.clientY };
-          this.canvas.style.cursor = 'grabbing';
-        } else {
-          this.orbitDrag = { x: e.clientX, y: e.clientY };
-        }
+        this.orbitDrag = { x: e.clientX, y: e.clientY };
         try {
           this.canvas.setPointerCapture?.(e.pointerId);
           this.activePointerId = e.pointerId;
@@ -3417,17 +3790,6 @@ export class OkeyTable3D {
       const hits = this.raycaster.intersectObjects(clickTargets, false);
 
       if (hits.length === 0) {
-        if (this.cameraMode === 'freeroam') {
-          this.cancelActiveInteractions();
-          this.freeroamState.lookDrag = { x: e.clientX, y: e.clientY };
-          this.canvas.style.cursor = 'grabbing';
-          try {
-            this.canvas.setPointerCapture?.(e.pointerId);
-            this.activePointerId = e.pointerId;
-          } catch {
-            // Ignore pointer capture errors
-          }
-        }
         return;
       }
 
@@ -3463,32 +3825,10 @@ export class OkeyTable3D {
           }
           return;
         }
-        if (this.cameraMode === 'freeroam') {
-          this.cancelActiveInteractions();
-          this.freeroamState.lookDrag = { x: e.clientX, y: e.clientY };
-          this.canvas.style.cursor = 'grabbing';
-          try {
-            this.canvas.setPointerCapture?.(e.pointerId);
-            this.activePointerId = e.pointerId;
-          } catch {
-            // Ignore pointer capture errors
-          }
-        }
         return;
       }
 
       if (this.currentState?.isSpectator && data.kind !== 'cat' && data.kind !== 'tv') {
-        if (this.cameraMode === 'freeroam') {
-          this.cancelActiveInteractions();
-          this.freeroamState.lookDrag = { x: e.clientX, y: e.clientY };
-          this.canvas.style.cursor = 'grabbing';
-          try {
-            this.canvas.setPointerCapture?.(e.pointerId);
-            this.activePointerId = e.pointerId;
-          } catch {
-            // Ignore pointer capture errors
-          }
-        }
         return;
       }
 
@@ -3529,7 +3869,35 @@ export class OkeyTable3D {
     };
 
     this.onPointerMove = (e) => {
-      if (this.freeroamState?.lookDrag) {
+      if (this.freeroamState?.touchLook && e.pointerId === this.freeroamState.touchLook.pointerId) {
+        const dx = e.clientX - this.freeroamState.touchLook.x;
+        const dy = e.clientY - this.freeroamState.touchLook.y;
+        this.freeroamState.touchLook.x = e.clientX;
+        this.freeroamState.touchLook.y = e.clientY;
+
+        this.freeroamState.yaw -= dx * 0.0062;
+        this.freeroamState.pitch = THREE.MathUtils.clamp(
+          this.freeroamState.pitch - dy * 0.0052,
+          -0.78,
+          0.58
+        );
+        const now = performance.now();
+        if (now - this.freeroamState.lastEmitAt > 95) {
+          this.freeroamState.lastEmitAt = now;
+          this.freeroamState.lastSentX = this.freeroamState.pos.x;
+          this.freeroamState.lastSentZ = this.freeroamState.pos.z;
+          this.freeroamState.lastSentYaw = this.freeroamState.yaw;
+          this.callbacks.onFreeroamMove?.({
+            x: this.freeroamState.pos.x,
+            z: this.freeroamState.pos.z,
+            yaw: this.freeroamState.yaw,
+            active: true
+          });
+        }
+        return;
+      }
+
+      if (this.freeroamState?.lookDrag && !this.isPointerLocked) {
         const dx = e.clientX - this.freeroamState.lookDrag.x;
         const dy = e.clientY - this.freeroamState.lookDrag.y;
         this.freeroamState.lookDrag = { x: e.clientX, y: e.clientY };
@@ -3719,19 +4087,41 @@ export class OkeyTable3D {
         if (hitKind === 'billiardFelt') {
           this.canvas.style.cursor = this.isMyBilliardTurn()
             ? 'crosshair'
-            : (this.cameraMode === 'freeroam' ? 'grab' : 'default');
+            : (this.cameraMode === 'freeroam' ? (this.isPointerLocked ? 'none' : 'grab') : 'default');
         } else {
           this.canvas.style.cursor = 'pointer';
         }
       } else {
-        this.canvas.style.cursor = this.cameraMode === 'freeroam' ? 'grab' : 'default';
+        this.canvas.style.cursor = this.cameraMode === 'freeroam'
+          ? (this.isPointerLocked ? 'none' : 'grab')
+          : 'default';
       }
     };
 
     this.onPointerUp = (e) => {
+      if (this.freeroamState?.touchLook && e.pointerId === this.freeroamState.touchLook.pointerId) {
+        this.freeroamState.touchLook = null;
+        try {
+          if (this.canvas.hasPointerCapture?.(e.pointerId)) {
+            this.canvas.releasePointerCapture(e.pointerId);
+          }
+        } catch {
+          // Ignore pointer capture errors
+        }
+        this.callbacks.onFreeroamMove?.({
+          x: this.freeroamState.pos.x,
+          z: this.freeroamState.pos.z,
+          yaw: this.freeroamState.yaw,
+          active: this.cameraMode === 'freeroam'
+        });
+        return;
+      }
+
       if (this.freeroamState?.lookDrag) {
         this.freeroamState.lookDrag = null;
-        this.canvas.style.cursor = this.cameraMode === 'freeroam' ? 'grab' : 'default';
+        this.canvas.style.cursor = this.cameraMode === 'freeroam'
+          ? (this.isPointerLocked ? 'none' : 'grab')
+          : 'default';
         releaseActivePointer();
         this.callbacks.onFreeroamMove?.({
           x: this.freeroamState.pos.x,
@@ -3960,15 +4350,28 @@ export class OkeyTable3D {
       }
     };
 
-    this.onPointerCancel = () => {
+    this.onPointerCancel = (e) => {
+      if (e?.pointerId != null && this.freeroamState?.touchLook) {
+        if (e.pointerId === this.freeroamState.touchLook.pointerId) {
+          this.freeroamState.touchLook = null;
+          return;
+        }
+        if (this.activePointerId == null) return;
+      }
       this.cancelActiveInteractions();
     };
 
     this.onWheel = (e) => {
       if (this.demoMode || this.cameraMode === 'freeroam') return;
+      const minRadius =
+        this.cameraMode === 'billiard'
+          ? 5.5
+          : this.cameraMode === 'sideTable'
+            ? 4.2
+            : 9.5;
       this.targetSpherical.radius = THREE.MathUtils.clamp(
         this.targetSpherical.radius + e.deltaY * 0.008,
-        this.cameraMode === 'billiard' ? 5.5 : 9.5,
+        minRadius,
         22.0
       );
     };
@@ -3986,6 +4389,8 @@ export class OkeyTable3D {
       this._css3dMatrixValid = false;
     };
 
+    document.addEventListener('pointerlockchange', this.onPointerLockChange);
+    document.addEventListener('mousemove', this.onDocumentMouseMove);
     this.canvas.addEventListener('pointerdown', this.onPointerDown);
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
@@ -4063,7 +4468,23 @@ export class OkeyTable3D {
       }
       if (this.envLights?.pendantLight) {
         this.envLights.pendantLight.color.set('#FFD699');
-        this.envLights.pendantLight.intensity = 44;
+        this.envLights.pendantLight.intensity = 48;
+      }
+      if (this.envLights?.billiardLight) {
+        this.envLights.billiardLight.color.set('#FFE4AD');
+        this.envLights.billiardLight.intensity = 38;
+      }
+      if (this.envLights?.westWingLight) {
+        this.envLights.westWingLight.color.set('#FFD89E');
+        this.envLights.westWingLight.intensity = 34;
+      }
+      if (this.envLights?.southLoungeLight) {
+        this.envLights.southLoungeLight.color.set('#FFD394');
+        this.envLights.southLoungeLight.intensity = 32;
+      }
+      if (this.envLights?.barLight) {
+        this.envLights.barLight.color.set('#FFE3AD');
+        this.envLights.barLight.intensity = 24;
       }
       if (this.envLights?.keyLight) {
         this.envLights.keyLight.color.set('#FFD091');
@@ -4086,7 +4507,23 @@ export class OkeyTable3D {
       }
       if (this.envLights?.pendantLight) {
         this.envLights.pendantLight.color.set('#FFC57A');
-        this.envLights.pendantLight.intensity = 48;
+        this.envLights.pendantLight.intensity = 52;
+      }
+      if (this.envLights?.billiardLight) {
+        this.envLights.billiardLight.color.set('#FFD68A');
+        this.envLights.billiardLight.intensity = 44;
+      }
+      if (this.envLights?.westWingLight) {
+        this.envLights.westWingLight.color.set('#FFC77D');
+        this.envLights.westWingLight.intensity = 40;
+      }
+      if (this.envLights?.southLoungeLight) {
+        this.envLights.southLoungeLight.color.set('#FFC378');
+        this.envLights.southLoungeLight.intensity = 36;
+      }
+      if (this.envLights?.barLight) {
+        this.envLights.barLight.color.set('#FFD796');
+        this.envLights.barLight.intensity = 28;
       }
       if (this.envLights?.keyLight) {
         this.envLights.keyLight.color.set('#FFE4BA');
@@ -4109,15 +4546,31 @@ export class OkeyTable3D {
       }
       if (this.envLights?.pendantLight) {
         this.envLights.pendantLight.color.set('#FFD18C');
-        this.envLights.pendantLight.intensity = 52;
+        this.envLights.pendantLight.intensity = 56;
+      }
+      if (this.envLights?.billiardLight) {
+        this.envLights.billiardLight.color.set('#FFDF9E');
+        this.envLights.billiardLight.intensity = 42;
+      }
+      if (this.envLights?.westWingLight) {
+        this.envLights.westWingLight.color.set('#FFD08E');
+        this.envLights.westWingLight.intensity = 38;
+      }
+      if (this.envLights?.southLoungeLight) {
+        this.envLights.southLoungeLight.color.set('#FFCC88');
+        this.envLights.southLoungeLight.intensity = 34;
+      }
+      if (this.envLights?.barLight) {
+        this.envLights.barLight.color.set('#FFE0A8');
+        this.envLights.barLight.intensity = 26;
       }
       if (this.envLights?.keyLight) {
         this.envLights.keyLight.color.set('#FFF0D4');
-        this.envLights.keyLight.intensity = 1.25;
+        this.envLights.keyLight.intensity = 1.28;
       }
       if (this.envLights?.rimLight) {
         this.envLights.rimLight.color.set('#CBD8FF');
-        this.envLights.rimLight.intensity = 0.32;
+        this.envLights.rimLight.intensity = 0.35;
       }
       if (this.hearthLight) {
         this.hearthLight.intensity = 8;
@@ -4535,17 +4988,23 @@ export class OkeyTable3D {
     if (this.cameraMode === 'freeroam' && !this.demoMode) {
       const fs = this.freeroamState;
       const keys = fs.keys;
-      const forwardInput =
+      const keyForward =
         (keys.has('keyw') || keys.has('arrowup') ? 1 : 0) -
         (keys.has('keys') || keys.has('arrowdown') ? 1 : 0);
-      const strafeInput =
+      const keyStrafe =
         (keys.has('keyd') || keys.has('arrowright') ? 1 : 0) -
         (keys.has('keya') || keys.has('arrowleft') ? 1 : 0);
 
-      if (forwardInput !== 0 || strafeInput !== 0) {
-        const len = Math.hypot(forwardInput, strafeInput);
-        const fNorm = forwardInput / len;
-        const sNorm = strafeInput / len;
+      const joyF = -(fs.mobileMove?.z || 0);
+      const joyS = fs.mobileMove?.x || 0;
+      const rawF = keyForward + joyF;
+      const rawS = keyStrafe + joyS;
+      const mag = Math.hypot(rawF, rawS);
+
+      if (mag > 0.05) {
+        const scale = mag > 1 ? 1 / mag : 1;
+        const fNorm = rawF * scale;
+        const sNorm = rawS * scale;
         const sprint = keys.has('shiftleft') || keys.has('shiftright');
         const speed = sprint ? 10.5 : 6.4;
 
@@ -4557,25 +5016,30 @@ export class OkeyTable3D {
         fs.pos.x += (fx * fNorm + rx * sNorm) * speed * dt;
         fs.pos.z += (fz * fNorm + rz * sNorm) * speed * dt;
         this.constrainFreeroamPosition(fs.pos);
+      }
 
-        if (frameNow - fs.lastEmitAt > 95) {
-          const moved =
-            fs.lastSentX === null ||
-            Math.hypot(fs.pos.x - fs.lastSentX, fs.pos.z - fs.lastSentZ) > 0.05 ||
-            Math.abs(fs.yaw - (fs.lastSentYaw ?? 0)) > 0.03;
-          if (moved) {
-            fs.lastEmitAt = frameNow;
-            fs.lastSentX = fs.pos.x;
-            fs.lastSentZ = fs.pos.z;
-            fs.lastSentYaw = fs.yaw;
-            this.callbacks.onFreeroamMove?.({
-              x: fs.pos.x,
-              z: fs.pos.z,
-              yaw: fs.yaw,
-              active: true
-            });
-          }
+      if (frameNow - fs.lastEmitAt > 95) {
+        const moved =
+          fs.lastSentX === null ||
+          Math.hypot(fs.pos.x - fs.lastSentX, fs.pos.z - fs.lastSentZ) > 0.05 ||
+          Math.abs(fs.yaw - (fs.lastSentYaw ?? 0)) > 0.03;
+        if (moved) {
+          fs.lastEmitAt = frameNow;
+          fs.lastSentX = fs.pos.x;
+          fs.lastSentZ = fs.pos.z;
+          fs.lastSentYaw = fs.yaw;
+          this.callbacks.onFreeroamMove?.({
+            x: fs.pos.x,
+            z: fs.pos.z,
+            yaw: fs.yaw,
+            active: true
+          });
         }
+      }
+
+      if (frameNow - this.lastProximityCheckAt > 110) {
+        this.lastProximityCheckAt = frameNow;
+        this.computeProximityTarget(false);
       }
 
       const cosPitch = Math.cos(fs.pitch);
@@ -4659,8 +5123,12 @@ export class OkeyTable3D {
     this.cancelActiveInteractions();
     this.clearFreeroamKeys();
     this.billiard3d?.dispose();
+    this.sideTables3d?.dispose();
+    this.envRT?.dispose();
     this.rainGroup?.dispose?.();
     this.css3dRenderer?.domElement?.remove();
+    document.removeEventListener('pointerlockchange', this.onPointerLockChange);
+    document.removeEventListener('mousemove', this.onDocumentMouseMove);
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);

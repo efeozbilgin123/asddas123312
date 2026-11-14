@@ -378,7 +378,7 @@ export class BilliardSession {
       frames: sim.frames,
       events: sim.events
     };
-    this.shotBusyUntil = now + sim.durationMs;
+    this.shotBusyUntil = now + Math.max(200, sim.durationMs - 200);
     this.aimState = {
       seatIndex: this.currentSeat,
       angle: shotAngle,

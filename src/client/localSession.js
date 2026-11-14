@@ -12,6 +12,7 @@ import {
   pickRandomBotName,
   ROOM_AMBIANCES
 } from '../../shared/presets.js';
+import { SIDE_TABLE_DEFS, SideTableSession } from '../../shared/sideGames.js';
 
 const LOCAL_QUICK_CHAT_MAP = new Map(KAHVE_QUICK_CHATS.map((q) => [q.id, q]));
 
@@ -39,9 +40,11 @@ export class LocalSingleplayerClient {
     this.playerAvatar = playerAvatar || 'avatar-1';
     this.viewerSeatIndex = [0, 1, 2, 3].includes(Number(seatIndex)) ? Number(seatIndex) : 0;
     this.okeyHumanSeatIndex = this.viewerSeatIndex;
-    this.myActivity = 'okey'; // 'okey' | 'billiard' | 'spectator'
+    this.myActivity = 'okey'; // 'okey' | 'billiard' | 'sideTable' | 'spectator'
     this.watchSeatIndex = null;
     this.billiardSeatIndex = null;
+    this.mySideTableId = null;
+    this.mySideSeatIndex = null;
     this.roamers = [];
 
     const humanAvatar = this.playerAvatar;
@@ -85,6 +88,25 @@ export class LocalSingleplayerClient {
     this.billiard.assignBot(0);
     this.billiard.assignBot(1);
 
+    this.sideTables = SIDE_TABLE_DEFS.map((def) => {
+      const tbl = new SideTableSession(def, {
+        onStateChange: () => {
+          this.emitRoomState();
+        }
+      });
+      if (def.kind === 'pisti' || def.kind === 'papazkacti') {
+        tbl.assignBot(1);
+      } else if (def.kind === 'poker') {
+        tbl.assignBot(1);
+        tbl.assignBot(2);
+      } else if (def.kind === 'batak') {
+        tbl.assignBot(1);
+        tbl.assignBot(2);
+        tbl.assignBot(3);
+      }
+      return tbl;
+    });
+
     this.session = new GameSession({
       roomCode: 'TEK1',
       seatsConfig,
@@ -106,6 +128,15 @@ export class LocalSingleplayerClient {
     }
   }
 
+  findHumanSideTable() {
+    if (!Array.isArray(this.sideTables)) return null;
+    for (const tbl of this.sideTables) {
+      const seat = tbl.findHumanSeat(this.playerId);
+      if (seat) return { table: tbl, seat };
+    }
+    return null;
+  }
+
   emitRoomState() {
     if (!this.onState || !this.session) return;
     const isSpectator = this.myActivity === 'spectator';
@@ -113,6 +144,9 @@ export class LocalSingleplayerClient {
     const effectiveViewer = isOkey ? this.okeyHumanSeatIndex : (this.watchSeatIndex ?? 0);
     const bSeat = this.billiard?.findHumanSeat(this.playerId) || null;
     this.billiardSeatIndex = bSeat ? bSeat.seatIndex : null;
+    const sideHit = this.findHumanSideTable();
+    this.mySideTableId = sideHit ? sideHit.table.id : null;
+    this.mySideSeatIndex = sideHit ? sideHit.seat.seatIndex : null;
 
     this.onState({
       code: 'TEK1',
@@ -122,6 +156,8 @@ export class LocalSingleplayerClient {
       isLocal: true,
       myActivity: this.myActivity,
       billiardSeatIndex: this.billiardSeatIndex,
+      mySideTableId: this.mySideTableId,
+      mySideSeatIndex: this.mySideSeatIndex,
       myRoamerKey: 'r-local',
       isSpectator,
       watchSeatIndex: isSpectator ? this.watchSeatIndex : null,
@@ -131,6 +167,7 @@ export class LocalSingleplayerClient {
       spectatorCount: isSpectator ? 1 : 0,
       roamers: this.roamers,
       billiard: this.billiard ? this.billiard.getClientView() : null,
+      sideTables: Array.isArray(this.sideTables) ? this.sideTables.map((t) => t.getClientView(this.playerId)) : [],
       music: this.music,
       tv: this.tv,
       ambianceTrack: this.ambianceTrack,
@@ -167,6 +204,15 @@ export class LocalSingleplayerClient {
       connected: true
     });
     this.okeyHumanSeatIndex = null;
+  }
+
+  vacateLocalSideTable() {
+    const hit = this.findHumanSideTable();
+    if (hit) {
+      hit.table.standHuman(this.playerId, { convertToBotIfActive: true });
+    }
+    this.mySideTableId = null;
+    this.mySideSeatIndex = null;
   }
 
   action(event, data, ack) {
@@ -221,11 +267,13 @@ export class LocalSingleplayerClient {
         res = { ok: true };
         break;
       case 'room:standUp':
-      case 'room:billiardLeave': {
+      case 'room:billiardLeave':
+      case 'room:sideLeave': {
         this.vacateLocalOkeyToBot();
         if (this.billiard?.findHumanSeat(this.playerId)) {
           this.billiard.standHuman(this.playerId, { convertToBotIfActive: true });
         }
+        this.vacateLocalSideTable();
         this.myActivity = 'spectator';
         this.watchSeatIndex = null;
         this.emitRoomState();
@@ -247,6 +295,7 @@ export class LocalSingleplayerClient {
         if (this.billiard?.findHumanSeat(this.playerId)) {
           this.billiard.standHuman(this.playerId, { convertToBotIfActive: true });
         }
+        this.vacateLocalSideTable();
         this.okeyHumanSeatIndex = targetIdx;
         this.viewerSeatIndex = targetIdx;
         this.myActivity = 'okey';
@@ -264,6 +313,7 @@ export class LocalSingleplayerClient {
       }
       case 'room:billiardJoin': {
         this.vacateLocalOkeyToBot();
+        this.vacateLocalSideTable();
         const reqIdx = data?.seatIndex !== undefined && data?.seatIndex !== null ? Number(data.seatIndex) : 0;
         if (this.billiard.phase !== 'playing') {
           this.billiard.seats[reqIdx].type = 'empty';
@@ -309,6 +359,56 @@ export class LocalSingleplayerClient {
       case 'room:billiardShoot':
         res = this.billiard.shoot(this.playerId, { angle: data?.angle, power: data?.power });
         break;
+      case 'room:sideJoin': {
+        const tbl = this.sideTables.find((t) => t.id === String(data?.tableId || ''));
+        if (!tbl) {
+          res = { ok: false, error: 'Yan masa bulunamadı.' };
+          break;
+        }
+        this.vacateLocalOkeyToBot();
+        if (this.billiard?.findHumanSeat(this.playerId)) {
+          this.billiard.standHuman(this.playerId, { convertToBotIfActive: true });
+        }
+        const curHit = this.findHumanSideTable();
+        if (curHit && curHit.table.id !== tbl.id) {
+          curHit.table.standHuman(this.playerId, { convertToBotIfActive: true });
+        }
+        const sitRes = tbl.sitHuman({
+          playerId: this.playerId,
+          playerName: this.playerName,
+          playerAvatar: this.playerAvatar,
+          seatIndex: data?.seatIndex
+        });
+        if (sitRes.ok) {
+          this.myActivity = 'sideTable';
+          this.watchSeatIndex = null;
+          this.emitRoomState();
+        }
+        res = sitRes.ok ? { ...sitRes, tableId: tbl.id } : sitRes;
+        break;
+      }
+      case 'room:sideToggleBot': {
+        const tbl = this.sideTables.find((t) => t.id === String(data?.tableId || this.mySideTableId || ''));
+        res = tbl ? tbl.toggleBotSeat(data?.seatIndex) : { ok: false, error: 'Yan masa bulunamadı.' };
+        break;
+      }
+      case 'room:sideStart': {
+        const tbl = this.sideTables.find((t) => t.id === String(data?.tableId || this.mySideTableId || ''));
+        res = tbl
+          ? tbl.startMatch({ autoFillBot: data?.autoFillBot !== false })
+          : { ok: false, error: 'Yan masa bulunamadı.' };
+        break;
+      }
+      case 'room:sideAction': {
+        const hit = this.findHumanSideTable();
+        const tbl = data?.tableId
+          ? this.sideTables.find((t) => t.id === String(data.tableId))
+          : hit?.table;
+        res = tbl
+          ? tbl.performAction(this.playerId, data?.action, data?.payload || {})
+          : { ok: false, error: 'Bu masada oturmuyorsunuz.' };
+        break;
+      }
       case 'room:roamMove':
         res = { ok: true };
         break;
@@ -967,6 +1067,12 @@ export class LocalSingleplayerClient {
     if (this.billiard) {
       this.billiard.destroy();
       this.billiard = null;
+    }
+    if (Array.isArray(this.sideTables)) {
+      for (const tbl of this.sideTables) {
+        tbl.destroy();
+      }
+      this.sideTables = [];
     }
   }
 }

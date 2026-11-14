@@ -124,6 +124,10 @@ export class GameSession {
     if (avatar !== undefined) seat.avatar = avatar;
     if (isBot !== undefined) seat.isBot = isBot;
     if (connected !== undefined) seat.connected = connected;
+    if (!seat.isBot && this.currentSeat === seatIndex && this.botTimer) {
+      clearTimeout(this.botTimer);
+      this.botTimer = null;
+    }
     if (seat.isBot && this.phase === 'playing' && this.currentSeat === seatIndex) {
       this.scheduleBotMove();
     }

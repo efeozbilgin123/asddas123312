@@ -3,16 +3,19 @@ import { BILLIARD_POCKETS, BILLIARD_TABLE } from '../../shared/billiardSession.j
 import { soundFX } from './sound.js';
 import { createNameplateTexture, getAvatarTexture, getBilliardBallTexture, getWoodTexture } from './textures.js';
 
-export const BILLIARD_WORLD_POS = new THREE.Vector3(16.5, 0, -2.2);
+export const BILLIARD_WORLD_POS = new THREE.Vector3(28.0, 0, 0);
+export const BILLIARD_SCALE = 1.48;
 
 export class BilliardTable3D {
   constructor(parentScene, shared = {}) {
     this.root = new THREE.Group();
     this.root.position.copy(BILLIARD_WORLD_POS);
+    this.root.scale.setScalar(BILLIARD_SCALE);
     parentScene.add(this.root);
 
     this.bustGeom = shared.bustGeom || null;
     this.avatarMatCache = shared.avatarMatCache || new Map();
+    this.onShotComplete = typeof shared.onShotComplete === 'function' ? shared.onShotComplete : null;
 
     this.feltHitMesh = null;
     this.ballMeshes = new Map();
@@ -33,6 +36,7 @@ export class BilliardTable3D {
     this.currentState = null;
     this.viewerId = null;
     this.activeShotId = 0;
+    this.shotStartPerfMs = 0;
     this.playedEventIndices = new Set();
     this.localAimAngle = -Math.PI / 2;
     this.localAimPower = 0.65;
@@ -48,21 +52,35 @@ export class BilliardTable3D {
   buildTable() {
     const { halfW, halfL } = BILLIARD_TABLE;
     const woodTex = getWoodTexture();
-    const walnutMat = new THREE.MeshLambertMaterial({ map: woodTex, color: '#5A321D' });
-    const darkWalnutMat = new THREE.MeshLambertMaterial({ map: woodTex, color: '#3E2112' });
+    const walnutMat = new THREE.MeshStandardMaterial({
+      map: woodTex,
+      color: '#6B3D24',
+      roughness: 0.42,
+      metalness: 0.08
+    });
+    const darkWalnutMat = new THREE.MeshStandardMaterial({
+      map: woodTex,
+      color: '#422414',
+      roughness: 0.48,
+      metalness: 0.06
+    });
     const feltMat = new THREE.MeshStandardMaterial({
-      color: '#136B44',
-      roughness: 0.92,
+      color: '#136F46',
+      roughness: 0.9,
       metalness: 0.02
     });
     const brassMat = new THREE.MeshStandardMaterial({
       color: '#D4AC4B',
-      roughness: 0.3,
-      metalness: 0.72
+      roughness: 0.26,
+      metalness: 0.78
     });
-    const pocketMat = new THREE.MeshBasicMaterial({ color: '#080707' });
+    const pocketMat = new THREE.MeshBasicMaterial({ color: '#070606' });
     const ivorySightMat = new THREE.MeshBasicMaterial({ color: '#F3E7C9' });
-    const lampShadeMat = new THREE.MeshLambertMaterial({ color: '#145D3A' });
+    const lampShadeMat = new THREE.MeshStandardMaterial({
+      color: '#145D3A',
+      roughness: 0.35,
+      metalness: 0.12
+    });
     const lampGlowMat = new THREE.MeshBasicMaterial({ color: '#FFF0C2' });
 
     this.disposableMats.push(
@@ -77,9 +95,9 @@ export class BilliardTable3D {
     );
 
     // Apron & Slate Base
-    const apronGeo = new THREE.BoxGeometry(halfW * 2 + 0.52, 0.56, halfL * 2 + 0.52);
+    const apronGeo = new THREE.BoxGeometry(halfW * 2 + 0.52, 0.52, halfL * 2 + 0.52);
     const apron = new THREE.Mesh(apronGeo, darkWalnutMat);
-    apron.position.y = -0.32;
+    apron.position.y = -0.3;
     apron.castShadow = true;
     apron.receiveShadow = true;
     this.root.add(apron);
@@ -157,18 +175,21 @@ export class BilliardTable3D {
       this.root.add(mesh);
     }
 
-    // 4 Sturdy Turned Legs reaching parquet floor at y = -2.35
-    const legGeo = new THREE.CylinderGeometry(0.21, 0.15, 1.85, 12);
-    const footGeo = new THREE.CylinderGeometry(0.2, 0.23, 0.14, 12);
+    // 4 Sturdy Turned Legs reaching parquet floor at local y = -2.35 / BILLIARD_SCALE (-1.588)
+    const floorLocalY = -2.35 / BILLIARD_SCALE;
+    const legLen = Math.abs(floorLocalY) - 0.45;
+    const legGeo = new THREE.CylinderGeometry(0.19, 0.14, legLen, 12);
+    const footGeo = new THREE.CylinderGeometry(0.19, 0.22, 0.12, 12);
     this.disposableGeoms.push(legGeo, footGeo);
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
         const leg = new THREE.Mesh(legGeo, darkWalnutMat);
-        leg.position.set(sx * (halfW - 0.12), -1.42, sz * (halfL - 0.25));
+        leg.position.set(sx * (halfW - 0.12), -0.45 - legLen / 2, sz * (halfL - 0.25));
+        leg.castShadow = true;
         this.root.add(leg);
 
         const foot = new THREE.Mesh(footGeo, brassMat);
-        foot.position.set(sx * (halfW - 0.12), -2.28, sz * (halfL - 0.25));
+        foot.position.set(sx * (halfW - 0.12), floorLocalY + 0.06, sz * (halfL - 0.25));
         this.root.add(foot);
       }
     }
@@ -336,9 +357,16 @@ export class BilliardTable3D {
     }
     this.nameplateMats.length = 0;
 
+    const floorLocalY = -2.35 / BILLIARD_SCALE;
+    const pedHeight = Math.max(0.4, Math.abs(floorLocalY) - 0.35);
+    const pedMat = new THREE.MeshStandardMaterial({ color: '#2B1B14', roughness: 0.65 });
+    const pedGeo = new THREE.CylinderGeometry(0.42, 0.56, pedHeight, 12);
+    this.disposableGeoms.push(pedGeo);
+    this.disposableMats.push(pedMat);
+
     const spots = [
-      { x: -3.15, z: 2.25, rotY: Math.PI / 2 },
-      { x: 3.15, z: -2.25, rotY: -Math.PI / 2 }
+      { x: -3.25, z: 2.25, rotY: Math.PI / 2 },
+      { x: 3.25, z: -2.25, rotY: -Math.PI / 2 }
     ];
 
     seats.forEach((seat, idx) => {
@@ -349,6 +377,10 @@ export class BilliardTable3D {
       const pGroup = new THREE.Group();
       pGroup.position.set(spot.x, -0.35, spot.z);
       pGroup.rotation.y = spot.rotY;
+
+      const ped = new THREE.Mesh(pedGeo, pedMat);
+      ped.position.y = -pedHeight / 2 - 0.25;
+      pGroup.add(ped);
 
       if (this.bustGeom) {
         const vestColor = idx === 0 ? '#1F4E78' : '#7A2E2E';
@@ -397,18 +429,23 @@ export class BilliardTable3D {
 
     const shot = billiardState.lastShot;
     if (shot && shot.id !== this.activeShotId) {
-      const ageMs = Date.now() - (shot.startedAt || Date.now());
-      if (ageMs < (shot.durationMs || 0) + 250) {
+      const rawAgeMs = Date.now() - (shot.startedAt || Date.now());
+      const clampedAgeMs = Math.max(0, rawAgeMs);
+      if (clampedAgeMs < (shot.durationMs || 0) + 200) {
         this.activeShotId = shot.id;
+        this.shotStartPerfMs = performance.now() - Math.min(clampedAgeMs, Math.max(0, (shot.durationMs || 0) - 50));
         this.playedEventIndices.clear();
         this.isAnimatingShot = true;
-        if (ageMs < 250) {
+        if (clampedAgeMs < 350) {
           soundFX.playBilliardCueShot(shot.power || 0.65);
         }
       } else {
         this.activeShotId = shot.id;
         this.isAnimatingShot = false;
       }
+    } else if (!shot) {
+      this.activeShotId = 0;
+      this.isAnimatingShot = false;
     }
 
     if (!this.isAnimatingShot) {
@@ -429,7 +466,7 @@ export class BilliardTable3D {
 
     const shot = state.lastShot;
     if (this.isAnimatingShot && shot && Array.isArray(shot.frames) && shot.frames.length > 0) {
-      const elapsedSec = Math.max(0, (Date.now() - (shot.startedAt || 0)) / 1000);
+      const elapsedSec = Math.max(0, (performance.now() - (this.shotStartPerfMs || performance.now())) / 1000);
       const frames = shot.frames;
       const lastFrame = frames[frames.length - 1];
 
@@ -455,6 +492,7 @@ export class BilliardTable3D {
           mesh.visible = !b.pocketed;
           if (!b.pocketed) this.applyBallRoll(b.id, mesh, b.x, b.z);
         }
+        this.onShotComplete?.();
       } else {
         let fIdx = 0;
         while (fIdx < frames.length - 2 && frames[fIdx + 1].t < elapsedSec) {
@@ -480,6 +518,9 @@ export class BilliardTable3D {
           }
         }
       }
+    } else if (this.isAnimatingShot) {
+      this.isAnimatingShot = false;
+      this.onShotComplete?.();
     }
 
     // Cue stick + aiming guideline while active player (or bot) lines up a shot
@@ -530,8 +571,8 @@ export class BilliardTable3D {
 
   worldToLocalFelt(worldPoint) {
     return {
-      x: worldPoint.x - BILLIARD_WORLD_POS.x,
-      z: worldPoint.z - BILLIARD_WORLD_POS.z
+      x: (worldPoint.x - BILLIARD_WORLD_POS.x) / BILLIARD_SCALE,
+      z: (worldPoint.z - BILLIARD_WORLD_POS.z) / BILLIARD_SCALE
     };
   }
 
@@ -539,9 +580,9 @@ export class BilliardTable3D {
     const cue = this.ballMeshes.get(0);
     if (!cue) return BILLIARD_WORLD_POS.clone();
     return new THREE.Vector3(
-      BILLIARD_WORLD_POS.x + cue.position.x,
-      cue.position.y,
-      BILLIARD_WORLD_POS.z + cue.position.z
+      BILLIARD_WORLD_POS.x + cue.position.x * BILLIARD_SCALE,
+      cue.position.y * BILLIARD_SCALE,
+      BILLIARD_WORLD_POS.z + cue.position.z * BILLIARD_SCALE
     );
   }
 

@@ -805,7 +805,7 @@ test('LocalSingleplayerClient transitions cleanly between Okey, Billiards, and F
   assert.equal(last.seats[0].type, 'human');
 });
 
-test('RoomManager direct invite join handles case-insensitive codes, full active tables, and cross-room switching', () => {
+test('RoomManager direct invite join handles case-insensitive codes, bot takeover, full active tables, and cross-room switching', (ctx) => {
   const io = createMockIo();
   const rm = new RoomManager(io);
 
@@ -813,6 +813,11 @@ test('RoomManager direct invite join handles case-insensitive codes, full active
   const roomB = rm.createRoom({ playerId: 'host-b', playerName: 'Kaan', roomName: 'Oda B' });
   assert.equal(roomA.ok, true);
   assert.equal(roomB.ok, true);
+  ctx.after(() => {
+    ['host-a', 'guest-1', 'guest-2', 'guest-3', 'late-1', 'host-b'].forEach((pid) => {
+      rm.leaveCurrentRoom(pid);
+    });
+  });
 
   // Guest joins Room A via lowercase invite code with auto activity
   const guestJoin = rm.joinRoom({
@@ -828,7 +833,15 @@ test('RoomManager direct invite join handles case-insensitive codes, full active
   // Start Room A (fills remaining seats 2 & 3 with bots)
   assert.equal(rm.startGame(roomA.room.code, 'host-a').ok, true);
 
-  // Late friend opening invite link enters as spectator/roamer when Okey seats are full
+  // Mid-game invite friends can take over bot seats 2 and 3 anytime
+  const g2 = rm.joinRoom({ roomCode: roomA.room.code, playerId: 'guest-2', playerName: 'Misafir 2', activity: 'auto' });
+  const g3 = rm.joinRoom({ roomCode: roomA.room.code, playerId: 'guest-3', playerName: 'Misafir 3', activity: 'auto' });
+  assert.equal(g2.ok, true);
+  assert.equal(g2.activity, 'okey');
+  assert.equal(g3.ok, true);
+  assert.equal(g3.activity, 'okey');
+
+  // Late 5th friend opening invite link enters as spectator/roamer when all 4 Okey seats are human
   const lateJoin = rm.joinRoom({
     roomCode: roomA.room.code,
     playerId: 'late-1',
@@ -852,7 +865,157 @@ test('RoomManager direct invite join handles case-insensitive codes, full active
 
   rm.leaveCurrentRoom('host-a');
   rm.leaveCurrentRoom('guest-1');
+  rm.leaveCurrentRoom('guest-2');
+  rm.leaveCurrentRoom('guest-3');
   rm.leaveCurrentRoom('late-1');
   rm.leaveCurrentRoom('host-b');
   assert.equal(rm.getRoom(roomA.room.code), null);
+});
+
+test('RoomManager puts a bot on Okey stand-up and allows human takeover at any time while protecting connected humans', (ctx) => {
+  const io = createMockIo();
+  const rm = new RoomManager(io);
+
+  const created = rm.createRoom({ playerId: 'p1', playerName: 'Efe', roomName: 'Bot Devir' });
+  const code = created.room.code;
+  ctx.after(() => {
+    ['p1', 'sp1', 'p2'].forEach((pid) => rm.leaveCurrentRoom(pid));
+  });
+  assert.equal(rm.joinRoom({ roomCode: code, playerId: 'p2', playerName: 'Can', activity: 'okey' }).ok, true);
+  assert.equal(rm.joinRoom({ roomCode: code, playerId: 'sp1', playerName: 'Zeynep', activity: 'spectator' }).ok, true);
+
+  // During waiting, standing up replaces vacated seat 1 with a bot
+  const standWait = rm.standUp({ roomCode: code, playerId: 'p2' });
+  assert.equal(standWait.ok, true);
+  assert.equal(created.room.seats[1].type, 'bot');
+
+  // Spectator can take over the bot seat in waiting
+  assert.equal(rm.takeSeat({ roomCode: code, playerId: 'sp1', targetSeatIndex: 1 }).ok, true);
+  assert.equal(created.room.seats[1].type, 'human');
+  assert.equal(created.room.seats[1].playerId, 'sp1');
+
+  // Connected human seat 0 remains protected
+  const stealRes = rm.takeSeat({ roomCode: code, playerId: 'p2', targetSeatIndex: 0 });
+  assert.equal(stealRes.ok, false);
+
+  // Start match (fills seats 2 and 3 with bots)
+  assert.equal(rm.startGame(code, 'p1').ok, true);
+  assert.equal(created.room.status, 'playing');
+
+  // Spectator/roamer p2 can take over bot seat 2 mid-game
+  const midTakeover = rm.takeSeat({ roomCode: code, playerId: 'p2', targetSeatIndex: 2 });
+  assert.equal(midTakeover.ok, true);
+  assert.equal(created.room.seats[2].type, 'human');
+  assert.equal(created.room.seats[2].playerId, 'p2');
+
+  // Standing up mid-game converts seat 0 to bot, and p1 can retake it anytime
+  assert.equal(rm.standUp({ roomCode: code, playerId: 'p1' }).ok, true);
+  assert.equal(created.room.seats[0].type, 'bot');
+  assert.equal(rm.takeSeat({ roomCode: code, playerId: 'p1', targetSeatIndex: 0 }).ok, true);
+  assert.equal(created.room.seats[0].type, 'human');
+  assert.equal(created.room.seats[0].playerId, 'p1');
+
+  rm.leaveCurrentRoom('p1');
+  rm.leaveCurrentRoom('sp1');
+  rm.leaveCurrentRoom('p2');
+  assert.equal(rm.getRoom(code), null);
+});
+
+test('SideTableSession supports Pişti, Papaz Kaçtı, Poker, Batak, and Chat hangout tables', async (ctx) => {
+  const { SideTableSession, SIDE_TABLE_MAP } = await import('../shared/sideGames.js');
+
+  // Pişti
+  const pisti = new SideTableSession(SIDE_TABLE_MAP.get('pisti'));
+  ctx.after(() => pisti.destroy());
+  assert.equal(pisti.sitHuman({ playerId: 'u1', playerName: 'Efe' }).ok, true);
+  assert.equal(pisti.toggleBotSeat(1).ok, true);
+  assert.equal(pisti.startMatch({ autoFillBot: false }).ok, true);
+  const pView = pisti.getClientView('u1');
+  assert.equal(pView.phase, 'playing');
+  assert.equal(pView.myHand.length, 4);
+  assert.equal(pisti.performAction('u1', 'playCard', { cardId: pView.myHand[0].id }).ok, true);
+
+  // Papaz Kaçtı
+  const papaz = new SideTableSession(SIDE_TABLE_MAP.get('papazkacti'));
+  ctx.after(() => papaz.destroy());
+  assert.equal(papaz.sitHuman({ playerId: 'u2', playerName: 'Ali' }).ok, true);
+  assert.equal(papaz.startMatch({ autoFillBot: true }).ok, true);
+  assert.equal(papaz.phase, 'playing');
+
+  // Poker (Texas Hold'em)
+  const poker = new SideTableSession(SIDE_TABLE_MAP.get('poker'));
+  ctx.after(() => poker.destroy());
+  assert.equal(poker.sitHuman({ playerId: 'u3', playerName: 'Veli' }).ok, true);
+  assert.equal(poker.startMatch({ autoFillBot: true }).ok, true);
+  const pkView = poker.getClientView('u3');
+  assert.equal(pkView.phase, 'playing');
+  assert.equal(pkView.myHand.length, 2);
+
+  // Batak (bidding -> playing)
+  const batak = new SideTableSession(SIDE_TABLE_MAP.get('batak'));
+  ctx.after(() => batak.destroy());
+  assert.equal(batak.sitHuman({ playerId: 'u4', playerName: 'Deniz' }).ok, true);
+  assert.equal(batak.startMatch({ autoFillBot: true }).ok, true);
+  assert.equal(batak.batakSubPhase, 'bidding');
+  assert.equal(batak.performAction('u4', 'bid', { bid: 4 }).ok, true);
+
+  // Chat table rejects startMatch/bots
+  const chat = new SideTableSession(SIDE_TABLE_MAP.get('sohbet-1'));
+  ctx.after(() => chat.destroy());
+  assert.equal(chat.sitHuman({ playerId: 'u5', playerName: 'Mert' }).ok, true);
+  assert.equal(chat.toggleBotSeat(1).ok, false);
+  assert.equal(chat.startMatch().ok, false);
+});
+
+test('RoomManager & LocalSingleplayerClient run Okey, Billiards, and Side Tables simultaneously with 96x84 roam bounds', async (ctx) => {
+  const io = createMockIo();
+  const rm = new RoomManager(io);
+
+  const created = rm.createRoom({ playerId: 'h1', playerName: 'Efe', roomName: 'Büyük Kahvehane' });
+  const code = created.room.code;
+  ctx.after(() => {
+    ['h1', 'b1', 's1'].forEach((pid) => rm.leaveCurrentRoom(pid));
+  });
+  assert.equal(rm.joinRoom({ roomCode: code, playerId: 'b1', playerName: 'Bilardocu', activity: 'billiard' }).ok, true);
+  assert.equal(rm.joinRoom({ roomCode: code, playerId: 's1', playerName: 'PiştiSever', activity: 'spectator' }).ok, true);
+
+  // Expanded hall roam bounds up to +-45.5 x +-39.5
+  const roamOk = rm.roamMove({ roomCode: code, playerId: 's1', x: 42.2, z: -34.6, yaw: 1.2, active: true });
+  assert.equal(roamOk.ok, true);
+  assert.equal(created.room.roamStates.get('s1').x, 42.2);
+  assert.equal(created.room.roamStates.get('s1').z, -34.6);
+
+  // Join side table 'pisti', start with bot, play card, then stand up
+  assert.equal(rm.sideTableJoin({ roomCode: code, playerId: 's1', tableId: 'pisti' }).ok, true);
+  assert.equal(rm.sideTableStart({ roomCode: code, playerId: 's1', tableId: 'pisti', autoFillBot: true }).ok, true);
+  const s1View = rm.getRoomPayloadForPlayer(created.room, 's1');
+  assert.equal(s1View.myActivity, 'sideTable');
+  assert.equal(s1View.mySideTableId, 'pisti');
+  const pistiCard = s1View.sideTables.find((t) => t.id === 'pisti').myHand[0];
+  assert.equal(rm.sideTableAction({ roomCode: code, playerId: 's1', tableId: 'pisti', action: 'playCard', payload: { cardId: pistiCard.id } }).ok, true);
+
+  rm.leaveCurrentRoom('h1');
+  rm.leaveCurrentRoom('b1');
+  rm.leaveCurrentRoom('s1');
+  assert.equal(rm.getRoom(code), null);
+
+  // LocalSingleplayerClient side-table parity
+  const { LocalSingleplayerClient } = await import('../src/client/localSession.js');
+  const states = [];
+  const local = new LocalSingleplayerClient({
+    playerName: 'Efe',
+    playerAvatar: 'avatar-1',
+    seatIndex: 0,
+    options: { teamMode: 'solo', katlamali: false, maxRounds: 5, turnSeconds: 60 },
+    onState: (s) => states.push(s)
+  });
+  ctx.after(() => local.destroy());
+  local.action('room:sideJoin', { tableId: 'pisti' }, (res) => assert.equal(res.ok, true));
+  local.action('room:sideStart', { tableId: 'pisti', autoFillBot: true }, (res) => assert.equal(res.ok, true));
+  const last = states[states.length - 1];
+  assert.equal(last.myActivity, 'sideTable');
+  assert.equal(last.mySideTableId, 'pisti');
+  assert.equal(last.sideTables.find((t) => t.id === 'pisti').phase, 'playing');
+  local.action('room:sideLeave', {}, (res) => assert.equal(res.ok, true));
+  assert.equal(states[states.length - 1].myActivity, 'spectator');
 });

@@ -28,6 +28,7 @@ import {
   resolveTvInput
 } from './musicResolver.js';
 import { BilliardSession } from '../shared/billiardSession.js';
+import { SIDE_TABLE_DEFS, SideTableSession } from '../shared/sideGames.js';
 import { GameSession } from './gameSession.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -79,6 +80,17 @@ export class RoomManager {
     return this.rooms.get(String(code).trim().toUpperCase()) || null;
   }
 
+  findHumanSideTable(room, playerId) {
+    if (!room || !Array.isArray(room.sideTables) || !playerId) return null;
+    for (const table of room.sideTables) {
+      const seat = table.findHumanSeat(playerId);
+      if (seat) {
+        return { table, seat };
+      }
+    }
+    return null;
+  }
+
   findRoomParticipant(room, playerId) {
     if (!room || !playerId) return null;
     const seat = room.seats.find((s) => s.type === 'human' && s.playerId === playerId);
@@ -86,10 +98,14 @@ export class RoomManager {
       return {
         seat,
         billiardSeat: null,
+        sideTable: null,
+        sideSeat: null,
         spectator: null,
         activity: 'okey',
         seatIndex: seat.seatIndex,
         billiardSeatIndex: null,
+        sideTableId: null,
+        sideSeatIndex: null,
         name: seat.name || 'Oyuncu',
         avatar: seat.avatar,
         isSpectator: false
@@ -100,12 +116,34 @@ export class RoomManager {
       return {
         seat: null,
         billiardSeat: bSeat,
+        sideTable: null,
+        sideSeat: null,
         spectator: null,
         activity: 'billiard',
         seatIndex: null,
         billiardSeatIndex: bSeat.seatIndex,
+        sideTableId: null,
+        sideSeatIndex: null,
         name: bSeat.name || 'Bilardocu',
         avatar: bSeat.avatar,
+        isSpectator: false
+      };
+    }
+    const sideHit = this.findHumanSideTable(room, playerId);
+    if (sideHit) {
+      return {
+        seat: null,
+        billiardSeat: null,
+        sideTable: sideHit.table,
+        sideSeat: sideHit.seat,
+        spectator: null,
+        activity: 'sideTable',
+        seatIndex: null,
+        billiardSeatIndex: null,
+        sideTableId: sideHit.table.id,
+        sideSeatIndex: sideHit.seat.seatIndex,
+        name: sideHit.seat.name || 'Oyuncu',
+        avatar: sideHit.seat.avatar,
         isSpectator: false
       };
     }
@@ -114,10 +152,14 @@ export class RoomManager {
       return {
         seat: null,
         billiardSeat: null,
+        sideTable: null,
+        sideSeat: null,
         spectator: spec,
         activity: 'spectator',
         seatIndex: null,
         billiardSeatIndex: null,
+        sideTableId: null,
+        sideSeatIndex: null,
         name: spec.name || 'Yancı',
         avatar: spec.avatar,
         isSpectator: true
@@ -137,6 +179,15 @@ export class RoomManager {
       for (const bSeat of room.billiard.seats) {
         if (bSeat.type === 'human' && bSeat.playerId) {
           ids.add(bSeat.playerId);
+        }
+      }
+    }
+    if (Array.isArray(room.sideTables)) {
+      for (const tbl of room.sideTables) {
+        for (const sSeat of tbl.seats) {
+          if (sSeat.type === 'human' && sSeat.playerId) {
+            ids.add(sSeat.playerId);
+          }
         }
       }
     }
@@ -162,6 +213,16 @@ export class RoomManager {
         if (bSeat.type === 'human' && bSeat.connected && bSeat.playerId && !seen.has(bSeat.playerId)) {
           seen.add(bSeat.playerId);
           ids.push(bSeat.playerId);
+        }
+      }
+    }
+    if (Array.isArray(room.sideTables)) {
+      for (const tbl of room.sideTables) {
+        for (const sSeat of tbl.seats) {
+          if (sSeat.type === 'human' && sSeat.connected && sSeat.playerId && !seen.has(sSeat.playerId)) {
+            seen.add(sSeat.playerId);
+            ids.push(sSeat.playerId);
+          }
         }
       }
     }
@@ -227,6 +288,18 @@ export class RoomManager {
     }
   }
 
+  getSideTablesPayload(room, viewerPlayerId = null) {
+    if (!Array.isArray(room?.sideTables)) return [];
+    return room.sideTables.map((t) => t.getClientView(viewerPlayerId));
+  }
+
+  broadcastRoomSideTables(room) {
+    if (!room?.sideTables) return;
+    for (const pid of this.getAllHumanRecipients(room)) {
+      this.io.to(`player:${pid}`).emit('room:sideTables', this.getSideTablesPayload(room, pid));
+    }
+  }
+
   destroyRoomResources(room) {
     if (!room) return;
     if (room.cleanupTimer) {
@@ -239,6 +312,16 @@ export class RoomManager {
     }
     if (room.billiard) {
       room.billiard.destroy();
+    }
+    if (Array.isArray(room.sideTables)) {
+      for (const tbl of room.sideTables) {
+        tbl.destroy();
+        for (const sSeat of tbl.seats) {
+          if (sSeat.type === 'human' && sSeat.playerId) {
+            this.playerToRoom.delete(sSeat.playerId);
+          }
+        }
+      }
     }
     for (const s of room.seats) {
       if (s.type === 'human' && s.playerId) {
@@ -277,6 +360,9 @@ export class RoomManager {
       const billiardCount = billiardSeats.filter((s) => s.type !== 'empty').length;
       const billiardHumanCount = billiardSeats.filter((s) => s.type === 'human').length;
       const billiardPhase = room.billiard?.phase || 'waiting';
+      const sideHumanCount = Array.isArray(room.sideTables)
+        ? room.sideTables.reduce((sum, tbl) => sum + tbl.seats.filter((s) => s.type === 'human').length, 0)
+        : 0;
       list.push({
         code: room.code,
         name: room.name,
@@ -287,6 +373,7 @@ export class RoomManager {
         billiardCount,
         billiardHumanCount,
         billiardPhase,
+        sideHumanCount,
         seats: room.seats.map((s) => ({
           seatIndex: s.seatIndex,
           type: s.type,
@@ -359,7 +446,8 @@ export class RoomManager {
       },
       seats,
       session: null,
-      billiard: null
+      billiard: null,
+      sideTables: []
     };
 
     room.billiard = new BilliardSession({
@@ -368,6 +456,16 @@ export class RoomManager {
         this.broadcastRoomsList();
       }
     });
+
+    room.sideTables = SIDE_TABLE_DEFS.map(
+      (def) =>
+        new SideTableSession(def, {
+          onStateChange: () => {
+            this.broadcastRoomSideTables(room);
+            this.broadcastRoomsList();
+          }
+        })
+    );
 
     this.rooms.set(code, room);
     this.playerToRoom.set(playerId, code);
@@ -432,6 +530,29 @@ export class RoomManager {
       return { ok: true, room, billiardSeatIndex: existingBilliard.seatIndex, isSpectator: false, activity: 'billiard' };
     }
 
+    // Check if player is reconnecting to an existing Side Table seat
+    const existingSide = this.findHumanSideTable(room, playerId);
+    if (existingSide) {
+      if (room.cleanupTimer) {
+        clearTimeout(room.cleanupTimer);
+        room.cleanupTimer = null;
+      }
+      existingSide.seat.connected = true;
+      existingSide.seat.name = cleanName;
+      if (playerAvatar) existingSide.seat.avatar = normalizeAvatar(playerAvatar, existingSide.seat.seatIndex);
+      this.playerToRoom.set(playerId, code);
+      this.broadcastRoomState(room);
+      this.broadcastRoomSideTables(room);
+      return {
+        ok: true,
+        room,
+        sideTableId: existingSide.table.id,
+        sideSeatIndex: existingSide.seat.seatIndex,
+        isSpectator: false,
+        activity: 'sideTable'
+      };
+    }
+
     const existingSpectator = room.spectators.get(playerId);
     if (existingSpectator && (asSpectator || activity === 'spectator')) {
       if (room.cleanupTimer) {
@@ -470,18 +591,51 @@ export class RoomManager {
       }
     }
 
+    if (!wantSpectator && typeof activity === 'string' && activity.startsWith('side:')) {
+      const targetTableId = activity.slice(5);
+      const targetTable = Array.isArray(room.sideTables)
+        ? room.sideTables.find((t) => t.id === targetTableId)
+        : null;
+      if (targetTable) {
+        const sRes = targetTable.sitHuman({
+          playerId,
+          playerName: cleanName,
+          playerAvatar: normalizeAvatar(playerAvatar, 0)
+        });
+        if (sRes.ok) {
+          if (room.cleanupTimer) {
+            clearTimeout(room.cleanupTimer);
+            room.cleanupTimer = null;
+          }
+          this.playerToRoom.set(playerId, code);
+          this.broadcastRoomState(room);
+          this.broadcastRoomSideTables(room);
+          this.broadcastRoomsList();
+          return {
+            ok: true,
+            room,
+            sideTableId: targetTable.id,
+            sideSeatIndex: sRes.seatIndex,
+            isSpectator: false,
+            activity: 'sideTable'
+          };
+        }
+      }
+    }
+
     if (!wantSpectator && activity !== 'billiard') {
       if (room.status === 'playing') {
-        const openSeat = room.seats.find(
-          (s) => s.type === 'empty' || (s.type === 'human' && !s.connected)
-        );
+        const openSeat =
+          room.seats.find((s) => s.type === 'empty') ||
+          room.seats.find((s) => s.type === 'human' && !s.connected) ||
+          room.seats.find((s) => s.type === 'bot');
         if (openSeat) {
           if (room.cleanupTimer) {
             clearTimeout(room.cleanupTimer);
             room.cleanupTimer = null;
           }
           const prevPlayerId = openSeat.playerId;
-          if (prevPlayerId) {
+          if (prevPlayerId && openSeat.type === 'human') {
             this.playerToRoom.delete(prevPlayerId);
             if (room.hostPlayerId === prevPlayerId) {
               room.hostPlayerId = playerId;
@@ -568,27 +722,29 @@ export class RoomManager {
     return { ok: true, watchSeatIndex: spec.watchSeatIndex };
   }
 
-  vacateOkeySeatForSwitch(room, mySeat) {
+  vacateOkeySeatForSwitch(room, mySeat, { putBot = true } = {}) {
     if (!mySeat) return;
-    if (room.status === 'waiting') {
+    if (!putBot && room.status === 'waiting') {
       mySeat.type = 'empty';
       mySeat.playerId = null;
       mySeat.name = null;
       mySeat.avatar = `avatar-${(mySeat.seatIndex % PRESET_AVATAR_COUNT) + 1}`;
       mySeat.connected = false;
-    } else {
-      mySeat.type = 'bot';
-      mySeat.playerId = `bot-${mySeat.seatIndex}`;
-      mySeat.name = `${mySeat.name || 'Oyuncu'} (Bot)`;
-      mySeat.connected = true;
-      if (room.session) {
-        room.session.updateSeatConnection(mySeat.seatIndex, {
-          playerId: mySeat.playerId,
-          name: mySeat.name,
-          isBot: true,
-          connected: true
-        });
-      }
+      return;
+    }
+
+    const baseName = mySeat.name || 'Oyuncu';
+    mySeat.type = 'bot';
+    mySeat.playerId = `bot-${mySeat.seatIndex}`;
+    mySeat.name = baseName.endsWith('(Bot)') ? baseName : `${baseName} (Bot)`;
+    mySeat.connected = true;
+    if (room.session) {
+      room.session.updateSeatConnection(mySeat.seatIndex, {
+        playerId: mySeat.playerId,
+        name: mySeat.name,
+        isBot: true,
+        connected: true
+      });
     }
   }
 
@@ -605,11 +761,22 @@ export class RoomManager {
       room.spectators = new Map();
     }
 
+    let startPos = { x: 0, z: 10.5, yaw: 0 };
     if (participant.seat) {
-      this.vacateOkeySeatForSwitch(room, participant.seat);
+      this.vacateOkeySeatForSwitch(room, participant.seat, { putBot: true });
     }
     if (participant.billiardSeat && room.billiard) {
       room.billiard.standHuman(playerId, { convertToBotIfActive: true });
+      startPos = { x: 21.5, z: -2.0, yaw: -Math.PI / 2 };
+    }
+    if (participant.sideTable) {
+      const tbl = participant.sideTable;
+      tbl.standHuman(playerId, { convertToBotIfActive: true });
+      startPos = {
+        x: Math.round(tbl.x * 0.82 * 100) / 100,
+        z: Math.round((tbl.z + (tbl.z > 0 ? -4.5 : 4.5)) * 100) / 100,
+        yaw: tbl.z > 0 ? 0 : Math.PI
+      };
     }
 
     room.spectators.set(playerId, {
@@ -622,9 +789,6 @@ export class RoomManager {
     });
     const key = this.ensureRoamerKey(room, playerId);
     if (!(room.roamStates instanceof Map)) room.roamStates = new Map();
-    const startPos = participant.billiardSeat
-      ? { x: 11.8, z: -2.2, yaw: -Math.PI / 2 }
-      : { x: 0, z: 10.5, yaw: 0 };
     room.roamStates.set(playerId, {
       key,
       name: participant.name || 'Oyuncu',
@@ -637,6 +801,7 @@ export class RoomManager {
 
     this.broadcastRoomState(room);
     this.broadcastRoomBilliard(room);
+    this.broadcastRoomSideTables(room);
     this.broadcastRoomRoamers(room);
     this.broadcastRoomsList();
     return { ok: true, activity: 'spectator' };
@@ -648,34 +813,34 @@ export class RoomManager {
 
     const spec = room.spectators instanceof Map ? room.spectators.get(playerId) : null;
     const bSeat = room.billiard?.findHumanSeat(playerId) || null;
-    if (!spec && !bSeat) {
+    const sideHit = this.findHumanSideTable(room, playerId);
+    if (!spec && !bSeat && !sideHit) {
       return { ok: false, error: 'Zaten masada koltuktasınız veya izleyici değilsiniz.' };
     }
 
     let seat = null;
     const requestedIdx = targetSeatIndex !== null && targetSeatIndex !== undefined ? Number(targetSeatIndex) : null;
-    if (room.status === 'waiting') {
-      if (requestedIdx !== null && Number.isInteger(requestedIdx) && room.seats[requestedIdx]) {
-        const candidate = room.seats[requestedIdx];
-        if (candidate.type === 'empty' || candidate.type === 'bot') {
-          seat = candidate;
-        }
-      } else {
-        seat = room.seats.find((s) => s.type === 'empty') || room.seats.find((s) => s.type === 'bot') || null;
+    const canTake = (candidate) =>
+      candidate &&
+      (candidate.type === 'empty' ||
+        candidate.type === 'bot' ||
+        (candidate.type === 'human' && !candidate.connected));
+
+    if (requestedIdx !== null && Number.isInteger(requestedIdx) && room.seats[requestedIdx]) {
+      const candidate = room.seats[requestedIdx];
+      if (canTake(candidate)) {
+        seat = candidate;
       }
     } else {
-      if (requestedIdx !== null && Number.isInteger(requestedIdx) && room.seats[requestedIdx]) {
-        const candidate = room.seats[requestedIdx];
-        if (candidate.type === 'empty' || (candidate.type === 'human' && !candidate.connected)) {
-          seat = candidate;
-        }
-      } else {
-        seat = room.seats.find((s) => s.type === 'empty' || (s.type === 'human' && !s.connected)) || null;
-      }
+      seat =
+        room.seats.find((s) => s.type === 'empty') ||
+        room.seats.find((s) => s.type === 'human' && !s.connected) ||
+        room.seats.find((s) => s.type === 'bot') ||
+        null;
     }
 
     if (!seat) {
-      return { ok: false, error: 'Masada geçilebilecek boş koltuk yok.' };
+      return { ok: false, error: 'Masada geçilebilecek boş koltuk veya bot yok.' };
     }
 
     const prevPlayerId = seat.playerId;
@@ -686,11 +851,12 @@ export class RoomManager {
       }
     }
 
-    const actorName = spec?.name || bSeat?.name || 'Oyuncu';
-    const actorAvatar = spec?.avatar || bSeat?.avatar || normalizeAvatar(null, seat.seatIndex);
+    const actorName = spec?.name || bSeat?.name || sideHit?.seat?.name || 'Oyuncu';
+    const actorAvatar = spec?.avatar || bSeat?.avatar || sideHit?.seat?.avatar || normalizeAvatar(null, seat.seatIndex);
 
     if (spec) room.spectators.delete(playerId);
     if (bSeat && room.billiard) room.billiard.standHuman(playerId, { convertToBotIfActive: true });
+    if (sideHit) sideHit.table.standHuman(playerId, { convertToBotIfActive: true });
     if (room.roamStates instanceof Map) room.roamStates.delete(playerId);
 
     seat.type = 'human';
@@ -711,6 +877,7 @@ export class RoomManager {
 
     this.broadcastRoomState(room);
     this.broadcastRoomBilliard(room);
+    this.broadcastRoomSideTables(room);
     this.broadcastRoomRoamers(room);
     this.broadcastRoomsList();
     return { ok: true, seatIndex: seat.seatIndex };
@@ -726,25 +893,28 @@ export class RoomManager {
       return { ok: true, seatIndex: participant.billiardSeat.seatIndex };
     }
 
-    // Pre-check if Billiard has a spot before removing from current Okey/spectator slot
+    // Pre-check if Billiard has a spot before removing from current Okey/side/spectator slot
     const reqIdx = seatIndex !== null && seatIndex !== undefined ? Number(seatIndex) : null;
     const canTake = (c) =>
       c &&
       (c.type === 'empty' ||
-        (room.billiard.phase !== 'playing' && c.type === 'bot') ||
+        c.type === 'bot' ||
         (c.type === 'human' && !c.connected));
     const available = reqIdx !== null
       ? (canTake(room.billiard.seats[reqIdx]) ? room.billiard.seats[reqIdx] : null)
       : room.billiard.seats.find((s) => s.type === 'empty') ||
         room.billiard.seats.find((s) => s.type === 'human' && !s.connected) ||
-        (room.billiard.phase !== 'playing' ? room.billiard.seats.find((s) => s.type === 'bot') : null);
+        room.billiard.seats.find((s) => s.type === 'bot');
 
     if (!available) {
       return { ok: false, error: 'Bilardo masasında boş koltuk yok.' };
     }
 
     if (participant.seat) {
-      this.vacateOkeySeatForSwitch(room, participant.seat);
+      this.vacateOkeySeatForSwitch(room, participant.seat, { putBot: true });
+    }
+    if (participant.sideTable) {
+      participant.sideTable.standHuman(playerId, { convertToBotIfActive: true });
     }
     if (participant.spectator && room.spectators instanceof Map) {
       room.spectators.delete(playerId);
@@ -753,19 +923,38 @@ export class RoomManager {
       room.roamStates.delete(playerId);
     }
 
-    const res = room.billiard.sitHuman({
-      playerId,
-      playerName: participant.name,
-      playerAvatar: participant.avatar,
-      seatIndex: available.seatIndex
-    });
-    if (!res.ok) return res;
+    const wasBot = available.type === 'bot';
+    if (wasBot && room.billiard.phase === 'playing') {
+      const target = available;
+      target.type = 'human';
+      target.playerId = playerId;
+      target.name = participant.name;
+      target.avatar = participant.avatar;
+      target.connected = true;
+      if (room.billiard.currentSeat === target.seatIndex && room.billiard.botTimer) {
+        clearTimeout(room.billiard.botTimer);
+        room.billiard.botTimer = null;
+      }
+    } else {
+      if (wasBot) {
+        available.type = 'empty';
+        available.playerId = null;
+      }
+      const res = room.billiard.sitHuman({
+        playerId,
+        playerName: participant.name,
+        playerAvatar: participant.avatar,
+        seatIndex: available.seatIndex
+      });
+      if (!res.ok) return res;
+    }
 
     this.broadcastRoomState(room);
     this.broadcastRoomBilliard(room);
+    this.broadcastRoomSideTables(room);
     this.broadcastRoomRoamers(room);
     this.broadcastRoomsList();
-    return res;
+    return { ok: true, seatIndex: available.seatIndex };
   }
 
   billiardLeave({ roomCode, playerId }) {
@@ -835,6 +1024,115 @@ export class RoomManager {
     return room.billiard.shoot(playerId, { angle, power });
   }
 
+  sideTableJoin({ roomCode, playerId, tableId, seatIndex = null }) {
+    const room = this.getRoom(roomCode);
+    if (!room || !Array.isArray(room.sideTables)) return { ok: false, error: 'Masa bulunamadı.' };
+    const table = room.sideTables.find((t) => t.id === String(tableId || ''));
+    if (!table) return { ok: false, error: 'Seçilen yan masa bulunamadı.' };
+
+    const participant = this.findRoomParticipant(room, playerId);
+    if (!participant) return { ok: false, error: 'Bu odada değilsiniz.' };
+
+    if (participant.sideTable && participant.sideTable.id === table.id) {
+      return { ok: true, tableId: table.id, seatIndex: participant.sideSeat.seatIndex };
+    }
+
+    const reqIdx = seatIndex !== null && seatIndex !== undefined ? Number(seatIndex) : null;
+    const canTake = (s) =>
+      s && (s.type === 'empty' || s.type === 'bot' || (s.type === 'human' && !s.connected));
+    const available = reqIdx !== null && Number.isInteger(reqIdx)
+      ? (canTake(table.seats[reqIdx]) ? table.seats[reqIdx] : null)
+      : table.seats.find((s) => s.type === 'empty') ||
+        table.seats.find((s) => s.type === 'human' && !s.connected) ||
+        table.seats.find((s) => s.type === 'bot');
+
+    if (!available) {
+      return { ok: false, error: `${table.title} masası şu an tamamen dolu.` };
+    }
+
+    if (participant.seat) {
+      this.vacateOkeySeatForSwitch(room, participant.seat, { putBot: true });
+    }
+    if (participant.billiardSeat && room.billiard) {
+      room.billiard.standHuman(playerId, { convertToBotIfActive: true });
+    }
+    if (participant.sideTable) {
+      participant.sideTable.standHuman(playerId, { convertToBotIfActive: true });
+    }
+    if (participant.spectator && room.spectators instanceof Map) {
+      room.spectators.delete(playerId);
+    }
+    if (room.roamStates instanceof Map) {
+      room.roamStates.delete(playerId);
+    }
+
+    const res = table.sitHuman({
+      playerId,
+      playerName: participant.name,
+      playerAvatar: participant.avatar,
+      seatIndex: available.seatIndex
+    });
+    if (!res.ok) return res;
+
+    this.broadcastRoomState(room);
+    this.broadcastRoomBilliard(room);
+    this.broadcastRoomSideTables(room);
+    this.broadcastRoomRoamers(room);
+    this.broadcastRoomsList();
+    return { ok: true, tableId: table.id, seatIndex: res.seatIndex };
+  }
+
+  sideTableLeave({ roomCode, playerId }) {
+    return this.standUp({ roomCode, playerId });
+  }
+
+  sideTableToggleBot({ roomCode, playerId, tableId, seatIndex }) {
+    const room = this.getRoom(roomCode);
+    if (!room || !Array.isArray(room.sideTables)) return { ok: false, error: 'Masa bulunamadı.' };
+    const table = room.sideTables.find((t) => t.id === String(tableId || ''));
+    if (!table) return { ok: false, error: 'Yan masa bulunamadı.' };
+    const participant = this.findRoomParticipant(room, playerId);
+    if (!participant) return { ok: false, error: 'Bu odada değilsiniz.' };
+    const res = table.toggleBotSeat(seatIndex);
+    if (res.ok) {
+      this.broadcastRoomSideTables(room);
+      this.broadcastRoomState(room);
+      this.broadcastRoomsList();
+    }
+    return res;
+  }
+
+  sideTableStart({ roomCode, playerId, tableId, autoFillBot = true }) {
+    const room = this.getRoom(roomCode);
+    if (!room || !Array.isArray(room.sideTables)) return { ok: false, error: 'Masa bulunamadı.' };
+    const table = room.sideTables.find((t) => t.id === String(tableId || ''));
+    if (!table) return { ok: false, error: 'Yan masa bulunamadı.' };
+    const participant = this.findRoomParticipant(room, playerId);
+    if (!participant) return { ok: false, error: 'Bu odada değilsiniz.' };
+    const res = table.startMatch({ autoFillBot });
+    if (res.ok) {
+      this.broadcastRoomSideTables(room);
+      this.broadcastRoomState(room);
+      this.broadcastRoomsList();
+    }
+    return res;
+  }
+
+  sideTableAction({ roomCode, playerId, tableId, action, payload = {} }) {
+    const room = this.getRoom(roomCode);
+    if (!room || !Array.isArray(room.sideTables)) return { ok: false, error: 'Masa bulunamadı.' };
+    const sideHit = this.findHumanSideTable(room, playerId);
+    const table = tableId
+      ? room.sideTables.find((t) => t.id === String(tableId))
+      : sideHit?.table;
+    if (!table) return { ok: false, error: 'Bu masada oturmuyorsunuz.' };
+    const res = table.performAction(playerId, action, payload);
+    if (res.ok) {
+      this.broadcastRoomSideTables(room);
+    }
+    return res;
+  }
+
   roamMove({ roomCode, playerId, x, z, yaw, active = true }) {
     const room = this.getRoom(roomCode);
     if (!room) return { ok: false };
@@ -848,8 +1146,8 @@ export class RoomManager {
       return { ok: true };
     }
 
-    const clampedX = Math.max(-23.5, Math.min(23.5, Number(x) || 0));
-    const clampedZ = Math.max(-19.5, Math.min(18.5, Number(z) || 0));
+    const clampedX = Math.max(-45.5, Math.min(45.5, Number(x) || 0));
+    const clampedZ = Math.max(-39.5, Math.min(39.5, Number(z) || 0));
     const cleanYaw = Number.isFinite(Number(yaw)) ? Number(yaw) : 0;
     const key = this.ensureRoamerKey(room, playerId);
 
@@ -880,7 +1178,8 @@ export class RoomManager {
 
     const okeyHasPlay = room.status === 'playing';
     const billiardHasPlay = room.billiard?.phase === 'playing';
-    const keepForDisconnect = disconnectOnly && (okeyHasPlay || billiardHasPlay);
+    const sideHasPlay = Array.isArray(room.sideTables) && room.sideTables.some((t) => t.phase === 'playing');
+    const keepForDisconnect = disconnectOnly && (okeyHasPlay || billiardHasPlay || sideHasPlay);
 
     if (!keepForDisconnect && room.roamStates instanceof Map) {
       room.roamStates.delete(playerId);
@@ -896,7 +1195,7 @@ export class RoomManager {
       }
       const connectedAfterSpec = this.getConnectedHumanIds(room);
       if (connectedAfterSpec.length === 0) {
-        if (disconnectOnly && (okeyHasPlay || billiardHasPlay)) {
+        if (keepForDisconnect) {
           this.scheduleRoomDisconnectCleanup(room);
         } else {
           this.destroyRoomResources(room);
@@ -922,7 +1221,7 @@ export class RoomManager {
       }
       const connectedAfterB = this.getConnectedHumanIds(room);
       if (connectedAfterB.length === 0) {
-        if (disconnectOnly && (okeyHasPlay || billiardHasPlay)) {
+        if (keepForDisconnect) {
           this.scheduleRoomDisconnectCleanup(room);
         } else {
           this.destroyRoomResources(room);
@@ -934,6 +1233,32 @@ export class RoomManager {
       }
       this.broadcastRoomState(room);
       this.broadcastRoomBilliard(room);
+      this.broadcastRoomsList();
+      return room;
+    }
+
+    const sideHit = this.findHumanSideTable(room, playerId);
+    if (sideHit) {
+      if (disconnectOnly && sideHit.table.phase === 'playing') {
+        sideHit.seat.connected = false;
+      } else {
+        this.playerToRoom.delete(playerId);
+        sideHit.table.standHuman(playerId, { convertToBotIfActive: true });
+      }
+      const connectedAfterSide = this.getConnectedHumanIds(room);
+      if (connectedAfterSide.length === 0) {
+        if (keepForDisconnect) {
+          this.scheduleRoomDisconnectCleanup(room);
+        } else {
+          this.destroyRoomResources(room);
+          this.broadcastRoomsList();
+          return null;
+        }
+      } else if (!disconnectOnly && room.hostPlayerId === playerId) {
+        room.hostPlayerId = connectedAfterSide[0];
+      }
+      this.broadcastRoomState(room);
+      this.broadcastRoomSideTables(room);
       this.broadcastRoomsList();
       return room;
     }
@@ -960,7 +1285,7 @@ export class RoomManager {
     }
 
     this.playerToRoom.delete(playerId);
-    this.vacateOkeySeatForSwitch(room, seat);
+    this.vacateOkeySeatForSwitch(room, seat, { putBot: false });
 
     const activeHumans = this.getConnectedHumanIds(room);
     if (activeHumans.length === 0) {
@@ -2100,10 +2425,19 @@ export class RoomManager {
     const myBilliardSeat = !mySeat && room.billiard?.findHumanSeat
       ? room.billiard.findHumanSeat(playerId)
       : null;
-    const mySpectator = !mySeat && !myBilliardSeat && room.spectators instanceof Map
+    const mySideHit = !mySeat && !myBilliardSeat
+      ? this.findHumanSideTable(room, playerId)
+      : null;
+    const mySpectator = !mySeat && !myBilliardSeat && !mySideHit && room.spectators instanceof Map
       ? room.spectators.get(playerId) || null
       : null;
-    const myActivity = mySeat ? 'okey' : myBilliardSeat ? 'billiard' : 'spectator';
+    const myActivity = mySeat
+      ? 'okey'
+      : myBilliardSeat
+        ? 'billiard'
+        : mySideHit
+          ? 'sideTable'
+          : 'spectator';
     const isSpectator = myActivity === 'spectator';
     const watchSeatIndex = mySpectator ? mySpectator.watchSeatIndex : null;
     const viewerSeatIndex = mySeat ? mySeat.seatIndex : (watchSeatIndex ?? 0);
@@ -2123,6 +2457,8 @@ export class RoomManager {
       isHost: room.hostPlayerId === playerId,
       myActivity,
       billiardSeatIndex: myBilliardSeat ? myBilliardSeat.seatIndex : null,
+      mySideTableId: mySideHit ? mySideHit.table.id : null,
+      mySideSeatIndex: mySideHit ? mySideHit.seat.seatIndex : null,
       myRoamerKey: this.ensureRoamerKey(room, playerId),
       isSpectator,
       watchSeatIndex,
@@ -2130,6 +2466,7 @@ export class RoomManager {
       spectatorCount: spectatorsList.length,
       roamers: this.getRoamersPayload(room),
       billiard: room.billiard ? room.billiard.getClientView() : null,
+      sideTables: this.getSideTablesPayload(room, playerId),
       music: room.music || null,
       tv: room.tv || null,
       ambianceTrack: room.ambianceTrack || null,

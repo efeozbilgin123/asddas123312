@@ -499,25 +499,48 @@
         </div>
       </div>
 
+      <!-- First-Person Center Crosshair -->
+      <div id="fp-crosshair" class="fp-crosshair" hidden aria-hidden="true"></div>
+
+      <!-- Dynamic Proximity Interaction Prompt -->
+      <button type="button" id="proximity-prompt" class="proximity-prompt" hidden>
+        <kbd id="proximity-key" class="proximity-prompt__key">E</kbd>
+        <span id="proximity-text"></span>
+      </button>
+
+      <!-- Mobile Touch Virtual Joystick -->
+      <div id="mobile-joystick" class="mobile-joystick" hidden aria-label="Mobil yürüyüş kumandası">
+        <div id="mobile-joystick-knob" class="mobile-joystick__knob"></div>
+      </div>
+
+      <!-- Side Table Card & Social Hangout HUD -->
+      <div id="side-game-hud" class="side-game-hud" hidden aria-label="Yan masa oyunu kontrolleri">
+        <div class="side-game-hud__head">
+          <div class="side-game-hud__title-wrap">
+            <strong id="side-game-title" class="side-game-hud__title">Masa</strong>
+            <span id="side-game-status" class="side-game-hud__status" role="status" aria-live="polite"></span>
+          </div>
+          <div class="side-game-hud__top-actions">
+            <button type="button" id="btn-side-bot" class="btn btn--quiet btn--sm" hidden>Bot Ekle</button>
+            <button type="button" id="btn-side-start" class="btn btn--primary btn--sm" hidden>Oyunu Başlat</button>
+            <button type="button" id="btn-side-stand" class="btn btn--quiet btn--sm">Masadan Kalk</button>
+          </div>
+        </div>
+        <div id="side-game-seats" class="side-game-seats"></div>
+        <div id="side-game-center" class="side-game-center"></div>
+        <div id="side-game-hand" class="side-game-hand"></div>
+        <div id="side-game-actions" class="side-game-actions"></div>
+      </div>
+
       <!-- Freeroam / Spectator Walk Bar -->
       <div id="freeroam-hud" class="freeroam-hud" hidden aria-label="Salonda gezinme ve izleme">
         <div class="freeroam-hud__info">
-          <span id="freeroam-hint" class="freeroam-hud__hint">WASD / Yön Tuşları: Yürü · Shift: Koş · Fare sürükle: Bak</span>
+          <span id="freeroam-hint" class="freeroam-hud__hint">Tıkla: Serbest Bakış (ESC çıkış) · WASD: Yürü · Shift: Koş · E: Etkileşim</span>
           <span id="freeroam-status" class="freeroam-hud__status"></span>
         </div>
         <div class="freeroam-hud__actions">
-          <div class="freeroam-warps" role="group" aria-label="Hızlı ışınlan">
-            <button type="button" class="btn btn--quiet btn--sm" data-warp="okey">Okey Masası</button>
-            <button type="button" class="btn btn--quiet btn--sm" data-warp="billiard">Bilardo</button>
-            <button type="button" class="btn btn--quiet btn--sm" data-warp="tea">Çay Ocağı</button>
-            <button type="button" class="btn btn--quiet btn--sm" data-warp="tv">TV Önü</button>
-          </div>
-          <div class="freeroam-join-btns">
-            <button type="button" id="btn-roam-join-okey" class="btn btn--primary btn--sm">Okey'e Otur</button>
-            <button type="button" id="btn-roam-join-billiard" class="btn btn--sm">Bilardo Oyna</button>
-            <button type="button" id="btn-roam-start-okey" class="btn btn--primary btn--sm" hidden>Okeyi Başlat</button>
-            <button type="button" id="btn-roam-back-wait" class="btn btn--quiet btn--sm" hidden>Bekleme Odası</button>
-          </div>
+          <button type="button" id="btn-roam-start-okey" class="btn btn--primary btn--sm" hidden>Okeyi Başlat</button>
+          <button type="button" id="btn-roam-back-wait" class="btn btn--quiet btn--sm" hidden>Bekleme Odası</button>
         </div>
       </div>
     </section>

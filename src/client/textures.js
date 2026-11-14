@@ -1182,24 +1182,19 @@ export function getPlayingCardTexture(card, { legal = true, dimmed = false, sele
   canvas.height = h;
   const ctx = canvas.getContext('2d');
 
-  ctx.clearRect(0, 0, w, h);
-
-  // Outer card body
+  // Card body, full bleed: the card mesh is an opaque box, so any pixel left
+  // transparent (margin, rounded corners) would render as a black frame.
   ctx.fillStyle = dimmed ? '#D8D1C2' : '#FCF7EC';
-  ctx.beginPath();
-  ctx.roundRect(6, 6, w - 12, h - 12, 22);
-  ctx.fill();
+  ctx.fillRect(0, 0, w, h);
 
-  // Border
-  ctx.lineWidth = selected ? 10 : (legal && !dimmed ? 6 : 4);
-  ctx.strokeStyle = selected
-    ? '#F5C842'
-    : dimmed
-      ? '#8A8172'
-      : '#2B2520';
-  ctx.beginPath();
-  ctx.roundRect(6, 6, w - 12, h - 12, 22);
-  ctx.stroke();
+  // Only a selected card keeps a visible (gold) outline.
+  if (selected) {
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = '#F5C842';
+    ctx.beginPath();
+    ctx.roundRect(6, 6, w - 12, h - 12, 22);
+    ctx.stroke();
+  }
 
   const isRed = suit === 'hearts' || suit === 'diamonds';
   const ink = isRed ? '#D41628' : '#18181B';
@@ -1277,9 +1272,7 @@ export function getPlayingCardBackTexture({ highlighted = false } = {}) {
   const ctx = canvas.getContext('2d');
 
   ctx.fillStyle = '#FCF7EC';
-  ctx.beginPath();
-  ctx.roundRect(6, 6, w - 12, h - 12, 22);
-  ctx.fill();
+  ctx.fillRect(0, 0, w, h);
 
   ctx.fillStyle = highlighted ? '#8C232A' : '#731A22';
   ctx.beginPath();

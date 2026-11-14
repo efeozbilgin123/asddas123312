@@ -2549,6 +2549,45 @@ function renderSideGameHud(room) {
   }
 }
 
+// Bottom action bar for card-table moves that used to be 3D plaques on the felt.
+function renderSideActionBar(table) {
+  const bar = document.getElementById('side-action-bar');
+  if (!bar) return;
+  const actions = [];
+  if (table && table.kind === 'poker' && table.phase === 'playing' && table.isMyTurn) {
+    const mySeat = (table.seats || []).find((s) => s.seatIndex === table.mySeatIndex);
+    const chips = mySeat?.chips || 0;
+    const toCall = Math.max(0, (table.currentBet || 0) - (mySeat?.bet || 0));
+    actions.push({
+      label: toCall > 0 ? `Gör (${toCall})` : 'Pas',
+      cls: 'btn--primary',
+      action: toCall > 0 ? 'call' : 'check',
+      payload: {}
+    });
+    if (chips > toCall + 10) actions.push({ label: '+20 Artır', cls: '', action: 'raise', payload: { amount: 20 } });
+    if (chips > toCall + 40) actions.push({ label: '+50 Artır', cls: '', action: 'raise', payload: { amount: 50 } });
+    actions.push({ label: 'Çekil', cls: 'btn--accent-3', action: 'fold', payload: {} });
+  }
+
+  const key = actions.length ? `${table.id}|${actions.map((a) => a.label).join('|')}` : '';
+  bar.hidden = actions.length === 0;
+  if (bar.dataset.renderKey === key) return; // identical buttons: keep them, clicks may be in flight
+  bar.dataset.renderKey = key;
+  bar.innerHTML = '';
+  for (const act of actions) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `btn btn--sm ${act.cls}`.trim();
+    btn.textContent = act.label;
+    btn.addEventListener('click', () => {
+      sendGameAction('room:sideAction', { tableId: table.id, action: act.action, payload: act.payload }, (res) => {
+        if (!res?.ok && res?.error) showNotice(res.error);
+      });
+    });
+    bar.appendChild(btn);
+  }
+}
+
 function renderOkeyWaitHud(room) {
   if (!els.okeyWaitHud || !room) return;
   const okeyHumans = (room.seats || []).filter((s) => s.type === 'human').length;
@@ -2607,6 +2646,9 @@ function syncActiveActivityHuds(room) {
   if (els.mobileJoystick) els.mobileJoystick.hidden = !showFreeroam;
 
   if (showSideTable) renderSideGameHud(room);
+  renderSideActionBar(
+    showSideTable ? (room.sideTables || []).find((t) => t.id === room.mySideTableId) || null : null
+  );
   if (showOkeyWait) renderOkeyWaitHud(room);
   if (showBilliard) renderBilliardHud(room);
   if (showFreeroam) {

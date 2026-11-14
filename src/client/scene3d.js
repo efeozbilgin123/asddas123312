@@ -7,7 +7,7 @@ import { KAHVE_CATS, RACK_THEMES, TILE_THEMES } from '../../shared/presets.js';
 import { SIDE_TABLE_DEFS } from '../../shared/sideGames.js';
 import { isOkeyTile } from '../../shared/tiles.js';
 import { BILLIARD_WORLD_POS, BilliardTable3D } from './billiard3d.js';
-import { buildKahveCharacter } from './playerVisuals.js';
+import { buildKahveCharacter, buildHumanFigure, buildPfpBadge } from './playerVisuals.js';
 import { SideTables3D } from './sideTables3d.js';
 import { soundFX } from './sound.js';
 import {
@@ -36,6 +36,36 @@ const TILE_D = 0.13;
 const RACK_COLS = 14;
 const RACK_ROWS = 2;
 const RACK_SPACING_X = 0.67;
+
+// Table spot-light strength and the per-atmosphere grade: a low ambient fill
+// with strong pools over the tables.
+const POOL_LIGHT_BASE = 90;
+const ATMOSPHERE_LOOKS = {
+  afternoon: {
+    background: '#2A1A10',
+    hemi: ['#FFE2B0', '#4A2B18', 0.95],
+    key: ['#FFD091', 1.05],
+    rim: ['#FFB36B', 0.45],
+    pool: ['#FFD9A0', 0.8],
+    hearth: 3.5
+  },
+  midnight: {
+    background: '#0E0908',
+    hemi: ['#C9B8E8', '#1F140E', 0.42],
+    key: ['#FFE4BA', 0.38],
+    rim: ['#7A8FD6', 0.4],
+    pool: ['#FFC57A', 1.15],
+    hearth: 15
+  },
+  rainy: {
+    background: '#160E09',
+    hemi: ['#FFEBD2', '#2B1C13', 0.5],
+    key: ['#FFF0D4', 0.6],
+    rim: ['#CBD8FF', 0.38],
+    pool: ['#FFD18C', 1.15],
+    hearth: 8
+  }
+};
 
 const CAMERA_PRESETS = {
   fp: {
@@ -348,6 +378,8 @@ export class OkeyTable3D {
       new THREE.Vector2(0.01, 1.94)
     ];
     this.bustGeom = new THREE.LatheGeometry(bustProfile, 24);
+    this.seatArmGeom = new THREE.CylinderGeometry(0.14, 0.115, 0.92, 10);
+    this.seatHandGeom = new THREE.SphereGeometry(0.125, 10, 8);
     this.rearCapMat = new THREE.MeshStandardMaterial({
       color: '#0E0E10',
       roughness: 0.92,
@@ -1013,30 +1045,30 @@ export class OkeyTable3D {
     const hemi = new THREE.HemisphereLight('#FFEBD2', '#2B1C13', 1.15);
     this.scene.add(hemi);
 
+    // Each table bay gets a downward cone of warm light with a soft edge, so the
+    // salon reads as pools of light with dimmer aisles in between (kahvehane
+    // mood) instead of one evenly lit hall.
+    const makePoolLight = (color, x, y, z) => {
+      const light = new THREE.SpotLight(color, POOL_LIGHT_BASE, 46, 1.02, 0.9, 1.15);
+      light.position.set(x, y, z);
+      light.target.position.set(x, 0, z);
+      this.scene.add(light.target);
+      this.scene.add(light);
+      return light;
+    };
+
     // Balanced overhead warm lights covering all 8 bays + Ocakbasi bar
-    const pendantLight = new THREE.PointLight('#FFD18C', 48, 52, 1.2);
-    pendantLight.position.set(0, 10.5, 0);
-    this.scene.add(pendantLight);
+    const pendantLight = makePoolLight('#FFD18C', 0, 10.5, 0);
 
-    const westNorthLight = new THREE.PointLight('#FFD08E', 44, 48, 1.2);
-    westNorthLight.position.set(-36, 10.5, 0);
-    this.scene.add(westNorthLight);
+    const westNorthLight = makePoolLight('#FFD08E', -36, 10.5, 0);
 
-    const eastNorthLight = new THREE.PointLight('#FFD08E', 44, 48, 1.2);
-    eastNorthLight.position.set(36, 10.5, 0);
-    this.scene.add(eastNorthLight);
+    const eastNorthLight = makePoolLight('#FFD08E', 36, 10.5, 0);
 
-    const billiardLight = new THREE.PointLight('#FFDF9E', 48, 44, 1.25);
-    billiardLight.position.set(BILLIARD_WORLD_POS.x, 8.8, BILLIARD_WORLD_POS.z);
-    this.scene.add(billiardLight);
+    const billiardLight = makePoolLight('#FFDF9E', BILLIARD_WORLD_POS.x, 8.8, BILLIARD_WORLD_POS.z);
 
-    const southWestLight = new THREE.PointLight('#FFCC88', 46, 54, 1.2);
-    southWestLight.position.set(-18, 10.5, 38);
-    this.scene.add(southWestLight);
+    const southWestLight = makePoolLight('#FFCC88', -18, 10.5, 38);
 
-    const southEastLight = new THREE.PointLight('#FFCC88', 46, 54, 1.2);
-    southEastLight.position.set(54, 10.5, 38);
-    this.scene.add(southEastLight);
+    const southEastLight = makePoolLight('#FFCC88', 54, 10.5, 38);
 
     const barLight = new THREE.PointLight('#FFE0A8', 34, 36, 1.25);
     barLight.position.set(18, 7.6, -33);
@@ -2087,22 +2119,30 @@ export class OkeyTable3D {
     return mat;
   }
 
-  buildPlayerCharacterModel({ vestColor, teamColor, isActive }) {
+  buildPlayerCharacterModel({ vestColor, teamColor, isActive, seedKey = '', isBot = false }) {
     const char = new THREE.Group();
 
-    const bustMat = this.getCachedMat(`bust-${vestColor}`, () =>
-      new THREE.MeshStandardMaterial({
-        color: vestColor,
-        roughness: 0.56,
-        metalness: 0.08
-      })
-    );
+    const { figure, vestMat, skinMat } = buildHumanFigure({ vestColor, seedKey, isBot });
+    char.add(figure);
+    // Opponents sit behind the tall rack walls; raise them so shoulders clear it.
+    const SEAT_LIFT = 0.8;
+    figure.position.y = SEAT_LIFT;
 
-    const bust = new THREE.Mesh(this.bustGeom, bustMat);
-    bust.scale.set(1.26, 1.0, 0.58);
-    bust.castShadow = true;
-    bust.receiveShadow = true;
-    char.add(bust);
+    // Forearms resting towards the table edge
+    for (const side of [-1, 1]) {
+      const pivot = new THREE.Group();
+      pivot.position.set(side * 0.86, 1.1 + SEAT_LIFT, 0.04);
+      pivot.rotation.x = -0.92;
+      pivot.rotation.z = side * -0.16;
+      const sleeve = new THREE.Mesh(this.seatArmGeom, vestMat);
+      sleeve.position.y = -0.46;
+      sleeve.castShadow = true;
+      pivot.add(sleeve);
+      const hand = new THREE.Mesh(this.seatHandGeom, skinMat);
+      hand.position.set(0, -0.98, 0.03);
+      pivot.add(hand);
+      char.add(pivot);
+    }
 
     if (isActive) {
       const turnMat = this.getCachedMat(`turn-${teamColor}`, () =>
@@ -2155,7 +2195,9 @@ export class OkeyTable3D {
       const character = this.buildPlayerCharacterModel({
         vestColor,
         teamColor,
-        isActive
+        isActive,
+        seedKey: `${seat.name || ''}:${seat.avatar || ''}`,
+        isBot: Boolean(seat.isBot)
       });
       holder.add(character);
 
@@ -2164,61 +2206,19 @@ export class OkeyTable3D {
 
       const headY = cfg.headY;
       const medRadius = cfg.medRadius;
-      const headGeoms = this.getHeadGeoms(medRadius);
-      const headGroup = new THREE.Group();
-      headGroup.position.set(0, headY, 0);
-      holder.add(headGroup);
-      headGroup.updateMatrixWorld(true);
-      headGroup.lookAt(0, headY, 0);
-
-      const ringMat = this.getCachedMat(`bezel-${isActive}-${teamColor}`, () =>
-        new THREE.MeshStandardMaterial({
-          color: isActive ? '#F4C44E' : teamColor,
-          emissive: isActive ? '#9A6F14' : '#000000',
-          roughness: 0.28,
-          metalness: 0.72
-        })
-      );
-
-      const bezel = new THREE.Mesh(headGeoms.bezel, ringMat);
-      bezel.rotation.x = Math.PI / 2;
-      bezel.castShadow = true;
-      headGroup.add(bezel);
-
-      const avatarKey = String(seat.avatar || 'avatar-1');
-      let avatarMat = this.avatarMatCache.get(avatarKey);
-      if (!avatarMat) {
-        avatarMat = new THREE.MeshBasicMaterial({
-          map: getAvatarTexture(avatarKey)
-        });
-        this.avatarMatCache.set(avatarKey, avatarMat);
-      }
-      const frontDisc = new THREE.Mesh(headGeoms.frontDisc, avatarMat);
-      frontDisc.position.z = 0.115;
-      headGroup.add(frontDisc);
-
-      const rearDisc = new THREE.Mesh(headGeoms.rearDisc, this.rearCapMat);
-      rearDisc.rotation.y = Math.PI;
-      rearDisc.position.z = -0.114;
-      headGroup.add(rearDisc);
-
-      if (isActive) {
-        const haloMat = this.getCachedMat('active-halo', () =>
-          new THREE.MeshBasicMaterial({
-            color: '#FFE082',
-            transparent: true,
-            opacity: 0.85,
-            side: THREE.DoubleSide
-          })
-        );
-        const halo = new THREE.Mesh(headGeoms.halo, haloMat);
-        halo.position.z = 0.04;
-        headGroup.add(halo);
-      }
+      const { badge } = buildPfpBadge({
+        avatar: seat.avatar || 'avatar-1',
+        name: seat.name || 'O',
+        radius: medRadius * 0.62,
+        ringColor: teamColor,
+        isActive
+      });
+      badge.position.set(0, headY + 1.2, 0);
+      holder.add(badge);
 
       const spriteMat = this.getNameplateMat(seat, isActive, teamMode);
       const nameplate = new THREE.Sprite(spriteMat);
-      nameplate.position.set(0, headY + medRadius + 0.62, 0);
+      nameplate.position.set(0, headY + medRadius + 1.35, 0);
       nameplate.scale.set(3.25, 0.8, 1);
       nameplate.renderOrder = 20;
       holder.add(nameplate);
@@ -3184,12 +3184,15 @@ export class OkeyTable3D {
       isMyTurn && state.turnPhase === 'play' && mySeat?.opened && selected.length === 1;
     const singleSelectedTile = canTryLayoff ? selected[0] : null;
 
-    const meldTileScale = 0.74;
+    // Laid melds are sized and tipped towards the viewer so their numbers can be
+    // read from the seat; flat, small tiles were illegible in first-person view.
+    const meldTileScale = 0.92;
+    const meldTilt = 0.4;
     const tileStep = TILE_W * meldTileScale + 0.03;
     const groupGap = 0.42;
     const maxRowWidth = 9.2;
-    const startZ = -2.35;
-    const rowStepZ = 0.88;
+    const startZ = -1.85;
+    const rowStepZ = 1.14;
 
     let cursorX = -maxRowWidth / 2;
     let cursorZ = startZ;
@@ -3210,7 +3213,7 @@ export class OkeyTable3D {
         this.meldTrayGeomUnit,
         isLayoffTarget ? this.meldTrayMatLayoff : this.meldTrayMatDefault
       );
-      tray.scale.set(groupWidth + 0.16, 1, 1);
+      tray.scale.set(groupWidth + 0.16, 1, 1.22);
       tray.position.set(cursorX + groupWidth / 2 - tileStep / 2 + 0.02, 0.03, cursorZ);
       tray.userData = { kind: 'tableMeld', meldId: meld.id, isLayoffTarget };
       this.dynamicGroup.add(tray);
@@ -3226,8 +3229,8 @@ export class OkeyTable3D {
           castShadow: false
         });
         mesh.scale.setScalar(meldTileScale);
-        mesh.rotation.x = -Math.PI / 2;
-        mesh.position.set(cursorX + sIdx * tileStep, 0.095, cursorZ);
+        mesh.rotation.x = -Math.PI / 2 + meldTilt;
+        mesh.position.set(cursorX + sIdx * tileStep, 0.095 + Math.sin(meldTilt) * TILE_H * meldTileScale * 0.5, cursorZ);
         mesh.userData = { kind: 'tableMeld', meldId: meld.id, isLayoffTarget };
         this.dynamicGroup.add(mesh);
         this.trackedMeshes.set(slot.tile.id, mesh);
@@ -4688,123 +4691,34 @@ export class OkeyTable3D {
     if (this.rainGroup) {
       this.rainGroup.visible = this.qualityMode !== 'performance' && valid === 'rainy';
     }
-    if (valid === 'afternoon') {
-      this.scene.background?.set('#2A1A10');
-      if (this.scene.fog) this.scene.fog.color.set('#2A1A10');
-      if (this.envLights?.hemi) {
-        this.envLights.hemi.color.set('#FFE2B0');
-        this.envLights.hemi.groundColor.set('#4A2B18');
-        this.envLights.hemi.intensity = 1.32;
-      }
-      if (this.envLights?.pendantLight) {
-        this.envLights.pendantLight.color.set('#FFD699');
-        this.envLights.pendantLight.intensity = 48;
-      }
-      if (this.envLights?.billiardLight) {
-        this.envLights.billiardLight.color.set('#FFE4AD');
-        this.envLights.billiardLight.intensity = 38;
-      }
-      if (this.envLights?.westWingLight) {
-        this.envLights.westWingLight.color.set('#FFD89E');
-        this.envLights.westWingLight.intensity = 34;
-      }
-      if (this.envLights?.southLoungeLight) {
-        this.envLights.southLoungeLight.color.set('#FFD394');
-        this.envLights.southLoungeLight.intensity = 32;
-      }
-      if (this.envLights?.barLight) {
-        this.envLights.barLight.color.set('#FFE3AD');
-        this.envLights.barLight.intensity = 24;
-      }
-      if (this.envLights?.keyLight) {
-        this.envLights.keyLight.color.set('#FFD091');
-        this.envLights.keyLight.intensity = 1.55;
-      }
-      if (this.envLights?.rimLight) {
-        this.envLights.rimLight.color.set('#FFB36B');
-        this.envLights.rimLight.intensity = 0.48;
-      }
-      if (this.hearthLight) {
-        this.hearthLight.intensity = 3.5;
-      }
-    } else if (valid === 'midnight') {
-      this.scene.background?.set('#0E0908');
-      if (this.scene.fog) this.scene.fog.color.set('#0E0908');
-      if (this.envLights?.hemi) {
-        this.envLights.hemi.color.set('#C9B8E8');
-        this.envLights.hemi.groundColor.set('#1F140E');
-        this.envLights.hemi.intensity = 0.92;
-      }
-      if (this.envLights?.pendantLight) {
-        this.envLights.pendantLight.color.set('#FFC57A');
-        this.envLights.pendantLight.intensity = 52;
-      }
-      if (this.envLights?.billiardLight) {
-        this.envLights.billiardLight.color.set('#FFD68A');
-        this.envLights.billiardLight.intensity = 44;
-      }
-      if (this.envLights?.westWingLight) {
-        this.envLights.westWingLight.color.set('#FFC77D');
-        this.envLights.westWingLight.intensity = 40;
-      }
-      if (this.envLights?.southLoungeLight) {
-        this.envLights.southLoungeLight.color.set('#FFC378');
-        this.envLights.southLoungeLight.intensity = 36;
-      }
-      if (this.envLights?.barLight) {
-        this.envLights.barLight.color.set('#FFD796');
-        this.envLights.barLight.intensity = 28;
-      }
-      if (this.envLights?.keyLight) {
-        this.envLights.keyLight.color.set('#FFE4BA');
-        this.envLights.keyLight.intensity = 1.0;
-      }
-      if (this.envLights?.rimLight) {
-        this.envLights.rimLight.color.set('#7A8FD6');
-        this.envLights.rimLight.intensity = 0.38;
-      }
-      if (this.hearthLight) {
-        this.hearthLight.intensity = 15;
-      }
-    } else {
-      this.scene.background?.set('#160E09');
-      if (this.scene.fog) this.scene.fog.color.set('#160E09');
-      if (this.envLights?.hemi) {
-        this.envLights.hemi.color.set('#FFEBD2');
-        this.envLights.hemi.groundColor.set('#2B1C13');
-        this.envLights.hemi.intensity = 1.15;
-      }
-      if (this.envLights?.pendantLight) {
-        this.envLights.pendantLight.color.set('#FFD18C');
-        this.envLights.pendantLight.intensity = 56;
-      }
-      if (this.envLights?.billiardLight) {
-        this.envLights.billiardLight.color.set('#FFDF9E');
-        this.envLights.billiardLight.intensity = 42;
-      }
-      if (this.envLights?.westWingLight) {
-        this.envLights.westWingLight.color.set('#FFD08E');
-        this.envLights.westWingLight.intensity = 38;
-      }
-      if (this.envLights?.southLoungeLight) {
-        this.envLights.southLoungeLight.color.set('#FFCC88');
-        this.envLights.southLoungeLight.intensity = 34;
-      }
-      if (this.envLights?.barLight) {
-        this.envLights.barLight.color.set('#FFE0A8');
-        this.envLights.barLight.intensity = 26;
-      }
-      if (this.envLights?.keyLight) {
-        this.envLights.keyLight.color.set('#FFF0D4');
-        this.envLights.keyLight.intensity = 1.28;
-      }
-      if (this.envLights?.rimLight) {
-        this.envLights.rimLight.color.set('#CBD8FF');
-        this.envLights.rimLight.intensity = 0.35;
-      }
-      if (this.hearthLight) {
-        this.hearthLight.intensity = 8;
-      }
+    const look = ATMOSPHERE_LOOKS[valid];
+    this.scene.background?.set(look.background);
+    if (this.scene.fog) this.scene.fog.color.set(look.background);
+    const L = this.envLights || {};
+    if (L.hemi) {
+      L.hemi.color.set(look.hemi[0]);
+      L.hemi.groundColor.set(look.hemi[1]);
+      L.hemi.intensity = look.hemi[2];
+    }
+    if (L.keyLight) {
+      L.keyLight.color.set(look.key[0]);
+      L.keyLight.intensity = look.key[1];
+    }
+    if (L.rimLight) {
+      L.rimLight.color.set(look.rim[0]);
+      L.rimLight.intensity = look.rim[1];
+    }
+    for (const pool of [L.pendantLight, L.westNorthLight, L.eastNorthLight, L.southWestLight, L.southEastLight, L.billiardLight]) {
+      if (!pool) continue;
+      pool.color.set(look.pool[0]);
+      pool.intensity = POOL_LIGHT_BASE * look.pool[1];
+    }
+    if (L.barLight) {
+      L.barLight.color.set(look.pool[0]);
+      L.barLight.intensity = 26 * look.pool[1];
+    }
+    if (this.hearthLight) {
+      this.hearthLight.intensity = look.hearth;
     }
     this.requestShadowUpdate(2);
   }

@@ -6,7 +6,8 @@ const TILE_INK = {
   red: '#D11124',
   blue: '#1050B5',
   black: '#141820',
-  yellow: '#F6CC00'
+  // Deep mustard: bright yellow vanished on the ivory tile face
+  yellow: '#C58F00'
 };
 
 const TILE_OUTLINE = {
@@ -1164,6 +1165,105 @@ const RANK_LABELS_TEX = {
 
 const playingCardCache = new Map();
 
+const CARD_CORNER_PX = 24;
+
+// Simple court figure: head, shoulders and a headpiece that tells J / Q / K apart.
+function drawCourtFigure(ctx, rankStr, suitStr, ink, cx, cy) {
+  const gold = '#D9A62E';
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  // Robe
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.moveTo(-58, 84);
+  ctx.quadraticCurveTo(-56, 14, -22, 6);
+  ctx.lineTo(22, 6);
+  ctx.quadraticCurveTo(56, 14, 58, 84);
+  ctx.closePath();
+  ctx.fill();
+  // Collar trim
+  ctx.strokeStyle = gold;
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(-22, 8);
+  ctx.lineTo(0, 40);
+  ctx.lineTo(22, 8);
+  ctx.stroke();
+  // Suit on the chest
+  ctx.fillStyle = '#FCF7EC';
+  ctx.font = '700 34px "Plus Jakarta Sans", sans-serif';
+  ctx.fillText(suitStr, 0, 64);
+
+  // Head
+  ctx.fillStyle = '#F1CFAE';
+  ctx.beginPath();
+  ctx.arc(0, -30, 30, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.arc(-10, -32, 3.2, 0, Math.PI * 2);
+  ctx.arc(10, -32, 3.2, 0, Math.PI * 2);
+  ctx.fill();
+  if (rankStr === 'K') {
+    // Beard
+    ctx.beginPath();
+    ctx.moveTo(-22, -20);
+    ctx.quadraticCurveTo(0, 26, 22, -20);
+    ctx.quadraticCurveTo(0, -6, -22, -20);
+    ctx.fill();
+  } else if (rankStr === 'Q') {
+    // Hair falling to the shoulders
+    ctx.beginPath();
+    ctx.moveTo(-30, -36);
+    ctx.quadraticCurveTo(-44, 0, -30, 14);
+    ctx.lineTo(-22, -6);
+    ctx.closePath();
+    ctx.moveTo(30, -36);
+    ctx.quadraticCurveTo(44, 0, 30, 14);
+    ctx.lineTo(22, -6);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Headpiece
+  ctx.fillStyle = gold;
+  ctx.beginPath();
+  if (rankStr === 'K') {
+    ctx.moveTo(-30, -52);
+    ctx.lineTo(-34, -92);
+    ctx.lineTo(-16, -72);
+    ctx.lineTo(0, -98);
+    ctx.lineTo(16, -72);
+    ctx.lineTo(34, -92);
+    ctx.lineTo(30, -52);
+  } else if (rankStr === 'Q') {
+    ctx.moveTo(-26, -54);
+    ctx.lineTo(-28, -76);
+    ctx.lineTo(-13, -64);
+    ctx.lineTo(0, -82);
+    ctx.lineTo(13, -64);
+    ctx.lineTo(28, -76);
+    ctx.lineTo(26, -54);
+  } else {
+    // Jack: flat cap with a feather
+    ctx.moveTo(-34, -50);
+    ctx.quadraticCurveTo(-30, -78, 6, -76);
+    ctx.quadraticCurveTo(36, -72, 34, -50);
+  }
+  ctx.closePath();
+  ctx.fill();
+  if (rankStr === 'J') {
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(18, -70);
+    ctx.quadraticCurveTo(40, -96, 30, -108);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 export function getPlayingCardTexture(card, { legal = true, dimmed = false, selected = false } = {}) {
   const suit = card?.suit || 'spades';
   const rank = Number(card?.rank) || 2;
@@ -1182,19 +1282,21 @@ export function getPlayingCardTexture(card, { legal = true, dimmed = false, sele
   canvas.height = h;
   const ctx = canvas.getContext('2d');
 
-  // Card body, full bleed: the card mesh is an opaque box, so any pixel left
-  // transparent (margin, rounded corners) would render as a black frame.
+  // Rounded card body. Pixels outside it stay transparent and are cut away by
+  // the card material's alphaTest, giving real rounded corners with no frame.
+  ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = dimmed ? '#D8D1C2' : '#FCF7EC';
-  ctx.fillRect(0, 0, w, h);
+  ctx.beginPath();
+  ctx.roundRect(0, 0, w, h, CARD_CORNER_PX);
+  ctx.fill();
 
-  // Only a selected card keeps a visible (gold) outline.
-  if (selected) {
-    ctx.lineWidth = 10;
-    ctx.strokeStyle = '#F5C842';
-    ctx.beginPath();
-    ctx.roundRect(6, 6, w - 12, h - 12, 22);
-    ctx.stroke();
-  }
+  // Hairline edge so overlapping cards stay distinct; gold when selected.
+  ctx.lineWidth = selected ? 10 : 2;
+  ctx.strokeStyle = selected ? '#F5C842' : 'rgba(60, 48, 36, 0.22)';
+  ctx.beginPath();
+  const inset = selected ? 5 : 1;
+  ctx.roundRect(inset, inset, w - inset * 2, h - inset * 2, CARD_CORNER_PX - inset);
+  ctx.stroke();
 
   const isRed = suit === 'hearts' || suit === 'diamonds';
   const ink = isRed ? '#D41628' : '#18181B';
@@ -1234,11 +1336,15 @@ export function getPlayingCardTexture(card, { legal = true, dimmed = false, sele
     ctx.roundRect(58, 92, w - 116, h - 184, 16);
     ctx.fill();
 
-    ctx.fillStyle = ink;
-    ctx.font = '800 98px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText(rankStr, w / 2, h / 2 - 22);
-    ctx.font = '700 68px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText(suitStr, w / 2, h / 2 + 52);
+    if (rankStr === 'J' || rankStr === 'Q' || rankStr === 'K') {
+      drawCourtFigure(ctx, rankStr, suitStr, ink, w / 2, h / 2);
+    } else {
+      ctx.fillStyle = ink;
+      ctx.font = '800 98px "Plus Jakarta Sans", sans-serif';
+      ctx.fillText(rankStr, w / 2, h / 2 - 22);
+      ctx.font = '700 68px "Plus Jakarta Sans", sans-serif';
+      ctx.fillText(suitStr, w / 2, h / 2 + 52);
+    }
   } else {
     ctx.fillStyle = ink;
     ctx.font = '700 116px "Plus Jakarta Sans", sans-serif';
@@ -1248,7 +1354,7 @@ export function getPlayingCardTexture(card, { legal = true, dimmed = false, sele
   if (dimmed) {
     ctx.fillStyle = 'rgba(20, 16, 12, 0.36)';
     ctx.beginPath();
-    ctx.roundRect(6, 6, w - 12, h - 12, 22);
+    ctx.roundRect(0, 0, w, h, CARD_CORNER_PX);
     ctx.fill();
   }
 
@@ -1272,7 +1378,9 @@ export function getPlayingCardBackTexture({ highlighted = false } = {}) {
   const ctx = canvas.getContext('2d');
 
   ctx.fillStyle = '#FCF7EC';
-  ctx.fillRect(0, 0, w, h);
+  ctx.beginPath();
+  ctx.roundRect(0, 0, w, h, CARD_CORNER_PX);
+  ctx.fill();
 
   ctx.fillStyle = highlighted ? '#8C232A' : '#731A22';
   ctx.beginPath();

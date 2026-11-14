@@ -3020,6 +3020,35 @@ body {
   }
 }
 
+.side-action-bar {
+  position: absolute;
+  left: 50%;
+  bottom: max(8px, env(safe-area-inset-bottom));
+  translate: -50% 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: calc(100% - var(--space-md));
+  padding: 8px 12px;
+  border-radius: var(--radius-stock);
+  background: var(--grain), var(--fibre), var(--color-paper);
+  border: 1px solid var(--color-rule);
+  box-shadow: var(--shadow-card);
+  pointer-events: auto;
+  z-index: 28;
+}
+
+.side-action-bar[hidden] {
+  display: none;
+}
+
+.side-action-bar .btn {
+  min-width: 96px;
+  min-height: 40px;
+}
+
 /* Panels anchored under the top bar follow its measured height (--topbar-bottom
    is set from JS): the bar wraps to a second row on mid-width screens and used
    to cover these panels and swallow their clicks. */

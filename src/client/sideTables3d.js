@@ -94,7 +94,8 @@ export class SideTables3D {
     const mat = new THREE.MeshStandardMaterial({
       map: tex,
       roughness: 0.34,
-      metalness: 0.04
+      metalness: 0.04,
+      alphaTest: 0.5 // cuts the texture's transparent corners -> rounded card
     });
     this.cachedFaceMats.set(tex.uuid, mat);
     return mat;
@@ -294,7 +295,8 @@ export class SideTables3D {
     this.sharedCardEdgeMat = new THREE.MeshStandardMaterial({ color: '#EDE4D1', roughness: 0.4 });
     this.sharedCardBottomMat = new THREE.MeshStandardMaterial({
       map: getPlayingCardBackTexture({ highlighted: false }),
-      roughness: 0.4
+      roughness: 0.4,
+      alphaTest: 0.5
     });
     this.sharedPlaqueEdgeMat = new THREE.MeshStandardMaterial({ color: '#3E2818', roughness: 0.45 });
     this.sharedEmptySlotMat = new THREE.MeshBasicMaterial({
@@ -913,74 +915,7 @@ export class SideTables3D {
             }
           }
 
-          if (isMyTable && t.isMyTurn) {
-            const mySeat = t.seats?.[localSeatIdx];
-            const toCall = Math.max(0, (t.currentBet || 0) - (mySeat?.bet || 0));
-            const actions = [
-              {
-                title: toCall > 0 ? `GÖR (${toCall})` : 'PAS',
-                sub: 'Devam Et',
-                tone: 'emerald',
-                action: toCall > 0 ? 'call' : 'check',
-                payload: {}
-              }
-            ];
-            if ((mySeat?.chips || 0) > toCall + 10) {
-              actions.push({
-                title: '+20 ARTIR',
-                sub: 'Bahis Yükselt',
-                tone: 'gold',
-                action: 'raise',
-                payload: { amount: 20 }
-              });
-            }
-            if ((mySeat?.chips || 0) > toCall + 40) {
-              actions.push({
-                title: '+50 ARTIR',
-                sub: 'Büyük Artış',
-                tone: 'gold',
-                action: 'raise',
-                payload: { amount: 50 }
-              });
-            }
-            actions.push({
-              title: 'ÇEKİL',
-              sub: 'Elden Çık',
-              tone: 'red',
-              action: 'fold',
-              payload: {}
-            });
-
-            // The viewer's two hole cards sit in the middle of the near edge, so the
-            // buttons fan out to both sides of them instead of hiding behind them.
-            const spacing = 2.3;
-            const innerX = 2.85;
-            const leftCount = Math.ceil(actions.length / 2);
-            actions.forEach((act, aIdx) => {
-              const ax = aIdx < leftCount
-                ? -innerX - (leftCount - 1 - aIdx) * spacing
-                : innerX + (aIdx - leftCount) * spacing;
-              const plaque = this.createPlaqueMesh(act.title, act.sub, {
-                tone: act.tone,
-                highlighted: true,
-                w: 2.15,
-                h: 0.98
-              });
-              plaque.position.set(ax, 0.32, 3.15);
-              plaque.rotation.x = 0.56;
-              plaque.userData = {
-                kind: 'sideAction',
-                tableId: t.id,
-                action: act.action,
-                payload: act.payload,
-                label: act.title,
-                baseY: 0.32,
-                baseScaleVec: plaque.userData.baseScaleVec
-              };
-              viewerFrame.add(plaque);
-              this.interactables.push(plaque);
-            });
-          }
+          // Poker actions (check / call / raise / fold) live in the bottom HUD bar.
         } else if (t.kind === 'batak') {
           const trumpPlaque = this.createPlaqueMesh('KOZ: ♠ MAÇA', `EL ${t.roundNumber || 1}`, {
             tone: 'dark',
@@ -1088,7 +1023,7 @@ export class SideTables3D {
               `${s.chips ?? 0} Çip`,
               { tone: s.folded ? 'red' : 'dark', w: 2.2, h: 0.78 }
             );
-            betPlaque.position.set(-2.1, 0.1, 4.75);
+            betPlaque.position.set(-3.3, 0.1, 4.75);
             betPlaque.rotation.x = 0.24;
             seatFrame.add(betPlaque);
           }
@@ -1098,9 +1033,13 @@ export class SideTables3D {
           const myHand = Array.isArray(t.myHand) ? t.myHand : [];
           const n = myHand.length;
           if (n > 0) {
-            const maxSpan = n <= 4 ? 5.6 : 9.4;
+            // Held as a fan near the table edge: smaller, overlapping and tipped
+            // outwards so the middle of the table (deck, pile, pot) stays visible.
+            const maxSpan = n <= 4 ? 3.9 : 8.2;
             const isPokerHand = t.kind === 'poker';
-            const step = n > 1 ? Math.min(isPokerHand ? 1.12 : 1.58, maxSpan / (n - 1)) : 0;
+            const handScale = isPokerHand ? 1.08 : n <= 4 ? 1.24 : 1.12;
+            const step = n > 1 ? Math.min(1.14, maxSpan / (n - 1)) : 0;
+            const fanStep = n > 1 ? Math.min(0.085, 0.62 / (n - 1)) : 0;
             myHand.forEach((card, cIdx) => {
               const offset = cIdx - (n - 1) / 2;
               const isLegal = !canPlayHandCard || legalSet.has(card.id);
@@ -1108,17 +1047,18 @@ export class SideTables3D {
                 faceUp: true,
                 legal: isLegal,
                 dimmed: canPlayHandCard && !isLegal,
-                scale: isPokerHand ? 1.08 : n <= 4 ? 1.56 : 1.38
+                scale: handScale
               });
-              cardMesh.rotation.order = 'YXZ';
-              const baseY = 1.05 + cIdx * 0.006 + (canPlayHandCard && isLegal ? 0.18 : 0);
+              // X first (tip towards the eye), then Y = spin within the card's own plane
+              cardMesh.rotation.order = 'XYZ';
+              const baseY = 1.0 + cIdx * 0.008 + (canPlayHandCard && isLegal ? 0.14 : 0);
               cardMesh.position.set(
                 offset * step,
-                baseY,
-                6.25 + Math.abs(offset) * 0.045
+                baseY - offset * offset * fanStep * 0.16,
+                6.7 + offset * offset * fanStep * 0.5
               );
               cardMesh.rotation.x = 0.72;
-              cardMesh.rotation.y = -offset * 0.03;
+              cardMesh.rotation.y = -offset * fanStep;
               cardMesh.userData = {
                 kind: canPlayHandCard && isLegal ? 'sideAction' : 'sideCard',
                 tableId: t.id,

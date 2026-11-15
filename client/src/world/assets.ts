@@ -64,7 +64,7 @@ async function loadEntry(entry: AssetEntry, res: Res, loaders: Loaders, bank: As
   } else if (entry.kind === 'model') {
     bank.models.set(entry.id, await loaders.model(`${ASSET_ROOT}/models/${entry.id}/${entry.id}_${res}.gltf`));
   } else if (entry.kind === 'hdri') {
-    bank.hdri.set(entry.id, await loaders.hdri(`${ASSET_ROOT}/hdri/${entry.id}_${res}.hdr`));
+    bank.hdri.set(entry.id, await loaders.hdri(`${ASSET_ROOT}/hdri/${entry.id}_${res}.hdr.bin`));
   } else if (entry.source === 'local') {
     const map = await loaders.texture(`${ASSET_ROOT}/${entry.path}`);
     map.colorSpace = THREE.SRGBColorSpace;

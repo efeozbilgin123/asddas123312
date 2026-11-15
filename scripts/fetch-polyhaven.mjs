@@ -67,7 +67,7 @@ async function fetchEntry(entry) {
         if (f) await download(f.url, path.join(assetsDir, 'textures', entry.id, `${entry.id}_${short}_${res}.jpg`));
       }
     } else {
-      await download(files.hdri[res].hdr.url, path.join(assetsDir, 'hdri', `${entry.id}_${res}.hdr`));
+      await download(files.hdri[res].hdr.url, path.join(assetsDir, 'hdri', `${entry.id}_${res}.hdr.bin`));
     }
   }
   const info = await getJson(`https://api.polyhaven.com/info/${entry.id}`);

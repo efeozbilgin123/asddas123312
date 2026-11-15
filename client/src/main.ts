@@ -264,14 +264,24 @@ function updateCamera(dt: number): void {
 }
 
 // ---------- loop ----------
+let autopilot: { x: number; z: number } | null = null;
 let fps = 60;
 function tick(dt: number): void {
   const kb = keyboard.read();
   const js = joystick.read();
   const raw = Math.hypot(js.x, js.z) > 0 ? js : kb;
+  // debug autopilot (tests): walk straight toward a world point, in world space
+  let move = cameraRelative(raw, orbit.yaw);
+  if (autopilot) {
+    const dx = autopilot.x - avatar.x;
+    const dz = autopilot.z - avatar.z;
+    const d = Math.hypot(dx, dz);
+    move = d < 0.1 ? { x: 0, z: 0, run: false } : { x: dx / d, z: dz / d, run: false };
+    if (d < 0.1) autopilot = null;
+  }
   // the cat is a small moving obstacle for the avatar (only once a cat model is in the room)
   const obstacles = catView.present ? [...COLLIDERS, { minX: cat.x - 0.15, maxX: cat.x + 0.15, minZ: cat.z - 0.15, maxZ: cat.z + 0.15 }] : COLLIDERS;
-  avatar = step(avatar, cameraRelative(raw, orbit.yaw), dt, obstacles);
+  avatar = step(avatar, move, dt, obstacles);
   const now = performance.now();
   sendMove(now);
   const shared = session.cat();
@@ -305,6 +315,10 @@ const debug = {
   fps: () => fps,
   session: () => session,
   chatText: () => chat?.text() ?? '',
+  walkTo(x: number, z: number) {
+    autopilot = { x, z };
+  },
+  nearestFreeSeat: () => nearestSeat(avatar, SEATS, occupied())?.id ?? null,
   hasBubble: (id: string) => remotes.hasBubble(id),
   teleport(x: number, z: number) {
     avatar = { ...avatar, x, z, mode: 'walk', seatId: null };

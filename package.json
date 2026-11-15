@@ -11,12 +11,14 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "npm run dev -w client",
+    "dev": "npm run dev -w server & npm run dev -w client",
     "build": "npm run build -w client",
     "preview": "npm run preview -w client",
     "test": "npm test --workspaces --if-present",
     "fetch-assets": "node scripts/fetch-polyhaven.mjs",
-    "smoke": "node e2e/smoke.mjs"
+    "smoke": "node e2e/smoke.mjs",
+    "start": "npm run start -w server",
+    "smoke:multi": "node e2e/multi.mjs"
   },
   "devDependencies": {
     "@napi-rs/canvas": "^1.1.1"

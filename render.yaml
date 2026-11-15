@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: kahvehane
+    runtime: node
+    plan: free
+    autoDeploy: true
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"

@@ -13,7 +13,7 @@ const { chromium, devices } = require('playwright');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = path.join(root, 'docs/superpowers/m1');
 const PORT = 4179;
-const URL = `http://localhost:${PORT}/?still&q=low&debug`;
+const URL = `http://localhost:${PORT}/?still&q=low&debug&name=Deneme`;
 
 let failures = 0;
 function check(name, ok, detail = '') {

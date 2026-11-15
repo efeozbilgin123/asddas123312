@@ -61,8 +61,8 @@ place({ id: 'tv-stool', asset: 'wooden_stool_01', pos: [-4.4, 0, -5.35], rotY: 0
 place({ id: 'tv', asset: 'television_02', pos: [-4.4, 0.55, -5.35], rotY: 0, scale: 1.7 });
 place({ id: 'rocking-chair', asset: 'Rockingchair_01', pos: [-6.6, 0, -3.2], rotY: 2.6, collider: box(-6.6, -3.2, 0.42, 0.42) });
 place({ id: 'side-sofa', asset: 'sofa_02', pos: [-7.45, 0, -0.9], rotY: PI / 2, collider: rotBox(-7.45, -0.9, 0.92, 0.5, PI / 2) });
-place({ id: 'lamp-stool', asset: 'wooden_stool_01', pos: [-2.6, 0, -2.4], rotY: 0.2, collider: box(-2.6, -2.4, 0.24, 0.24) });
-place({ id: 'oil-lamp', asset: 'vintage_oil_lamp', pos: [-2.6, 0.44, -2.4], rotY: 0 });
+place({ id: 'lamp-stool', asset: 'wooden_stool_01', pos: [-3.3, 0, -1.5], rotY: 0.2, collider: box(-3.3, -1.5, 0.24, 0.24) });
+place({ id: 'oil-lamp', asset: 'vintage_oil_lamp', pos: [-3.3, 0.44, -1.5], rotY: 0 });
 
 seats.push({ id: 'sofa-l', pos: [-5.0, 0, -2.3], facingY: PI, kind: 'sofa' });
 seats.push({ id: 'sofa-r', pos: [-3.8, 0, -2.3], facingY: PI, kind: 'sofa' });

@@ -17,7 +17,7 @@ const nearSofa = { x: sofa.pos[0], z: -3.15, facing: Math.PI, speed: 0 };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Walks a client to a target in small validated steps. */
-const AROUND_SOFA = [{ x: -2.0, z: 0.5 }, { x: -2.0, z: -3.15 }];
+const AROUND_SOFA = [{ x: -2.5, z: 0.5 }, { x: -2.5, z: -3.15 }];
 
 async function walkVia(room: SalonRoom, client: Awaited<ReturnType<typeof join>>, to: { x: number; z: number }) {
   for (const w of AROUND_SOFA) await walkTo(room, client, w);

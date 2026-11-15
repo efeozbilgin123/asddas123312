@@ -28,6 +28,8 @@ export interface Session {
   onEmote(cb: (m: EmoteBroadcast) => void): void;
   onCorrect(cb: (p: CorrectMsg) => void): void;
   onDenied(cb: (reason: DeniedMsg['reason']) => void): void;
+  /** The server connection is gone for good (SDK reconnection gave up, or the server removed us). */
+  onLost(cb: () => void): void;
   sendMove(m: MoveMsg): void;
   sit(seatId: string): void;
   stand(): void;
@@ -61,6 +63,7 @@ export function offlineSession(): Session {
     onEmote: noop,
     onCorrect: noop,
     onDenied: noop,
+    onLost: noop,
     sendMove: noop,
     sit: noop,
     stand: noop,
@@ -78,12 +81,23 @@ interface SdkRoom {
   };
   send(type: string, msg?: unknown): void;
   onMessage(type: string, cb: (msg: never) => void): void;
+  onLeave?(cb: (code: number) => void): void;
   leave(consented?: boolean): unknown;
 }
 
 function wrap(room: SdkRoom): Session {
+  let online = true;
+  let leaving = false;
+  const lost: Array<() => void> = [];
+  room.onLeave?.(() => {
+    if (leaving || !online) return;
+    online = false;
+    lost.forEach((cb) => cb());
+  });
   return {
-    online: true,
+    get online() {
+      return online;
+    },
     selfId: room.sessionId,
     players() {
       const out = new Map<string, RemotePlayer>();
@@ -97,12 +111,16 @@ function wrap(room: SdkRoom): Session {
     onEmote: (cb) => room.onMessage('emote', cb as (m: never) => void),
     onCorrect: (cb) => room.onMessage('correct', cb as (m: never) => void),
     onDenied: (cb) => room.onMessage('denied', ((m: DeniedMsg) => cb(m.reason)) as (m: never) => void),
+    onLost: (cb) => void lost.push(cb),
     sendMove: (m) => room.send('move', m),
     sit: (seatId) => room.send('sit', { seatId }),
     stand: () => room.send('stand', {}),
     chat: (text) => room.send('chat', { text }),
     emote: (id) => room.send('emote', { id }),
-    leave: () => void room.leave(true)
+    leave: () => {
+      leaving = true;
+      void room.leave(true);
+    }
   };
 }
 
@@ -112,9 +130,14 @@ export async function connect(
 ): Promise<Session | ConnectError> {
   const client: JoinableClient = deps.client ?? (new Client(opts.url) as unknown as JoinableClient);
   const timeout = new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), opts.timeoutMs ?? 4000));
+  const joining = client.join(ROOM_NAME, { name: opts.name, look: opts.look });
   try {
-    const result = await Promise.race([client.join(ROOM_NAME, { name: opts.name, look: opts.look }), timeout]);
-    if (result === 'timeout') return { error: 'offline' };
+    const result = await Promise.race([joining, timeout]);
+    if (result === 'timeout') {
+      // a join that still completes later must not leave a ghost player holding a slot
+      joining.then((r) => (r as SdkRoom).leave(true)).catch(() => {});
+      return { error: 'offline' };
+    }
     const room = result as SdkRoom;
     // swallow unhandled message types so the SDK doesn't warn
     for (const t of ['chat', 'emote', 'correct', 'denied']) room.onMessage(t, () => {});

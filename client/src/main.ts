@@ -138,11 +138,16 @@ async function joinSalon(): Promise<void> {
       avatar = { ...avatar, x: p.x, z: p.z };
     });
     session.onDenied((reason) => {
-      if (reason === 'seat-taken') {
+      if (reason === 'seat-taken' || reason === 'too-far') {
         const seat = SEATS.find((s) => s.id === avatar.seatId);
         if (seat) avatar = standUp(avatar, seat, COLLIDERS);
-        hud.toast('Bu koltuk dolu');
+        hud.toast(reason === 'seat-taken' ? 'Bu koltuk dolu' : 'Koltuğa biraz daha yaklaş');
       }
+    });
+    session.onLost(() => {
+      session = offlineSession();
+      hud.toast('Bağlantı koptu — çevrimdışı devam ediyorsun', 4000);
+      chat?.system('Bağlantı koptu. Sayfayı yenileyerek tekrar girebilirsin.');
     });
     break;
   }

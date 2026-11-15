@@ -23,3 +23,48 @@ test('offline session is inert', () => {
   expect(s.cat()).toBeNull();
   expect(() => s.chat('x')).not.toThrow();
 });
+
+function fakeRoom() {
+  const handlers: Record<string, (m: unknown) => void> = {};
+  let leaveCb: ((code: number) => void) | null = null;
+  const room = {
+    sessionId: 's1',
+    state: {},
+    left: false,
+    send() {},
+    onMessage(type: string, cb: (m: unknown) => void) {
+      handlers[type] = cb;
+    },
+    onLeave(cb: (code: number) => void) {
+      leaveCb = cb;
+    },
+    leave() {
+      room.left = true;
+    },
+    drop: (code = 4010) => leaveCb?.(code)
+  };
+  return room;
+}
+
+test('a lost connection is reported and the session goes offline', async () => {
+  const room = fakeRoom();
+  const s = await connect({ url: 'ws://x', name: 'A', look: 'kum' }, { client: { join: async () => room } });
+  if ('error' in s) throw new Error('expected a session');
+  let lost = 0;
+  s.onLost(() => lost++);
+  expect(s.online).toBe(true);
+  room.drop();
+  expect(lost).toBe(1);
+  expect(s.online).toBe(false);
+});
+
+test('a join that completes after the timeout is left, not kept as a ghost', async () => {
+  const room = fakeRoom();
+  let resolveJoin: (r: unknown) => void = () => {};
+  const client = { join: () => new Promise((r) => (resolveJoin = r)) };
+  const r = await connect({ url: 'ws://x', name: 'A', look: 'kum', timeoutMs: 50 }, { client });
+  expect(r).toEqual({ error: 'offline' });
+  resolveJoin(room);
+  await new Promise((res) => setTimeout(res, 10));
+  expect(room.left).toBe(true);
+});

@@ -59,3 +59,19 @@ describe('controller', () => {
     expect(p.z).toBeCloseTo(0.8, 5);
   });
 });
+
+import { moveCircle } from '../src/avatar/collision';
+
+test('moveCircle stays put instead of ending wedged between two close boxes', () => {
+  const a = box(0, 0, 0.5, 0.5); // maxZ 0.5
+  const b = box(0, 0.85, 0.5, 0.1); // minZ 0.75 → 0.25 gap, narrower than the 0.3 diameter
+  const from = { x: 0.8, z: 0.62 };
+  const to = { x: 0.4, z: 0.62 };
+  const p = moveCircle(from, to, 0.15, [a, b]);
+  const overlap = [a, b].some((bx) => {
+    const dx = p.x - Math.max(bx.minX, Math.min(p.x, bx.maxX));
+    const dz = p.z - Math.max(bx.minZ, Math.min(p.z, bx.maxZ));
+    return Math.hypot(dx, dz) < 0.15 - 1e-6;
+  });
+  expect(overlap).toBe(false);
+});

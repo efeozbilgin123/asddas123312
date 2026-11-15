@@ -38,5 +38,7 @@ export const MANIFEST: AssetEntry[] = [
   texture('beam_wall_01'),
   texture('wooden_rough_planks'),
   { id: 'snowy_forest', kind: 'hdri', source: 'polyhaven' },
-  { id: 'kilim', kind: 'texture', source: 'local', path: 'rug/kilim_2k.jpg' }
+  { id: 'kilim', kind: 'texture', source: 'local', path: 'rug/kilim_2k.jpg' },
+  // Optional: a rigged cat dropped into this path by the owner (see docs/superpowers/m1/README.md)
+  { id: 'cat', kind: 'model', source: 'local', path: 'models/cat/cat.glb', deferred: true }
 ];

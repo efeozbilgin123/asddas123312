@@ -32,7 +32,11 @@ export function realLoaders(): Loaders {
   const tex = new THREE.TextureLoader();
   const rgbe = new RGBELoader();
   return {
-    model: async (url) => (await gltf.loadAsync(url)).scene,
+    model: async (url) => {
+      const g = await gltf.loadAsync(url);
+      g.scene.animations = g.animations; // keep clips with the scene for rigged models
+      return g.scene;
+    },
     texture: (url) => tex.loadAsync(url),
     hdri: (url) => rgbe.loadAsync(url)
   };
@@ -55,7 +59,9 @@ async function optional<T>(p: Promise<T>): Promise<T | undefined> {
 }
 
 async function loadEntry(entry: AssetEntry, res: Res, loaders: Loaders, bank: AssetBank): Promise<void> {
-  if (entry.kind === 'model') {
+  if (entry.kind === 'model' && entry.source === 'local') {
+    bank.models.set(entry.id, await loaders.model(`${ASSET_ROOT}/${entry.path}`));
+  } else if (entry.kind === 'model') {
     bank.models.set(entry.id, await loaders.model(`${ASSET_ROOT}/models/${entry.id}/${entry.id}_${res}.gltf`));
   } else if (entry.kind === 'hdri') {
     bank.hdri.set(entry.id, await loaders.hdri(`${ASSET_ROOT}/hdri/${entry.id}_${res}.hdr`));

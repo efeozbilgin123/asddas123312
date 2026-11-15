@@ -1,5 +1,5 @@
 import type { Box2 } from '../world/layout';
-import { resolveCircle } from './collision';
+import { moveCircle } from './collision';
 
 export interface MoveInput { x: number; z: number; run: boolean }
 
@@ -49,7 +49,7 @@ export function step(s: AvatarState, input: MoveInput, dt: number, boxes: readon
   const steps = Math.max(1, Math.ceil(dist / MAX_MOVE));
   let p = { x: s.x, z: s.z };
   for (let i = 0; i < steps; i++) {
-    p = resolveCircle({ x: p.x + (dir.x * dist) / steps, z: p.z + (dir.z * dist) / steps }, AVATAR_RADIUS, boxes);
+    p = moveCircle(p, { x: p.x + (dir.x * dist) / steps, z: p.z + (dir.z * dist) / steps }, AVATAR_RADIUS, boxes);
   }
   return { ...s, x: p.x, z: p.z, facing, speed };
 }

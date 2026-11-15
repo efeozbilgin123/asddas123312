@@ -34,3 +34,17 @@ export function resolveCircle(pos: P2, radius: number, boxes: readonly Box2[]): 
   }
   return p;
 }
+
+export function overlapsAny(p: P2, radius: number, boxes: readonly Box2[]): boolean {
+  return boxes.some((b) => {
+    const dx = p.x - Math.max(b.minX, Math.min(p.x, b.maxX));
+    const dz = p.z - Math.max(b.minZ, Math.min(p.z, b.maxZ));
+    return dx * dx + dz * dz < radius * radius - 1e-9;
+  });
+}
+
+/** Moves a circle toward `to`, sliding along boxes; if it would end wedged, it stays at `from`. */
+export function moveCircle(from: P2, to: P2, radius: number, boxes: readonly Box2[]): P2 {
+  const p = resolveCircle(to, radius, boxes);
+  return overlapsAny(p, radius, boxes) ? from : p;
+}

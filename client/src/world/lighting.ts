@@ -82,6 +82,13 @@ export function createLighting(renderer: THREE.WebGLRenderer, scene: THREE.Scene
     scene.add(l);
   }
 
+  const sill = PLACEMENTS.find((p) => p.id === 'sill-lantern');
+  if (sill) {
+    const l = new THREE.PointLight('#ffb062', 1.6, 3.5, 2);
+    l.position.set(sill.pos[0], sill.pos[1] + 0.3, sill.pos[2] + 0.15);
+    scene.add(l);
+  }
+
   const moon = new THREE.DirectionalLight('#8fa6d8', 0.35);
   moon.position.set(WINDOW.x, WINDOW.y + 2, -ROOM.depth / 2 - 4);
   moon.target.position.set(WINDOW.x, 0, 0);

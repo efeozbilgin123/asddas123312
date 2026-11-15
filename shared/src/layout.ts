@@ -100,11 +100,42 @@ place({ id: 'plant', asset: 'potted_plant_02', pos: [7.4, 0, -4.75], rotY: -0.6,
 place({ id: 'corner-stool', asset: 'wooden_stool_01', pos: [5.4, 0, -5.4], rotY: 0.5, collider: box(5.4, -5.4, 0.24, 0.24) });
 seats.push({ id: 'corner-stool', pos: [5.4, 0, -5.4], facingY: 0, kind: 'stool' });
 
+// ---- Kahvehane eşyaları ----
+// bookshelf (right wall, faces −x): books on its shelves, a vase on top
+for (const [i, y] of [0.45, 0.93, 1.42].entries()) {
+  place({ id: `books-${i + 1}`, asset: 'book_encyclopedia_set_01', pos: [7.55, y, -3.5 + i * 0.12], rotY: -PI / 2 });
+}
+place({ id: 'shelf-vase', asset: 'ceramic_vase_02', pos: [7.6, 2.06, -2.75], rotY: 0.3 });
+// cabinet top
+place({ id: 'cabinet-pot', asset: 'brass_pot_01', pos: [6.2, 1.88, -5.7], rotY: 0.4 });
+place({ id: 'cabinet-jug', asset: 'jug_01', pos: [7.0, 1.88, -5.7], rotY: -0.5 });
+// grandfather clock against the right wall
+place({ id: 'grandfather-clock', asset: 'vintage_grandfather_clock_01', pos: [7.75, 0, -0.6], rotY: -PI / 2, collider: rotBox(7.75, -0.6, 0.32, 0.22, -PI / 2) });
+// bench by the entrance, left wall
+place({ id: 'bench', asset: 'painted_wooden_bench', pos: [-7.7, 0, 3.0], rotY: PI / 2, collider: rotBox(-7.7, 3.0, 0.6, 0.26, PI / 2) });
+seats.push({ id: 'bench-a', pos: [-7.7, 0, 2.7], facingY: PI / 2, kind: 'stool' });
+seats.push({ id: 'bench-b', pos: [-7.7, 0, 3.3], facingY: PI / 2, kind: 'stool' });
+place({ id: 'big-plant', asset: 'potted_plant_01', pos: [-7.45, 0, 5.4], rotY: 0.8, collider: box(-7.45, 5.4, 0.3, 0.3) });
+// window sill
+place({ id: 'sill-plant', asset: 'potted_plant_04', pos: [0.75, 0.88, -5.9], rotY: 0 });
+place({ id: 'sill-lantern', asset: 'wooden_lantern_01', pos: [2.1, 0.88, -5.9], rotY: 0.2 });
+// game tables: a plate here, a vase there (masa-2 gets the tavla board)
+place({ id: 'plate-1', asset: 'carved_wooden_plate', pos: [-0.8, 0.76, -3.2], rotY: 0 });
+place({ id: 'plate-3', asset: 'carved_wooden_plate', pos: [-0.8, 0.76, 1.4], rotY: 1 });
+place({ id: 'vase-4', asset: 'brass_vase_01', pos: [3.6, 0.76, 1.4], rotY: 0, scale: 0.55 });
+
+/** Generated-texture decor (no models): wall kilim and a tavla board. */
+export const WALL_KILIM = { x: -ROOM.width / 2 + 0.02, y: 1.95, z: -0.9, width: 2.1, height: 1.4 } as const;
+export const TAVLA = { x: 3.6, y: 0.76, z: -3.2, width: 0.5, depth: 0.38 } as const;
+
 // ---- Tavan ve duvarlar ----
 place({ id: 'chandelier-1', asset: 'lantern_chandelier_01', pos: [-4.4, ROOM.height, -3.4], rotY: 0 });
 place({ id: 'chandelier-2', asset: 'lantern_chandelier_01', pos: [1.4, ROOM.height, -0.9], rotY: 0.5 });
+place({ id: 'chandelier-3', asset: 'lantern_chandelier_01', pos: [5.8, ROOM.height, -2.2], rotY: 1.1 });
 place({ id: 'frame-1', asset: 'hanging_picture_frame_01', pos: [-2.2, 1.75, -ROOM.depth / 2 + 0.03], rotY: 0 });
 place({ id: 'frame-2', asset: 'hanging_picture_frame_01', pos: [-ROOM.width / 2 + 0.03, 1.75, -3.4], rotY: PI / 2 });
+place({ id: 'frame-3', asset: 'fancy_picture_frame_01', pos: [4.2, 1.85, -ROOM.depth / 2 + 0.03], rotY: 0 });
+place({ id: 'frame-4', asset: 'fancy_picture_frame_01', pos: [ROOM.width / 2 - 0.03, 1.85, 2.0], rotY: -PI / 2 });
 
 export const PLACEMENTS: readonly Placement[] = placements;
 export const SEATS: readonly Seat[] = seats;

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { AssetBank, PbrSet } from './assets';
-import { PLACEMENTS, ROOM, WINDOW, type Placement } from '@kahvehane/shared';
+import { PLACEMENTS, ROOM, TAVLA, WALL_KILIM, WINDOW, type Placement } from '@kahvehane/shared';
 import type { QualityPreset } from './quality';
 
 function pbr(set: PbrSet | undefined, repeatX: number, repeatY: number, fallback: string): THREE.MeshStandardMaterial {
@@ -90,8 +90,8 @@ function windowFrame(bank: AssetBank, q: QualityPreset): THREE.Group {
   return g;
 }
 
-/** Light-emitting parts of lamp models glow warmly. */
-function glow(mesh: THREE.Mesh): void {
+/** Light-emitting parts of lamp models glow warmly; picture frames get our own artwork. */
+function glow(mesh: THREE.Mesh, bank?: AssetBank): void {
   const mat = mesh.material as THREE.MeshStandardMaterial;
   if (!mat?.name) return;
   if (/chandelier_01_lamp$|_flame$/.test(mat.name)) {
@@ -100,6 +100,11 @@ function glow(mesh: THREE.Mesh): void {
     m.emissiveIntensity = 4;
     mesh.material = m;
     mesh.castShadow = false;
+  } else if (/picture_frame.*_artwork$/.test(mat.name) && bank?.textures.get('legacy-art')) {
+    const m = mat.clone();
+    m.map = bank.textures.get('legacy-art')!.map;
+    m.color.set('#ffffff');
+    mesh.material = m;
   } else if (/picture_frame.*_glass$/.test(mat.name)) {
     mesh.visible = false; // the dark glass hides the artwork under our lighting
   } else if (/_glass$/.test(mat.name) && /lantern|lamp/.test(mat.name)) {
@@ -123,12 +128,38 @@ export function addPlacement(group: THREE.Group, p: Placement, bank: AssetBank, 
     if (!mesh.isMesh) return;
     mesh.castShadow = q.shadows;
     mesh.receiveShadow = q.shadows;
-    glow(mesh);
+    glow(mesh, bank);
   });
   obj.name = p.id;
   obj.userData.placementId = p.id;
   group.add(obj);
   return true;
+}
+
+/** Wall kilim and the tavla board: generated textures on simple surfaces. Added once their textures load. */
+export function addDecor(group: THREE.Group, bank: AssetBank, q: QualityPreset): void {
+  if (group.getObjectByName('decor')) return;
+  const decor = new THREE.Group();
+  decor.name = 'decor';
+  const kilim = bank.textures.get('kilim');
+  if (kilim) {
+    const wallRug = new THREE.Mesh(new THREE.PlaneGeometry(WALL_KILIM.width, WALL_KILIM.height), new THREE.MeshStandardMaterial({ map: kilim.map, roughness: 1 }));
+    wallRug.position.set(WALL_KILIM.x, WALL_KILIM.y, WALL_KILIM.z);
+    wallRug.rotation.y = Math.PI / 2;
+    wallRug.receiveShadow = q.shadows;
+    decor.add(wallRug);
+  }
+  const tavla = bank.textures.get('tavla');
+  if (tavla) {
+    const wood = new THREE.MeshStandardMaterial({ color: '#3a2112', roughness: 0.6 });
+    const top = new THREE.MeshStandardMaterial({ map: tavla.map, roughness: 0.55 });
+    const board = new THREE.Mesh(new THREE.BoxGeometry(TAVLA.width, 0.035, TAVLA.depth), [wood, wood, top, wood, wood, wood]);
+    board.position.set(TAVLA.x, TAVLA.y + 0.0175, TAVLA.z);
+    board.rotation.y = 0.25;
+    board.castShadow = board.receiveShadow = q.shadows;
+    decor.add(board);
+  }
+  if (decor.children.length) group.add(decor);
 }
 
 /** Adds every placement whose model is loaded and not yet in the group. Returns how many were added. */

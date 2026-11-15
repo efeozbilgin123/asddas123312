@@ -20,7 +20,7 @@ import { createLighting } from './world/lighting';
 import { createPostFx, type PostFx } from './world/postfx';
 import { MANIFEST } from './world/manifest';
 import { detectQuality, QUALITY, type QualityName } from './world/quality';
-import { addLoadedPlacements, buildRoom } from './world/room';
+import { addDecor, addLoadedPlacements, buildRoom } from './world/room';
 import { createSnow } from './world/weather';
 
 const QUALITIES = ['low', 'medium', 'high'] as const;
@@ -371,6 +371,7 @@ hud.missing(bank.missing.filter((id) => id !== 'cat'));
 
 void loadAll(MANIFEST.filter((m) => m.deferred), '1k', undefined, undefined, bank).then(() => {
   addLoadedPlacements(room.furniture, bank, quality);
+  addDecor(room.group, bank, quality);
   if (!catView.present) catView = new CatView(scene, bank);
   hud.missing(bank.missing.filter((id) => id !== 'cat'));
   debug.ready = true;

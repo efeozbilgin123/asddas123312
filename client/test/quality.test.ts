@@ -14,3 +14,9 @@ test('presets match spec values', () => {
   expect(QUALITY.medium).toMatchObject({ pixelRatio: 1.5, shadows: true, shadowMapSize: 1024, snowCount: 150 });
   expect(QUALITY.high).toMatchObject({ pixelRatio: 2, shadowMapSize: 2048, textureRes: '2k', snowCount: 300 });
 });
+
+test('post-processing per preset: high = AO + bloom + SMAA, medium = bloom only, low = none', () => {
+  expect(QUALITY.high).toMatchObject({ ao: true, bloom: true, aa: 'smaa' });
+  expect(QUALITY.medium).toMatchObject({ ao: false, bloom: true, aa: 'msaa' });
+  expect(QUALITY.low).toMatchObject({ ao: false, bloom: false, aa: 'none' });
+});

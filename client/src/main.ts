@@ -17,6 +17,7 @@ import { ChatPanel } from './ui/chat';
 import { EMOTES } from '@kahvehane/shared';
 import { showJoin, type JoinChoice } from './ui/join';
 import { createLighting } from './world/lighting';
+import { createPostFx, type PostFx } from './world/postfx';
 import { MANIFEST } from './world/manifest';
 import { detectQuality, QUALITY, type QualityName } from './world/quality';
 import { addLoadedPlacements, buildRoom } from './world/room';
@@ -37,12 +38,14 @@ let character: CharacterId = readSetting('kh.character', CHARACTERS) ?? 'mannequ
 
 // ---------- renderer & scene ----------
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: qualityName !== 'low' });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: quality.aa === 'msaa' && !quality.bloom });
 renderer.setPixelRatio(Math.min(devicePixelRatio, quality.pixelRatio));
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.05, 200);
+let postfx: PostFx | null = null;
 function resize(): void {
   renderer.setSize(innerWidth, innerHeight, false);
+  postfx?.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
 }
@@ -69,12 +72,14 @@ keyboard.onInteract(() => {
 // ---------- world ----------
 const bank: AssetBank = await loadAll(
   MANIFEST.filter((m) => !m.deferred),
-  '1k',
+  quality.textureRes,
   (d, t) => hud.progress(d, t)
 );
 const room = buildRoom(bank, quality);
 scene.add(room.group);
 const lighting = createLighting(renderer, scene, bank, quality);
+postfx = createPostFx(renderer, scene, camera, quality);
+postfx.setSize(innerWidth, innerHeight);
 const snow = createSnow(quality);
 scene.add(snow.object);
 
@@ -321,7 +326,8 @@ function tick(dt: number): void {
     }
   }
   updateCamera(dt);
-  renderer.render(scene, camera);
+  if (postfx) postfx.render();
+  else renderer.render(scene, camera);
 }
 
 const debug = {

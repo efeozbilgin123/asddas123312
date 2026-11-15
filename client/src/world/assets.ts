@@ -84,12 +84,15 @@ async function optional<T>(p: Promise<T>): Promise<T | undefined> {
 }
 
 async function loadEntry(entry: AssetEntry, res: Res, loaders: Loaders, bank: AssetBank): Promise<void> {
+  // Only room-surface textures follow the quality resolution; models and the HDRI stay 1k
+  // (2k models would multiply the download for little visible gain).
+  const modelRes: Res = '1k';
   if (entry.kind === 'model' && entry.source === 'local') {
     bank.models.set(entry.id, await loaders.model(`${ASSET_ROOT}/${entry.path}`));
   } else if (entry.kind === 'model') {
-    bank.models.set(entry.id, await loaders.model(`${ASSET_ROOT}/models/${entry.id}/${entry.id}_${res}.gltf`));
+    bank.models.set(entry.id, await loaders.model(`${ASSET_ROOT}/models/${entry.id}/${entry.id}_${modelRes}.gltf`));
   } else if (entry.kind === 'hdri') {
-    bank.hdri.set(entry.id, await loaders.hdri(`${ASSET_ROOT}/hdri/${entry.id}_${res}.hdr.bin`));
+    bank.hdri.set(entry.id, await loaders.hdri(`${ASSET_ROOT}/hdri/${entry.id}_${modelRes}.hdr.bin`));
   } else if (entry.source === 'local') {
     const map = await loaders.texture(`${ASSET_ROOT}/${entry.path}`);
     map.colorSpace = THREE.SRGBColorSpace;

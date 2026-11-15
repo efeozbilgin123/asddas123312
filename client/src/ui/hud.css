@@ -47,3 +47,17 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #120c08; col
 .toast { position: fixed; z-index: 8; left: 50%; top: 30%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line);
   border-radius: 12px; padding: 10px 16px; font-size: 15px; transition: opacity .4s; }
 .toast.gone { opacity: 0; }
+.chat { position: fixed; z-index: 5; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom));
+  width: min(320px, 70vw); background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 8px; font-size: 14px;
+  display: flex; flex-direction: column; gap: 6px; }
+@media (pointer: coarse) { .chat { bottom: 160px; } }
+.chat.closed .chat__log, .chat.closed .chat__form, .chat.closed .chat__emotes { display: none; }
+.chat__toggle { align-self: flex-start; font: 600 12px system-ui; color: var(--ink); background: none; border: 0; opacity: .75; cursor: pointer; padding: 0 2px; }
+.chat__log { max-height: 140px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; -webkit-user-select: text; user-select: text; }
+.chat__line { overflow-wrap: anywhere; }
+.chat__line.self b { color: #f0a050; }
+.chat__line.system { opacity: .65; font-style: italic; }
+.chat__input { font: 14px system-ui, sans-serif; width: 100%; box-sizing: border-box; padding: 7px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: #2a1d14; color: var(--ink); }
+.chat__emotes { display: flex; gap: 4px; }
+.chat__emotes button { font-size: 18px; background: #2a1d14; border: 1px solid var(--line); border-radius: 8px; padding: 2px 6px; cursor: pointer; }

@@ -116,9 +116,9 @@ export class RemotePlayers {
     e.bubble = { sprite, until: nowMs + (kind === 'emote' ? 3000 : 4000) };
   }
 
-  /** World position of a remote player's head (for own-bubble placement parity). */
-  has(playerId: string): boolean {
-    return this.entries.has(playerId);
+  /** Whether a remote player currently shows a bubble (used by tests). */
+  hasBubble(playerId: string): boolean {
+    return this.entries.get(playerId)?.bubble != null;
   }
 
   private tag(p: RemotePlayer): THREE.Sprite {

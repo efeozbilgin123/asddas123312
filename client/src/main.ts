@@ -12,7 +12,9 @@ import { Hud, readSetting, type CharacterId } from './ui/hud';
 import { loadAll, type AssetBank } from './world/assets';
 import { CAT_SPOTS, COLLIDERS, LOOKS, ROOM, SEAT_POSE, SEATS, SPAWN } from '@kahvehane/shared';
 import { connect, defaultServerUrl, offlineSession, type Session } from './net/connection';
-import { RemotePlayers } from './net/remote';
+import { RemotePlayers, textSprite } from './net/remote';
+import { ChatPanel } from './ui/chat';
+import { EMOTES } from '@kahvehane/shared';
 import { showJoin, type JoinChoice } from './ui/join';
 import { createLighting } from './world/lighting';
 import { MANIFEST } from './world/manifest';
@@ -145,6 +147,60 @@ async function joinSalon(): Promise<void> {
   spawnAvatar();
 }
 
+// ---------- chat & emotes ----------
+let ownBubble: { sprite: THREE.Sprite; until: number } | null = null;
+function showOwnBubble(text: string, kind: 'chat' | 'emote'): void {
+  if (ownBubble) scene.remove(ownBubble.sprite);
+  const sprite =
+    kind === 'emote'
+      ? textSprite(text, { height: 0.42, bg: 'rgba(0,0,0,0)', font: 80 })
+      : textSprite(Array.from(text).slice(0, 60).join(''), { height: 0.24, bg: 'rgba(243,230,211,0.95)', fg: '#1a0f06' });
+  scene.add(sprite);
+  ownBubble = { sprite, until: performance.now() + (kind === 'emote' ? 3000 : 4000) };
+}
+const emojiOf = (id: string) => EMOTES.find((e) => e.id === id)?.emoji ?? '';
+let chat: ChatPanel | null = null;
+const known = new Map<string, string>(); // id → name, for join/leave lines
+
+function setupChat(): void {
+  if (!session.online) return;
+  chat = new ChatPanel(hudRoot, {
+    onSend: (text) => session.chat(text),
+    onEmote: (id) => session.emote(id)
+  });
+  session.onChat((m) => {
+    const self = m.from === session.selfId;
+    chat?.add({ name: m.name, text: m.text, self });
+    if (self) showOwnBubble(m.text, 'chat');
+    else remotes.bubble(m.from, m.text, 'chat', performance.now());
+  });
+  session.onEmote((m) => {
+    if (m.from === session.selfId) showOwnBubble(emojiOf(m.id), 'emote');
+    else remotes.bubble(m.from, emojiOf(m.id), 'emote', performance.now());
+  });
+  session.onDenied((reason) => {
+    if (reason === 'rate-limit') chat?.system('Biraz yavaş 🙂');
+  });
+  for (const p of session.players().values()) known.set(p.id, p.name);
+}
+
+function announceJoinsAndLeaves(): void {
+  if (!chat) return;
+  const now = session.players();
+  for (const p of now.values()) {
+    if (!known.has(p.id)) {
+      known.set(p.id, p.name);
+      chat.system(`${p.name} salona girdi`);
+    }
+  }
+  for (const [id, name] of known) {
+    if (!now.has(id)) {
+      known.delete(id);
+      chat.system(`${name} ayrıldı`);
+    }
+  }
+}
+
 // Sends our position at most 10 times a second, only when it changed.
 let lastSent = { x: NaN, z: NaN, facing: NaN, at: 0 };
 function sendMove(now: number): void {
@@ -222,6 +278,7 @@ function tick(dt: number): void {
   if (shared) cat = { ...cat, x: shared.x, z: shared.z, facing: shared.facing, action: shared.action as CatState['action'] };
   else cat = catStep(cat, dt, { spots: CAT_SPOTS, avatar, rng: Math.random });
   remotes.update(session, now, dt);
+  announceJoinsAndLeaves();
   const seat = avatar.seatId ? SEATS.find((x) => x.id === avatar.seatId) : undefined;
   avatarView?.update(avatar, dt, seat ? SEAT_POSE[seat.kind] : undefined);
   catView.update(cat, dt);
@@ -229,6 +286,14 @@ function tick(dt: number): void {
   snow.update(dt);
   hud.sitState(avatar.mode === 'sit' ? 'stand' : nearestSeat(avatar, SEATS, occupied()) ? 'sit' : null, touch);
   hud.status(session.online, session.players().size);
+  if (ownBubble && avatarView) {
+    const p = avatarView.root.position;
+    ownBubble.sprite.position.set(p.x, avatar.mode === 'sit' ? 1.77 : 2.32, p.z);
+    if (now > ownBubble.until) {
+      scene.remove(ownBubble.sprite);
+      ownBubble = null;
+    }
+  }
   updateCamera(dt);
   renderer.render(scene, camera);
 }
@@ -239,6 +304,8 @@ const debug = {
   cat: () => ({ ...cat }),
   fps: () => fps,
   session: () => session,
+  chatText: () => chat?.text() ?? '',
+  hasBubble: (id: string) => remotes.hasBubble(id),
   teleport(x: number, z: number) {
     avatar = { ...avatar, x, z, mode: 'walk', seatId: null };
   },
@@ -259,6 +326,7 @@ if (import.meta.env.DEV || params.has('debug')) (window as unknown as { __kh: ty
 
 hud.ready();
 await joinSalon();
+setupChat();
 camera.position.set(avatar.x, 2.5, avatar.z + 3);
 updateCamera(1);
 worldReady = true;

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { AvatarView } from './avatar/avatar';
 import { followCamera } from './avatar/camera';
 import { step, type AvatarState } from '@kahvehane/shared';
@@ -9,7 +10,10 @@ import { KeyboardInput } from './input/keyboard';
 import { nearestSeat, sitDown, standUp } from '@kahvehane/shared';
 import { Hud, readSetting, type CharacterId } from './ui/hud';
 import { loadAll, type AssetBank } from './world/assets';
-import { CAT_SPOTS, COLLIDERS, ROOM, SEAT_POSE, SEATS, SPAWN } from '@kahvehane/shared';
+import { CAT_SPOTS, COLLIDERS, LOOKS, ROOM, SEAT_POSE, SEATS, SPAWN } from '@kahvehane/shared';
+import { connect, defaultServerUrl, offlineSession, type Session } from './net/connection';
+import { RemotePlayers } from './net/remote';
+import { showJoin, type JoinChoice } from './ui/join';
 import { createLighting } from './world/lighting';
 import { MANIFEST } from './world/manifest';
 import { detectQuality, QUALITY, type QualityName } from './world/quality';
@@ -72,25 +76,83 @@ const lighting = createLighting(renderer, scene, bank, quality);
 const snow = createSnow(quality);
 scene.add(snow.object);
 
-// ---------- avatar ----------
+// ---------- avatars ----------
+const lookColor = (id: string) => LOOKS.find((l) => l.id === id)?.color;
+function makeAvatar(look: string): AvatarView | null {
+  const model = bank.models.get(`char-${character}`);
+  if (!model) return null;
+  return new AvatarView(scene, SkeletonUtils.clone(model), model.animations, { idle: 'idle', walk: 'walk', run: 'run' }, { tint: lookColor(look) });
+}
+
 let avatar: AvatarState = { x: SPAWN[0], z: SPAWN[2], facing: Math.PI, speed: 0, mode: 'walk', seatId: null };
 let avatarView: AvatarView | null = null;
+let myLook: string = LOOKS[0].id;
 function spawnAvatar(): void {
   if (avatarView) scene.remove(avatarView.root);
-  const model = bank.models.get(`char-${character}`);
-  const clips = model?.animations ?? [];
-  avatarView = model ? new AvatarView(scene, model, clips, { idle: 'idle', walk: 'walk', run: 'run' }) : null;
+  avatarView = makeAvatar(myLook);
 }
-spawnAvatar();
+
+// ---------- session ----------
+let session: Session = offlineSession();
+const remotes = new RemotePlayers(scene, makeAvatar);
+
+function occupied(): Set<string> {
+  return remotes.occupiedSeats(session);
+}
 
 function toggleSit(): void {
   if (avatar.mode === 'sit') {
     const seat = SEATS.find((s) => s.id === avatar.seatId);
     if (seat) avatar = standUp(avatar, seat, COLLIDERS);
+    session.stand();
     return;
   }
-  const seat = nearestSeat(avatar, SEATS, new Set());
-  if (seat) avatar = sitDown(avatar, seat);
+  const seat = nearestSeat(avatar, SEATS, occupied());
+  if (!seat) return;
+  avatar = sitDown(avatar, seat); // optimistic; reverted on 'denied'
+  session.sit(seat.id);
+}
+
+async function joinSalon(): Promise<void> {
+  const auto = params.get('name');
+  let choice: JoinChoice | null = auto ? { name: auto, look: params.get('look') ?? LOOKS[0].id } : null;
+  let message = '';
+  for (;;) {
+    if (!choice) choice = await showJoin(hudRoot, message);
+    myLook = choice.look;
+    const result = await connect({ url: defaultServerUrl(), name: choice.name, look: choice.look });
+    if ('error' in result) {
+      if (result.error === 'offline') break;
+      message = result.error === 'full' ? 'Salon dolu (15/15). Biraz sonra tekrar dene.' : 'Bir isim yaz';
+      choice = null;
+      continue;
+    }
+    session = result;
+    const me = session.players().get(session.selfId);
+    if (me) avatar = { ...avatar, x: me.x, z: me.z, facing: me.facing };
+    session.onCorrect((p) => {
+      avatar = { ...avatar, x: p.x, z: p.z };
+    });
+    session.onDenied((reason) => {
+      if (reason === 'seat-taken') {
+        const seat = SEATS.find((s) => s.id === avatar.seatId);
+        if (seat) avatar = standUp(avatar, seat, COLLIDERS);
+        hud.toast('Bu koltuk dolu');
+      }
+    });
+    break;
+  }
+  spawnAvatar();
+}
+
+// Sends our position at most 10 times a second, only when it changed.
+let lastSent = { x: NaN, z: NaN, facing: NaN, at: 0 };
+function sendMove(now: number): void {
+  if (!session.online || avatar.mode === 'sit' || now - lastSent.at < 100) return;
+  const moved = Math.hypot(avatar.x - lastSent.x, avatar.z - lastSent.z) > 0.01 || Math.abs(avatar.facing - lastSent.facing) > 0.02;
+  if (!moved && !(Number.isNaN(lastSent.x))) return;
+  session.sendMove({ x: avatar.x, z: avatar.z, facing: avatar.facing, speed: avatar.speed });
+  lastSent = { x: avatar.x, z: avatar.z, facing: avatar.facing, at: now };
 }
 
 // ---------- cat ----------
@@ -154,13 +216,19 @@ function tick(dt: number): void {
   // the cat is a small moving obstacle for the avatar (only once a cat model is in the room)
   const obstacles = catView.present ? [...COLLIDERS, { minX: cat.x - 0.15, maxX: cat.x + 0.15, minZ: cat.z - 0.15, maxZ: cat.z + 0.15 }] : COLLIDERS;
   avatar = step(avatar, cameraRelative(raw, orbit.yaw), dt, obstacles);
-  cat = catStep(cat, dt, { spots: CAT_SPOTS, avatar, rng: Math.random });
+  const now = performance.now();
+  sendMove(now);
+  const shared = session.cat();
+  if (shared) cat = { ...cat, x: shared.x, z: shared.z, facing: shared.facing, action: shared.action as CatState['action'] };
+  else cat = catStep(cat, dt, { spots: CAT_SPOTS, avatar, rng: Math.random });
+  remotes.update(session, now, dt);
   const seat = avatar.seatId ? SEATS.find((x) => x.id === avatar.seatId) : undefined;
   avatarView?.update(avatar, dt, seat ? SEAT_POSE[seat.kind] : undefined);
   catView.update(cat, dt);
   lighting.update(performance.now() / 1000);
   snow.update(dt);
-  hud.sitState(avatar.mode === 'sit' ? 'stand' : nearestSeat(avatar, SEATS, new Set()) ? 'sit' : null, touch);
+  hud.sitState(avatar.mode === 'sit' ? 'stand' : nearestSeat(avatar, SEATS, occupied()) ? 'sit' : null, touch);
+  hud.status(session.online, session.players().size);
   updateCamera(dt);
   renderer.render(scene, camera);
 }
@@ -170,6 +238,7 @@ const debug = {
   avatar: () => ({ ...avatar }),
   cat: () => ({ ...cat }),
   fps: () => fps,
+  session: () => session,
   teleport(x: number, z: number) {
     avatar = { ...avatar, x, z, mode: 'walk', seatId: null };
   },
@@ -188,9 +257,10 @@ const debug = {
 // Test/debug hooks only in development or with ?debug (they can teleport the avatar).
 if (import.meta.env.DEV || params.has('debug')) (window as unknown as { __kh: typeof debug }).__kh = debug;
 
+hud.ready();
+await joinSalon();
 camera.position.set(avatar.x, 2.5, avatar.z + 3);
 updateCamera(1);
-hud.ready();
 worldReady = true;
 hud.missing(bank.missing.filter((id) => id !== 'cat'));
 

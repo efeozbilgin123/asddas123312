@@ -10,6 +10,8 @@ const DEFAULT_SEAT = { height: 0.47, forward: 0 };
 export interface AvatarOptions {
   /** Rotate the model 180° (Mixamo exports differ: some face +z, some −z). */
   flip?: boolean;
+  /** Body colour for the placeholder mannequin (joints get a darker shade). */
+  tint?: string;
 }
 
 const _q = new THREE.Quaternion();
@@ -43,6 +45,7 @@ export class AvatarView {
 
   constructor(scene: THREE.Scene, model: THREE.Object3D, clips: THREE.AnimationClip[], map: ClipMap, opts: AvatarOptions = {}) {
     this.model = model;
+    model.updateMatrixWorld(true); // clones have stale bone matrices until updated
     const box = new THREE.Box3().setFromObject(model);
     const h = box.max.y - box.min.y || 1;
     model.scale.multiplyScalar(HEIGHT / h);
@@ -54,6 +57,13 @@ export class AvatarView {
         m.castShadow = true;
         m.receiveShadow = true;
         m.frustumCulled = false; // skinned bounds don't follow the animation
+        if (opts.tint) {
+          const mat = (m.material as THREE.MeshStandardMaterial).clone();
+          const c = new THREE.Color(opts.tint);
+          if (/joint/i.test(mat.name)) c.multiplyScalar(0.55);
+          mat.color.copy(c);
+          m.material = mat;
+        }
       }
       const b = o as THREE.Bone;
       if (b.isBone) this.bones.set(b.name.replace(/^mixamorig:?/, ''), b);

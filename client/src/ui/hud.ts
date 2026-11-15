@@ -99,6 +99,27 @@ export class Hud {
     el.textContent = `Yüklenemeyen: ${ids.join(', ')}`;
   }
 
+  /** Top-left pill: player count online, or the offline notice. */
+  status(online: boolean, count: number): void {
+    let el = document.querySelector<HTMLDivElement>('.pill');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'pill';
+      document.body.append(el);
+    }
+    el.classList.toggle('offline', !online);
+    el.textContent = online ? `Salonda ${count} kişi` : 'Çevrimdışı — tek başına geziyorsun';
+  }
+
+  toast(text: string, ms = 2500): void {
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.textContent = text;
+    document.body.append(el);
+    setTimeout(() => el.classList.add('gone'), ms);
+    setTimeout(() => el.remove(), ms + 500);
+  }
+
   ready(): void {
     this.loading.classList.add('done');
     document.getElementById('boot')?.remove();

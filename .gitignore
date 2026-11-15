@@ -1,5 +1,5 @@
 node_modules/
 dist/
-.hallmark/
+.superpowers/
 .DS_Store
 *.log

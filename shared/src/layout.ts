@@ -55,8 +55,8 @@ place({ id: 'stove', asset: 'barrel_stove', pos: [-7.2, 0, -5.2], rotY: PI / 4, 
 place({ id: 'basket', asset: 'wicker_basket_01', pos: [-7.45, 0, -4.25], rotY: 0.3, collider: box(-7.45, -4.25, 0.22, 0.2) });
 place({ id: 'sofa', asset: 'sofa_03', pos: [-4.4, 0, -2.3], rotY: PI, collider: box(-4.4, -2.3, 1.38, 0.47) });
 place({ id: 'pillows', asset: 'throw_pillows_01', pos: [-4.4, 0.42, -2.25], rotY: PI });
-place({ id: 'coffee-table', asset: 'coffee_table_round_01', pos: [-4.4, 0, -3.7], rotY: 0, scale: 0.6, collider: box(-4.4, -3.7, 0.4, 0.4) });
-place({ id: 'tea-set', asset: 'tea_set_01', pos: [-4.4, 0.295, -3.7], rotY: 0.4, scale: 0.6 });
+place({ id: 'coffee-table', asset: 'coffee_table_round_01', pos: [-4.4, 0, -3.95], rotY: 0, scale: 0.6, collider: box(-4.4, -3.95, 0.4, 0.4) });
+place({ id: 'tea-set', asset: 'tea_set_01', pos: [-4.4, 0.295, -3.95], rotY: 0.4, scale: 0.6 });
 place({ id: 'tv-stool', asset: 'wooden_stool_01', pos: [-4.4, 0, -5.35], rotY: 0, scale: 1.25, collider: box(-4.4, -5.35, 0.28, 0.28) });
 place({ id: 'tv', asset: 'television_02', pos: [-4.4, 0.55, -5.35], rotY: 0, scale: 1.7 });
 place({ id: 'rocking-chair', asset: 'Rockingchair_01', pos: [-6.6, 0, -3.2], rotY: 2.6, collider: box(-6.6, -3.2, 0.42, 0.42) });
@@ -119,7 +119,7 @@ export const SPAWN: Vec3 = [0, 0, 4.6];
 
 export const CAT_SPOTS: readonly CatSpot[] = [
   { id: 'soba-onu', pos: [-6.4, 0, -4.6], kind: 'sleep' },
-  { id: 'kilim', pos: [-5.5, 0, -4.4], kind: 'sleep' },
+  { id: 'kilim', pos: [-5.6, 0, -4.7], kind: 'sleep' },
   { id: 'pencere', pos: [1.4, 0, -5.5], kind: 'sit' },
   { id: 'raf-onu', pos: [6.6, 0, -4.6], kind: 'sit' },
   { id: 'masalar-arasi', pos: [1.4, 0, -0.9], kind: 'wander' },
@@ -153,11 +153,14 @@ export const WALL_COLLIDERS: readonly Box2[] = [
 
 export const COLLIDERS: readonly Box2[] = [...FURNITURE_COLLIDERS, ...WALL_COLLIDERS];
 
+/** Distance from the seat point to where you stand: clears the furniture's depth plus the avatar's radius. */
+const APPROACH: Record<Seat['kind'], number> = { sofa: 0.85, rocking: 0.8, chair: 0.6, stool: 0.6 };
+
 /**
- * Where an avatar stands before sitting / after standing: 0.6 m in front of the seat,
+ * Where an avatar stands before sitting / after standing: in front of the seat (distance per kind),
  * except game chairs, which face a table — there the avatar stands behind the chair.
  */
-export function seatApproach(seat: Seat, distance = 0.6): { x: number; z: number } {
+export function seatApproach(seat: Seat, distance = APPROACH[seat.kind]): { x: number; z: number } {
   const dir = seat.kind === 'chair' ? seat.facingY + Math.PI : seat.facingY;
   return { x: seat.pos[0] + Math.sin(dir) * distance, z: seat.pos[2] + Math.cos(dir) * distance };
 }

@@ -59,7 +59,9 @@ export function validateMove(prev: { x: number; z: number }, next: MoveMsg, elap
   if (![next.x, next.z, next.facing, next.speed].every(Number.isFinite)) return false;
   if (Math.abs(next.x) > ROOM.width / 2 || Math.abs(next.z) > ROOM.depth / 2) return false;
   const dist = Math.hypot(next.x - prev.x, next.z - prev.z);
-  if (dist > RUN_SPEED * SPEED_FACTOR * Math.max(0, elapsedSec) + SLACK) return false;
+  const budget = RUN_SPEED * SPEED_FACTOR * Math.max(0, elapsedSec);
+  // Slack absorbs jitter but never more than doubles the budget, so many tiny messages can't add up.
+  if (dist > budget + Math.min(SLACK, budget)) return false;
   return !overlapsAny(next, AVATAR_RADIUS - 0.02, boxes);
 }
 

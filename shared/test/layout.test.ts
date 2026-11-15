@@ -74,3 +74,36 @@ describe('cat edges', () => {
     expect(PLACEMENTS.find((p) => p.id === 'basket')?.collider).toBeDefined();
   });
 });
+
+describe('reachability', () => {
+  test('every seat approach point is reachable on foot from SPAWN', async () => {
+    const { overlapsAny } = await import('../src/collision');
+    const R = 0.3;
+    const cell = 0.1;
+    const W = ROOM.width / 2;
+    const D = ROOM.depth / 2;
+    const key = (i: number, j: number) => `${i},${j}`;
+    const toIJ = (x: number, z: number) => [Math.round((x + W) / cell), Math.round((z + D) / cell)] as const;
+    const free = (i: number, j: number) => !overlapsAny({ x: i * cell - W, z: j * cell - D }, R, COLLIDERS);
+    const [si, sj] = toIJ(SPAWN[0], SPAWN[2]);
+    const seen = new Set([key(si, sj)]);
+    const queue: [number, number][] = [[si, sj]];
+    while (queue.length) {
+      const [i, j] = queue.pop()!;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const ni = i + di!, nj = j + dj!;
+        const k = key(ni, nj);
+        if (!seen.has(k) && free(ni, nj)) {
+          seen.add(k);
+          queue.push([ni, nj]);
+        }
+      }
+    }
+    const unreachable = SEATS.filter((seat) => {
+      const a = seatApproach(seat);
+      const [ai, aj] = toIJ(a.x, a.z);
+      return ![-2, -1, 0, 1, 2].some((di) => [-2, -1, 0, 1, 2].some((dj) => seen.has(key(ai + di, aj + dj))));
+    }).map((s) => s.id);
+    expect(unreachable).toEqual([]);
+  });
+});

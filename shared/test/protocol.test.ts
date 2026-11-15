@@ -55,3 +55,17 @@ test('LOOKS and EMOTES have unique ids and the planned sizes', () => {
   expect(new Set(EMOTES.map((e) => e.id)).size).toBe(6);
   expect(LOOKS[0]).toEqual({ id: 'kiremit', label: 'Kiremit', color: '#c0583c' });
 });
+
+test('validateMove: rapid tiny messages cannot add up the slack into a speed hack', () => {
+  // 50 messages, 20 ms apart, 0.3 m each = 15 m/s
+  let p = { x: 0, z: 4.6 };
+  let accepted = 0;
+  for (let i = 0; i < 50; i++) {
+    const next = { x: 0, z: p.z - 0.3, facing: 0, speed: 3.2 };
+    if (validateMove(p, next, 0.02, [])) {
+      p = next;
+      accepted++;
+    }
+  }
+  expect(accepted).toBe(0);
+});

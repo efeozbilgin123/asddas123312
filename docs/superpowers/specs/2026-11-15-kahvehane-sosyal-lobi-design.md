@@ -64,8 +64,16 @@ Kod sıfırdan yazılır; eski koddan dosya kopyalanmaz. Oyun kurallarının **m
   (gölge/çözünürlük düşürme) gerekir.
 - **Her şey ücretsiz olmalı.** Barındırma: tek Node sunucusu, Render ücretsiz plan.
   Bu plan ~15 dk kimse bağlı değilken uyur ve yeniden başlarken bellek silinir; bağlı
-  oyuncu varken WebSocket trafiği sunucuyu uyanık tutar. Kabul: salon boşaldıktan sonra
-  açık oyunlar/yazboz sıfırlanabilir. Medya: LiveKit Cloud ücretsiz katmanı.
+  oyuncu varken WebSocket mesajları sunucuyu uyanık tutar (Render, Şubat 2026 değişikliği;
+  doğrulandı). Render ücretsiz sunucuları her an yeniden başlatabilir, disk kalıcı değil.
+  Kabul: salon boşalınca ya da yeniden başlatmada açık oyunlar/yazboz sıfırlanabilir.
+  **Medya sunucusu (ekran paylaşımı) kararı bekliyor — bkz. §12.**
+- **LiveKit Cloud ücretsiz (Build) kotası doğrulandı:** ayda 5.000 katılımcı-dakika
+  WebRTC, 100 dk gürültü engelleme (Krisp/ai-coustics). 15 kişi × 2 saatlik maç ≈ 1.800
+  katılımcı-dk → ayda yalnızca ~2–3 maç gecesi. Bu yüzden Krisp kullanılamaz; RNNoise.
+- Ekran paylaşımı yalnızca masaüstü tarayıcıdan başlatılabilir (telefon izler ama
+  paylaşamaz); sekme sesi yalnızca Chromium tabanlı tarayıcılarda yakalanır.
+- `.m3u8` linkleri ancak https ve çapraz-köken izinliyse oynar; değilse ekran paylaşımı.
   Gürültü engelleme: RNNoise (WASM, ücretsiz) — Krisp ücretli olabileceği için.
 - Birçok site iframe içinde açılmayı engeller; DRM'li içerik (Netflix vb.) ekran
   paylaşımında siyah görünür. Bu bilinen ve kabul edilmiş bir sınırdır.
@@ -128,12 +136,18 @@ shared/  (TS, istemci+sunucu)
 
 ### 8.2 Mekân
 
-- Tek salon: oturma köşesi (kanepe + TV + soba), 4 oyun masası, küçük mutfak/ocak
+- Tek salon: oturma köşesi (kanepe + TV + soba), 4 kart/taş masası + 1 bilardo masası, küçük mutfak/ocak
   köşesi (çaydanlık), pencereler (dış hava: kar/yağmur), kediler.
 - Varlık kaynakları: Poly Haven (CC0; kontrol edildi — `barrel_stove`, `sofa_02/03`,
   `Rockingchair_01`, `round_wooden_table_01/02`, `vintage_oil_lamp`, kitaplık,
-  bitkiler vb. mevcut), gerektiğinde diğer CC0/CC-BY kaynaklar (ör. Quaternius,
-  Kenney, Sketchfab CC). Atıf listesi `CREDITS.md`.
+  bitkiler vb. mevcut — **doğrulandı**: API erişilebilir, ör. `sofa_03` 1k glTF ≈ 0,7 MB,
+  `barrel_stove` 1k ≈ 2,1 MB / 2k ≈ 7,4 MB → ilk yüklemede 1k, sonra 2k).
+  **Doğrulanmadı / açık:** gerçekçi rig'li insan karakteri (CC0 adayları: Polygonal Mind
+  "100 Avatars", "Human Basics" — gerçekçilik düzeyi belirsiz; Mixamo karakterleri ücretsiz
+  ama Adobe girişi gerektirir), kedi, bilardo masası, tüplü/eski TV, çay takımı.
+  Sketchfab ve Freesound indirmek için giriş ister; gerekirse sahibi indirip repoya koyar.
+  Kenney/Quaternius gibi low-poly paketler **kullanılmaz** (sahibinin reddettiği görünüm).
+  Atıf listesi `CREDITS.md`.
 - Gerçekçilik: PBR malzemeler, HDRI ortam ışığı, sıcak nokta ışıkları (soba titreşimi,
   lamba), önceden hesaplanmış/yumuşak gölgeler, ton eşleme. Modeller sıkıştırılır
   (glTF + Draco/Meshopt + KTX2).
@@ -214,9 +228,9 @@ Sahip masadan kalkarsa sahiplik sıradaki oturan kişiye geçer.
 - LiveKit ses odası; mikrofon varsayılan kapalı, "Bas-konuş" veya açık mikrofon.
 - Mesafeye göre ses seviyesi (aynı masadakiler net, uzaktakiler kısık/duyulmaz).
 - Gürültü engelleme: tarayıcı içi RNNoise (WASM) — ücretsiz; Krisp ücretli plan gerektirebilir.
-- Risk: LiveKit Cloud ücretsiz kotası 15 kişilik uzun ekran paylaşımına yetmezse,
-  kurucu kota aşımında ekran paylaşımını kalite düşürerek sürdürmenin yolunu arar ve
-  sahibine bildirir (ücretli plan seçeneği kullanılmaz).
+- Sesli sohbet: ses akışı küçük (~30 kbps) olduğu için 15 kişiye kadar eşler arası
+  (P2P) bağlantıyla da ücretsiz yapılabilir; ekran paylaşımı ise bir medya sunucusu
+  (SFU) gerektirir — barındırma kararı §12'de.
 
 ### 8.7 Sesler
 
@@ -231,7 +245,28 @@ Sahip masadan kalkarsa sahiplik sıradaki oturan kişiye geçer.
   ayarlar). Oyun arayüzü yalnızca masada oturunca.
 - Hızlı tepkiler/emote ve yazılı sohbet (balon olarak avatarın üstünde).
 
-## 9. Kurucuya bırakılanlar
+## 9. Yapım sırası (kilometre taşları)
+
+Her taşın sonunda sahibine canlı link gösterilir; onay almadan sonrakine geçilmez.
+
+1. **Salon:** gerçek indirilmiş modeller, ışık, soba ateşi, kedi, pencere havası ve
+   yürüyen tek avatar; tek kişilik, ağ yok. Gerçekçi görünümü kanıtlamak için.
+   Karakter modeli seçenekleri burada sahibine gösterilir.
+2. **Çok oyunculu salon:** giriş (isim + görünüm), 10–15 kişi senkron yürüme/oturma,
+   yazılı sohbet ve emote.
+3. **İlk oyun uçtan uca (101 Okey)** — diğer oyunlar için şablon: motor + bot + masa
+   ayarları + 3D + ses + skor.
+4. **Batak**, 5. **Pişti**, 6. **Bilardo** (fizik ayrı iş).
+7. **TV + müzik:** senkron link oynatıcı, ardından ekran paylaşımı.
+8. **Sesli sohbet** (grup zaten Discord kullandığı için en son).
+
+İlk uygulama planı yalnızca 1. kilometre taşını kapsar.
+
+**Kodun yeri:** yeni kod bu dalda sıfırdan yazılır; eski kod ağacı kaldırılır (git
+geçmişinde ve `main`'de durur). Eski projeden yalnızca `public/assets/` dokuları
+(Gemini yapımı) ve kedi/avatar görselleri gerekirse taşınır; eski sesler ve 3D kod alınmaz.
+
+## 10. Kurucuya bırakılanlar
 
 - Salonun tam yerleşimi ve hangi modellerin seçileceği (§8.2 kaynakları içinde).
 - Bot algoritmalarının ayrıntısı (makul ve hızlı olmak şartıyla).
@@ -241,10 +276,19 @@ Sahip masadan kalkarsa sahiplik sıradaki oturan kişiye geçer.
 - Sipariş menüsü, kedi sevme gibi küçük etkileşimler: zaman kalırsa.
 - Batak puanlama ayrıntısı (en yaygın kural varsayılan; masa ayarı ile değiştirilebilir).
 
-## 10. Test ve doğrulama
+## 11. Test ve doğrulama
 
 - Her oyun motoru için birim testleri (kurallar, puanlama, uç durumlar, bot geçerli
   hamle yapar).
 - Çok oyunculu entegrasyon testleri (Colyseus oda testleri; gizli bilgi sızmıyor).
 - Playwright ile duman testi: giriş, yürüme, oturma, bir eli botlarla bitirme, TV linki açma.
 - Telefon görünümünde performans kontrolü (hedef ≥ 30 FPS orta kalite).
+
+## 12. Açık karar: ekran paylaşımı nerede barınacak?
+
+- **(a) Oracle Cloud "Always Free" sanal sunucu (önerilen):** kalıcı ücretsiz; LiveKit
+  sunucusu + oyun sunucusu aynı makinede, uyku yok, oyunlar silinmez, kota yok. Sahibinin
+  bir kez Oracle hesabı açması gerekir (kart doğrulaması ister, ücret alınmaz).
+- **(b) LiveKit Cloud ücretsiz:** kurulum yok; ayda ~2–3 maç gecesi ekran paylaşımı.
+- **(c) Medya sunucusu yok:** ekran paylaşımı P2P; paylaşanın upload hızı 14 kişiye
+  yetmez → düşük kalite/az izleyici.

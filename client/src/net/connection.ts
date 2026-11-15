@@ -36,6 +36,8 @@ export interface Session {
   stand(): void;
   chat(text: string): void;
   emote(id: string): void;
+  /** Switch avatar while in the salon (server validates it). */
+  setAvatar(id: string): void;
   leave(): void;
 }
 
@@ -75,6 +77,7 @@ export function offlineSession(): Session {
     stand: noop,
     chat: noop,
     emote: noop,
+    setAvatar: noop,
     leave: noop
   };
 }
@@ -123,6 +126,7 @@ function wrap(room: SdkRoom): Session {
     stand: () => room.send('stand', {}),
     chat: (text) => room.send('chat', { text }),
     emote: (id) => room.send('emote', { id }),
+    setAvatar: (id) => room.send('avatar', { id }),
     leave: () => {
       leaving = true;
       void room.leave(true);

@@ -36,6 +36,8 @@ export function textSprite(text: string, opts: { height?: number; bg?: string; f
 
 interface Entry {
   view: AvatarLike;
+  avatarId: string;
+  look: string;
   buffer: SnapshotBuffer;
   tag: THREE.Sprite;
   tagText: string;
@@ -70,19 +72,12 @@ export class RemotePlayers {
       if (!e) {
         const view = this.avatars.mannequin(p.look); // shown until the VRM (if any) is ready
         if (!view) continue;
-        const entry: Entry = { view, buffer: new SnapshotBuffer(), tag: this.tag(p), tagText: tagText(p), bubble: null, last: '' };
+        const entry: Entry = { view, avatarId: '', look: p.look, buffer: new SnapshotBuffer(), tag: this.tag(p), tagText: tagText(p), bubble: null, last: '' };
         e = entry;
         this.scene.add(e.tag);
         this.entries.set(p.id, e);
-        if (p.avatar !== 'mannequin') {
-          void this.avatars.vrm(p.avatar).then((v) => {
-            if (!v) return; // load failed: keep the mannequin
-            if (this.entries.get(p.id) !== entry) return void this.scene.remove(v.root);
-            this.scene.remove(entry.view.root);
-            entry.view = v;
-          });
-        }
       }
+      if (e.avatarId !== p.avatar) this.swapAvatar(p.id, e, p.avatar, p.look);
       const key = `${p.x.toFixed(3)},${p.z.toFixed(3)},${p.facing.toFixed(3)},${p.speed.toFixed(2)}`;
       if (key !== e.last) {
         e.buffer.push(nowMs, p);
@@ -110,6 +105,24 @@ export class RemotePlayers {
         }
       }
     }
+  }
+
+  /** Mannequin right away, then the chosen VRM/GLB when it has loaded (ignored if changed again meanwhile). */
+  private swapAvatar(id: string, e: Entry, avatarId: string, look: string): void {
+    e.avatarId = avatarId;
+    const m = this.avatars.mannequin(look);
+    if (m) {
+      this.scene.remove(e.view.root);
+      e.view = m;
+    }
+    e.look = look;
+    if (avatarId === 'mannequin') return;
+    void this.avatars.vrm(avatarId).then((v) => {
+      if (!v) return; // load failed: keep the mannequin
+      if (this.entries.get(id) !== e || e.avatarId !== avatarId) return void this.scene.remove(v.root);
+      this.scene.remove(e.view.root);
+      e.view = v;
+    });
   }
 
   /** Shows a chat or emote bubble over a remote player. */

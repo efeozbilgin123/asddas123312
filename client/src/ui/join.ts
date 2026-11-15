@@ -1,5 +1,6 @@
 import { BUILTIN_AVATARS, LOOKS, sanitizeName } from '@kahvehane/shared';
 import { AVATAR_LABELS } from '../avatar/library';
+import { modelBytes } from './avatarFile';
 
 export interface JoinChoice { name: string; look: string; avatar: string }
 
@@ -19,12 +20,13 @@ function remember(key: string, value: string): void {
   }
 }
 
-/** Uploads a .vrm to the game server; resolves to its avatar id or throws a Turkish message. */
+/** Uploads a .vrm/.glb (or the model inside a .zip) to the game server; resolves to its avatar id or throws a Turkish message. */
 export async function uploadAvatar(file: File, serverHttp: string): Promise<string> {
-  if (file.size > 30 * 1024 * 1024) throw new Error('Dosya 30 MB’tan büyük.');
+  const bytes = await modelBytes(file);
+  if (bytes.length > 30 * 1024 * 1024) throw new Error('Model 30 MB’tan büyük.');
   let res: Response;
   try {
-    res = await fetch(`${serverHttp}/avatars`, { method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream' } });
+    res = await fetch(`${serverHttp}/avatars`, { method: 'POST', body: new Blob([bytes as BlobPart]), headers: { 'content-type': 'application/octet-stream' } });
   } catch {
     throw new Error('Sunucuya ulaşılamadı (çevrimdışı).');
   }
@@ -75,10 +77,10 @@ export function showJoin(root: HTMLElement, message = '', serverHttp = ''): Prom
     };
     const upload = document.createElement('label');
     upload.className = 'join__avatar join__upload';
-    upload.textContent = 'Kendi VRM’in…';
+    upload.textContent = 'Kendi modelin… (.vrm / .glb / .zip)';
     const file = document.createElement('input');
     file.type = 'file';
-    file.accept = '.vrm';
+    file.accept = '.vrm,.glb,.zip';
     file.hidden = true;
     upload.append(file);
     avatars.append(upload);

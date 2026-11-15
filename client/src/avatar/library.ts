@@ -6,6 +6,7 @@ import { LOOKS } from '@kahvehane/shared';
 import { AvatarView, type AvatarLike } from './avatar';
 import { retargetClip } from './retarget';
 import { VrmAvatarView, type VrmClips } from './vrmAvatar';
+import { GlbAvatarView } from './glbAvatar';
 
 export const AVATAR_LABELS: Record<string, string> = { twist: 'Aiko', mannequin: 'Manken' };
 
@@ -40,7 +41,7 @@ export class AvatarLibrary {
     return new AvatarView(this.scene, SkeletonUtils.clone(this.mannequin), this.mannequin.animations, { idle: 'idle', walk: 'walk', run: 'run' }, { tint });
   }
 
-  /** A VRM view for `id`, or null if it's the mannequin or fails to load. */
+  /** A VRM (or plain GLB) view for `id`, or null if it's the mannequin or fails to load. */
   async vrmView(id: string): Promise<AvatarLike | null> {
     const url = avatarUrl(id, this.serverHttp);
     if (!url) return null;
@@ -56,7 +57,7 @@ export class AvatarLibrary {
     try {
       const gltf = await this.loader.parseAsync(buf.slice(0), '');
       const vrm = gltf.userData.vrm as VRM | undefined;
-      if (!vrm) return null;
+      if (!vrm) return new GlbAvatarView(this.scene, gltf.scene, gltf.animations); // plain .glb upload
       VRMUtils.removeUnnecessaryVertices(vrm.scene);
       VRMUtils.combineSkeletons(vrm.scene);
       VRMUtils.rotateVRM0(vrm); // VRM 0.x faces −z; ours face +z

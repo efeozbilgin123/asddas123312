@@ -35,7 +35,7 @@ export function createHttpApp({ store, clientDist, uploadLimit = { max: 5, windo
     if ('error' in result) {
       return void res
         .status(result.error === 'too-big' ? 413 : 400)
-        .json({ error: result.error === 'too-big' ? 'Dosya 30 MB’tan büyük.' : 'Bu bir VRM dosyası değil.' });
+        .json({ error: result.error === 'too-big' ? 'Dosya 30 MB’tan büyük.' : 'Bu bir .vrm/.glb dosyası değil.' });
     }
     res.json({ id: result.id });
   });

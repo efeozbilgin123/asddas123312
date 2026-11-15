@@ -12,6 +12,7 @@
     "@colyseus/sdk": "^0.18.10",
     "@kahvehane/shared": "*",
     "@pixiv/three-vrm": "^3.5.5",
+    "fflate": "^0.8.3",
     "three": "^0.170.0"
   },
   "devDependencies": {

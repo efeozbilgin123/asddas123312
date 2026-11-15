@@ -59,6 +59,14 @@ const joystick = new TouchJoystick(hudRoot);
 const hud = new Hud(hudRoot, touch, qualityName, character, {
   onSitToggle: () => toggleSit(),
   onQuality: () => location.reload(),
+  onChangeAvatar: () => {
+    void showJoin(hudRoot, 'Karakterini seç', serverHttpUrl()).then((choice) => {
+      myLook = choice.look;
+      myAvatar = choice.avatar;
+      session.setAvatar(choice.avatar);
+      spawnAvatar();
+    });
+  },
   onCharacter: (c) => {
     character = c;
     spawnAvatar();

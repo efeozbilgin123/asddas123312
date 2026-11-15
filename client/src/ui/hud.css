@@ -68,3 +68,4 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #120c08; col
 .join__avatar.on { border-color: var(--accent); background: #3a2716; }
 .join__upload { border-style: dashed; }
 .join__credit { margin: 0; font-size: 11px; opacity: .55; }
+.menu__action { position: static; width: 100%; margin-top: 4px; font-size: 14px; padding: 9px 14px; }

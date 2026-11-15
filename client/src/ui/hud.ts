@@ -7,6 +7,8 @@ export interface HudCallbacks {
   onSitToggle(): void;
   onQuality(q: QualityName): void;
   onCharacter(c: CharacterId): void;
+  /** "Karakteri değiştir" in the settings menu. */
+  onChangeAvatar(): void;
 }
 
 const QUALITY_LABEL: Record<QualityName, string> = { low: 'Düşük', medium: 'Orta', high: 'Yüksek' };
@@ -68,11 +70,17 @@ export class Hud {
         writeSetting('kh.quality', q);
         cb.onQuality(q);
       }),
-      segment('Karakter', CHARACTER_LABEL, character, (c) => {
-        writeSetting('kh.character', c);
-        cb.onCharacter(c);
-      })
     );
+    const change = document.createElement('button');
+    change.className = 'hud-btn menu__action';
+    change.textContent = 'Karakteri değiştir';
+    change.addEventListener('click', () => {
+      menu.hidden = true;
+      cb.onChangeAvatar();
+    });
+    menu.append(change);
+    void character;
+    void CHARACTER_LABEL;
     root.append(this.loading, this.sitButton, this.hint, gear, menu);
     document.getElementById('boot')?.remove(); // our own loading screen takes over
     document.getElementById('boot')?.remove(); // our own loading screen takes over

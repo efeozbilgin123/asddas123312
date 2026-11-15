@@ -8,11 +8,11 @@ import { retargetClip } from './retarget';
 import { VrmAvatarView, type VrmClips } from './vrmAvatar';
 import { GlbAvatarView } from './glbAvatar';
 
-export const AVATAR_LABELS: Record<string, string> = { twist: 'Aiko', mannequin: 'Manken' };
+export const AVATAR_LABELS: Record<string, string> = { twist: 'Aiko', nine: 'Nine', ayicik: 'Ayıcık', kedi: 'Kedi', mannequin: 'Manken' };
 
 /** Where an avatar id's file lives: bundled assets, or uploads on the game server. */
 export function avatarUrl(id: string, serverHttp: string): string | null {
-  if (id === 'twist') return `./assets/models/avatars/${id}.vrm`;
+  if (['twist', 'nine', 'ayicik', 'kedi'].includes(id)) return `./assets/models/avatars/${id}.vrm`;
   const m = /^custom:([0-9a-f]{64})$/.exec(id);
   return m ? `${serverHttp}/avatars/${m[1]}.vrm` : null;
 }

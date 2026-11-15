@@ -84,6 +84,7 @@ rows.sort();
 // Non-Poly Haven assets: kept here so regenerating CREDITS.md never drops them.
 const own = [
   '| Kilim dokusu | Kahvehane (kendi çalışmamız) | scripts/make-kilim.mjs | CC0 |',
+  '| Nine (Eugenia), Ayıcık (Teddy), Kedi (WeirdCat) — VRM avatarlar | Polygonal Mind, 100Avatars | https://github.com/toxsam/open-source-avatars | CC0 |',
   '| Aiko — VRM1_Constraint_Twist_Sample (VRM avatar) | pixiv Inc. | https://github.com/vrm-c/vrm-specification/tree/master/samples/VRM1_Constraint_Twist_Sample | VRM Public License 1.0 (atıf gerekmez) |',
   '| Xbot (geçici manken) | three.js örnekleri; kaynak: Adobe Mixamo | https://github.com/mrdoob/three.js/tree/r170/examples/models/gltf | MIT (three.js) / Mixamo koşulları |'
 ];

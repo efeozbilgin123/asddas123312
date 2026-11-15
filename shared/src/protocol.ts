@@ -23,8 +23,8 @@ export const EMOTES = [
   { id: 'alkis', emoji: '👏', label: 'Alkış' }
 ] as const satisfies readonly { id: string; emoji: string; label: string }[];
 
-/** Bundled avatars: a permissively licensed anime VRM and the tinted mannequin. */
-export const BUILTIN_AVATARS = ['twist', 'mannequin'] as const;
+/** Bundled avatars: Aiko (pixiv sample), three cozy CC0 100Avatars characters, and the tinted mannequin. */
+export const BUILTIN_AVATARS = ['twist', 'nine', 'ayicik', 'kedi', 'mannequin'] as const;
 export type BuiltinAvatar = (typeof BUILTIN_AVATARS)[number];
 const CUSTOM_AVATAR = /^custom:([0-9a-f]{64})$/;
 

@@ -128,7 +128,7 @@ export function showJoin(root: HTMLElement, message = '', serverHttp = ''): Prom
     go.textContent = 'İçeri gir';
     const credit = document.createElement('p');
     credit.className = 'join__credit';
-    credit.textContent = 'Aiko: pixiv VRM örnek modeli';
+    credit.textContent = 'Aiko: pixiv VRM örnek modeli · Nine, Ayıcık, Kedi: Polygonal Mind 100Avatars (CC0)';
     card.append(title, note, input, avatarsLabel, avatars, looksLabel, swatches, go, credit);
     card.addEventListener('submit', (e) => {
       e.preventDefault();

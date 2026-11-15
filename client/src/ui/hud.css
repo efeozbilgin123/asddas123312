@@ -29,3 +29,5 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #120c08; col
   width: 120px; height: 120px; border-radius: 50%; background: #0005; border: 2px solid #fff3; touch-action: none; }
 .joystick__knob { position: absolute; left: 35px; top: 35px; width: 50px; height: 50px; border-radius: 50%;
   background: #f3e6d3cc; pointer-events: none; }
+.missing { position: fixed; z-index: 7; left: 50%; bottom: 12px; transform: translateX(-50%); max-width: 90vw;
+  background: #5c1a12e6; border: 1px solid #a33; border-radius: 10px; padding: 6px 12px; font-size: 12px; }

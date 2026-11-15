@@ -22,6 +22,14 @@ export interface Seat {
   kind: 'sofa' | 'chair' | 'stool' | 'rocking';
 }
 
+/** Sitting surface per seat kind: height, and how far forward of the seat point the hips rest (meters). */
+export const SEAT_POSE: Record<Seat['kind'], { height: number; forward: number }> = {
+  sofa: { height: 0.6, forward: 0.2 },
+  chair: { height: 0.47, forward: -0.05 },
+  stool: { height: 0.45, forward: 0 },
+  rocking: { height: 0.56, forward: 0.02 }
+};
+
 export interface CatSpot { id: string; pos: Vec3; kind: 'sleep' | 'sit' | 'wander' }
 
 export const box = (x: number, z: number, hx: number, hz: number): Box2 => ({

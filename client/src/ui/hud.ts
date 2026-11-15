@@ -1,7 +1,7 @@
 import './hud.css';
 import type { QualityName } from '../world/quality';
 
-export type CharacterId = 'soldier';
+export type CharacterId = 'mannequin';
 
 export interface HudCallbacks {
   onSitToggle(): void;
@@ -10,7 +10,7 @@ export interface HudCallbacks {
 }
 
 const QUALITY_LABEL: Record<QualityName, string> = { low: 'Düşük', medium: 'Orta', high: 'Yüksek' };
-const CHARACTER_LABEL: Record<CharacterId, string> = { soldier: 'Geçici karakter' };
+const CHARACTER_LABEL: Record<CharacterId, string> = { mannequin: 'Geçici manken' };
 
 export function readSetting<T extends string>(key: string, allowed: readonly T[]): T | null {
   try {
@@ -74,6 +74,8 @@ export class Hud {
       })
     );
     root.append(this.loading, this.sitButton, this.hint, gear, menu);
+    document.getElementById('boot')?.remove(); // our own loading screen takes over
+    document.getElementById('boot')?.remove(); // our own loading screen takes over
   }
 
   progress(done: number, total: number): void {
@@ -82,8 +84,24 @@ export class Hud {
     this.fill.style.width = `${pct}%`;
   }
 
+  /** Shows which assets failed to load, so a player can report it (empty list: nothing shown). */
+  missing(ids: string[]): void {
+    let el = document.querySelector<HTMLDivElement>('.missing');
+    if (ids.length === 0) {
+      el?.remove();
+      return;
+    }
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'missing';
+      document.body.append(el);
+    }
+    el.textContent = `Yüklenemeyen: ${ids.join(', ')}`;
+  }
+
   ready(): void {
     this.loading.classList.add('done');
+    document.getElementById('boot')?.remove();
   }
 
   /** null: hidden; 'sit': near a free seat; 'stand': seated. */

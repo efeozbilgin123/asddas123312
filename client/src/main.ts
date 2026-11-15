@@ -9,7 +9,7 @@ import { KeyboardInput } from './input/keyboard';
 import { nearestSeat, sitDown, standUp } from './interact/seats';
 import { Hud, readSetting, type CharacterId } from './ui/hud';
 import { loadAll, type AssetBank } from './world/assets';
-import { CAT_SPOTS, COLLIDERS, ROOM, SEATS, SPAWN } from './world/layout';
+import { CAT_SPOTS, COLLIDERS, ROOM, SEAT_POSE, SEATS, SPAWN } from './world/layout';
 import { createLighting } from './world/lighting';
 import { MANIFEST } from './world/manifest';
 import { detectQuality, QUALITY, type QualityName } from './world/quality';
@@ -17,7 +17,7 @@ import { addLoadedPlacements, buildRoom } from './world/room';
 import { createSnow } from './world/weather';
 
 const QUALITIES = ['low', 'medium', 'high'] as const;
-const CHARACTERS = ['soldier'] as const;
+const CHARACTERS = ['mannequin'] as const;
 const params = new URLSearchParams(location.search);
 const forced = params.get('q');
 const qualityName: QualityName =
@@ -27,7 +27,7 @@ const qualityName: QualityName =
 const quality = QUALITY[qualityName];
 const still = params.has('still');
 const touch = matchMedia('(pointer: coarse)').matches;
-let character: CharacterId = readSetting('kh.character', CHARACTERS) ?? 'soldier';
+let character: CharacterId = readSetting('kh.character', CHARACTERS) ?? 'mannequin';
 
 // ---------- renderer & scene ----------
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
@@ -79,7 +79,7 @@ function spawnAvatar(): void {
   if (avatarView) scene.remove(avatarView.root);
   const model = bank.models.get(`char-${character}`);
   const clips = model?.animations ?? [];
-  avatarView = model ? new AvatarView(scene, model, clips, { idle: 'Idle', walk: 'Walk', run: 'Run' }) : null;
+  avatarView = model ? new AvatarView(scene, model, clips, { idle: 'idle', walk: 'walk', run: 'run' }) : null;
 }
 spawnAvatar();
 
@@ -155,7 +155,8 @@ function tick(dt: number): void {
   const obstacles = catView.present ? [...COLLIDERS, { minX: cat.x - 0.15, maxX: cat.x + 0.15, minZ: cat.z - 0.15, maxZ: cat.z + 0.15 }] : COLLIDERS;
   avatar = step(avatar, cameraRelative(raw, orbit.yaw), dt, obstacles);
   cat = catStep(cat, dt, { spots: CAT_SPOTS, avatar, rng: Math.random });
-  avatarView?.update(avatar, dt);
+  const seat = avatar.seatId ? SEATS.find((x) => x.id === avatar.seatId) : undefined;
+  avatarView?.update(avatar, dt, seat ? SEAT_POSE[seat.kind] : undefined);
   catView.update(cat, dt);
   lighting.update(performance.now() / 1000);
   snow.update(dt);
@@ -191,10 +192,12 @@ camera.position.set(avatar.x, 2.5, avatar.z + 3);
 updateCamera(1);
 hud.ready();
 worldReady = true;
+hud.missing(bank.missing.filter((id) => id !== 'cat'));
 
 void loadAll(MANIFEST.filter((m) => m.deferred), '1k', undefined, undefined, bank).then(() => {
   addLoadedPlacements(room.furniture, bank, quality);
   if (!catView.present) catView = new CatView(scene, bank);
+  hud.missing(bank.missing.filter((id) => id !== 'cat'));
   debug.ready = true;
 });
 

@@ -5,8 +5,27 @@ import type { AvatarState } from './controller';
 export interface ClipMap { idle: string; walk: string; run?: string; sit?: string }
 
 const HEIGHT = 1.72;
-const SIT_DROP = 0.47; // hips go from standing height to seat height
-const SIT_BACK = 0.12;
+const DEFAULT_SEAT = { height: 0.47, forward: 0 };
+
+export interface AvatarOptions {
+  /** Rotate the model 180° (Mixamo exports differ: some face +z, some −z). */
+  flip?: boolean;
+}
+
+const _q = new THREE.Quaternion();
+const _qp = new THREE.Quaternion();
+const _axis = new THREE.Vector3();
+
+/** Rotates a bone by `angle` about a world-space axis (rig-independent posing). */
+function rotateWorld(bone: THREE.Object3D, axis: THREE.Vector3, angle: number): void {
+  if (!bone.parent) return;
+  bone.parent.getWorldQuaternion(_qp);
+  _q.setFromAxisAngle(axis, angle);
+  // local' = parentWorld⁻¹ · R · parentWorld · local
+  const pinv = _qp.clone().invert();
+  bone.quaternion.premultiply(pinv.multiply(_q).multiply(_qp));
+  bone.updateMatrixWorld(true);
+}
 
 /**
  * A rigged character driven by AvatarState. Clips may come from another model with the same
@@ -20,14 +39,15 @@ export class AvatarView {
   private current: THREE.AnimationAction | null = null;
   private readonly bones = new Map<string, THREE.Bone>();
   private sitBlend = 0;
+  private readonly hipY: number;
 
-  constructor(scene: THREE.Scene, model: THREE.Object3D, clips: THREE.AnimationClip[], map: ClipMap) {
+  constructor(scene: THREE.Scene, model: THREE.Object3D, clips: THREE.AnimationClip[], map: ClipMap, opts: AvatarOptions = {}) {
     this.model = model;
     const box = new THREE.Box3().setFromObject(model);
     const h = box.max.y - box.min.y || 1;
     model.scale.multiplyScalar(HEIGHT / h);
     model.position.y -= box.min.y * (HEIGHT / h); // feet on the floor
-    model.rotation.y = Math.PI; // Mixamo exports face −z; our yaw convention looks along +z
+    if (opts.flip) model.rotation.y = Math.PI; // our yaw convention looks along +z
     model.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.isMesh) {
@@ -40,6 +60,10 @@ export class AvatarView {
     });
     this.root.add(model);
     scene.add(this.root);
+    this.root.updateMatrixWorld(true);
+    const hips = this.bones.get('Hips');
+    const hipY = hips ? hips.getWorldPosition(new THREE.Vector3()).y : 0.95;
+    this.hipY = hipY;
     this.mixer = new THREE.AnimationMixer(model);
     for (const key of ['idle', 'walk', 'run', 'sit'] as const) {
       const name = map[key];
@@ -58,7 +82,8 @@ export class AvatarView {
     this.current = next;
   }
 
-  update(s: AvatarState, dt: number): void {
+  /** `seat`: the sitting surface of the current seat (hips rest on it). */
+  update(s: AvatarState, dt: number, seat: { height: number; forward: number } = DEFAULT_SEAT): void {
     const sitting = s.mode === 'sit';
     const sitClip = sitting && this.actions.sit !== undefined;
     if (sitClip) this.play('sit');
@@ -69,19 +94,28 @@ export class AvatarView {
 
     this.sitBlend = THREE.MathUtils.damp(this.sitBlend, sitting ? 1 : 0, 10, dt);
     const k = this.sitBlend;
-    this.root.position.set(s.x - Math.sin(s.facing) * SIT_BACK * k, -SIT_DROP * k, s.z - Math.cos(s.facing) * SIT_BACK * k);
+    const fwd = seat.forward * k;
+    this.root.position.set(s.x + Math.sin(s.facing) * fwd, -Math.max(0, this.hipY - seat.height) * k, s.z + Math.cos(s.facing) * fwd);
     this.root.rotation.y = s.facing;
-    if (k > 0.001 && !this.actions.sit) this.applySitPose(k);
+    if (k > 0.001 && !this.actions.sit) {
+      this.root.updateMatrixWorld(true);
+      this.applySitPose(k, s.facing);
+    }
   }
 
-  /** Bends hips and knees ~90° (after the mixer has written the idle pose). */
-  private applySitPose(k: number): void {
+  /**
+   * Bends hips and knees ~90° about the avatar's own right axis, in world space, after the mixer
+   * has written the idle pose — works for any rig orientation.
+   */
+  private applySitPose(k: number, facing: number): void {
+    _axis.set(Math.cos(facing), 0, -Math.sin(facing)); // avatar's local +x in world space
+    const axis = _axis.clone();
     for (const side of ['Left', 'Right']) {
-      this.bones.get(`${side}UpLeg`)?.rotateX(1.45 * k);
-      this.bones.get(`${side}Leg`)?.rotateX(-1.5 * k);
-      this.bones.get(`${side}Foot`)?.rotateX(-0.1 * k);
+      const up = this.bones.get(`${side}UpLeg`);
+      const leg = this.bones.get(`${side}Leg`);
+      if (up) rotateWorld(up, axis, -(Math.PI / 2) * k); // thigh swings forward to horizontal
+      if (leg) rotateWorld(leg, axis, (Math.PI / 2) * k); // shin back down to vertical
     }
-    this.bones.get('Spine')?.rotateX(-0.08 * k);
   }
 
   /** Head position for cameras. */

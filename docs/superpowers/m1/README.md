@@ -11,7 +11,7 @@
 
 ## Bilinen eksikler (bilerek)
 
-- **Karakter geçici:** şu anki avatar three.js örneklerindeki "Soldier" modeli (zırhlı, cozy
+- **Karakter geçici:** şu anki avatar three.js örneklerindeki gri "Xbot" mankeni (cozy
   değil) — sadece yürüme/oturma sistemini göstermek için. Gerçekçi, ücretsiz ve girişsiz
   indirilebilen, animasyonlu bir insan modeli bulunamadı. Önerilen yol: **Mixamo**
   (ücretsiz Adobe girişi) — gündelik giyimli bir karakter seçip *Idle*, *Walking*,

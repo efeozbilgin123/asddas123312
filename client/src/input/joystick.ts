@@ -1,4 +1,4 @@
-import type { MoveInput } from '../avatar/controller';
+import type { MoveInput } from '@kahvehane/shared';
 
 /** Drag offset in pixels → movement vector (screen right = +x, screen down = +z). */
 export function joystickVector(dx: number, dy: number, radius: number, deadzone = 0.15): MoveInput {

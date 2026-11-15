@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { AssetBank, PbrSet } from './assets';
-import { PLACEMENTS, ROOM, WINDOW, type Placement } from './layout';
+import { PLACEMENTS, ROOM, WINDOW, type Placement } from '@kahvehane/shared';
 import type { QualityPreset } from './quality';
 
 function pbr(set: PbrSet | undefined, repeatX: number, repeatY: number, fallback: string): THREE.MeshStandardMaterial {

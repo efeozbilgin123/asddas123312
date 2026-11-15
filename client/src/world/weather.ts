@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ROOM, WINDOW } from './layout';
+import { ROOM, WINDOW } from '@kahvehane/shared';
 import type { QualityPreset } from './quality';
 
 export interface Weather {

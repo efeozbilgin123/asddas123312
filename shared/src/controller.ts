@@ -1,4 +1,4 @@
-import type { Box2 } from '../world/layout';
+import type { Box2 } from './layout';
 import { moveCircle } from './collision';
 
 export interface MoveInput { x: number; z: number; run: boolean }

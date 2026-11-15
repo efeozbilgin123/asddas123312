@@ -1,5 +1,5 @@
-import { moveCircle } from '../avatar/collision';
-import { CAT_EDGES, COLLIDERS, type CatSpot } from '../world/layout';
+import { moveCircle } from './collision';
+import { CAT_EDGES, COLLIDERS, type CatSpot } from './layout';
 
 export interface CatState {
   x: number;

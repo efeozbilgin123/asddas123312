@@ -1,4 +1,4 @@
-import type { Box2 } from '../world/layout';
+import type { Box2 } from './layout';
 
 export interface P2 { x: number; z: number }
 

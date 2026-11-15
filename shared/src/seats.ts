@@ -1,6 +1,6 @@
-import { resolveCircle } from '../avatar/collision';
-import { AVATAR_RADIUS, type AvatarState } from '../avatar/controller';
-import { seatApproach, type Box2, type Seat } from '../world/layout';
+import { resolveCircle } from './collision';
+import { AVATAR_RADIUS, type AvatarState } from './controller';
+import { seatApproach, type Box2, type Seat } from './layout';
 
 /**
  * Closest free seat within `radius`. Distance is to the seat itself; game chairs (which face a

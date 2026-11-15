@@ -1,4 +1,4 @@
-import type { MoveInput } from '../avatar/controller';
+import type { MoveInput } from '@kahvehane/shared';
 
 const KEYS = {
   forward: ['KeyW', 'ArrowUp'],

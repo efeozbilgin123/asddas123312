@@ -1,4 +1,4 @@
-import type { Box2 } from '../world/layout';
+import type { Box2 } from '@kahvehane/shared';
 
 export interface V3 { x: number; y: number; z: number }
 export interface RoomSize { width: number; depth: number; height: number }

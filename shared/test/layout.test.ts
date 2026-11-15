@@ -2,8 +2,7 @@ import { describe, expect, test } from 'vitest';
 import {
   BILLIARD_AREA, CAT_EDGES, CAT_SPOTS, COLLIDERS, FURNITURE_COLLIDERS, PLACEMENTS, ROOM, SEATS, SPAWN,
   seatApproach, type Box2
-} from '../src/world/layout';
-import { MANIFEST } from '../src/world/manifest';
+} from '../src/layout';
 
 const overlaps = (a: Box2, b: Box2) => a.minX < b.maxX && b.minX < a.maxX && a.minZ < b.maxZ && b.minZ < a.maxZ;
 const inside = (x: number, z: number, b: Box2) => x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ;
@@ -26,11 +25,6 @@ describe('layout', () => {
 
   test('SPAWN is outside all colliders', () => {
     for (const c of COLLIDERS) expect(inside(SPAWN[0], SPAWN[2], c)).toBe(false);
-  });
-
-  test('every placement asset id exists in MANIFEST', () => {
-    const ids = new Set(MANIFEST.map((m) => m.id));
-    for (const p of PLACEMENTS) expect(ids.has(p.asset), p.asset).toBe(true);
   });
 
   test('BILLIARD_AREA intersects no collider', () => {

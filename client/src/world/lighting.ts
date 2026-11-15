@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { AssetBank } from './assets';
 import { fireColor, flicker } from './flicker';
-import { PLACEMENTS, ROOM, WINDOW } from './layout';
+import { PLACEMENTS, ROOM, WINDOW } from '@kahvehane/shared';
 import type { QualityPreset } from './quality';
 
 export interface Lighting {

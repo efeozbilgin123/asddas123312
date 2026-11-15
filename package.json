@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "workspaces": [
+    "shared",
     "client"
   ],
   "engines": {
@@ -12,7 +13,7 @@
     "dev": "npm run dev -w client",
     "build": "npm run build -w client",
     "preview": "npm run preview -w client",
-    "test": "npm test -w client",
+    "test": "npm test --workspaces --if-present",
     "fetch-assets": "node scripts/fetch-polyhaven.mjs",
     "smoke": "node e2e/smoke.mjs"
   },

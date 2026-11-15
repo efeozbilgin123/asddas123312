@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
-import { resolveCircle } from '../src/avatar/collision';
-import { step, type AvatarState } from '../src/avatar/controller';
-import { box, WALL_COLLIDERS, type Box2 } from '../src/world/layout';
+import { resolveCircle } from '../src/collision';
+import { step, type AvatarState } from '../src/controller';
+import { box, WALL_COLLIDERS, type Box2 } from '../src/layout';
 
 const start = (x = 0, z = 0): AvatarState => ({ x, z, facing: 0, speed: 0, mode: 'walk', seatId: null });
 const run = (s: AvatarState, input: { x: number; z: number; run: boolean }, seconds: number, boxes: Box2[] = []) => {
@@ -60,7 +60,7 @@ describe('controller', () => {
   });
 });
 
-import { moveCircle } from '../src/avatar/collision';
+import { moveCircle } from '../src/collision';
 
 test('moveCircle stays put instead of ending wedged between two close boxes', () => {
   const a = box(0, 0, 0.5, 0.5); // maxZ 0.5

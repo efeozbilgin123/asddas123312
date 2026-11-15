@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { followCamera } from '../src/avatar/camera';
-import { ROOM } from '../src/world/layout';
+import { ROOM } from '@kahvehane/shared';
 
 test('followCamera stays inside room near a wall', () => {
   const target = { x: 0, y: 1.5, z: -ROOM.depth / 2 + 0.2 };

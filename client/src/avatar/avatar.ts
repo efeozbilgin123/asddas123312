@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { AvatarState } from './controller';
+import type { AvatarState } from '@kahvehane/shared';
 
 /** `sit`: a real seated clip (e.g. Mixamo "Sitting Idle"); without one a procedural pose is used. */
 export interface ClipMap { idle: string; walk: string; run?: string; sit?: string }

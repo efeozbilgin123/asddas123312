@@ -1,0 +1,8 @@
+{
+  "name": "@kahvehane/shared",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": { "test": "vitest run" }
+}

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { AssetBank } from '../world/assets';
-import type { CatState } from './brain';
+import type { CatState } from '@kahvehane/shared';
 
 const CLIP_PATTERNS: Record<CatState['action'], RegExp[]> = {
   walk: [/walk/i, /trot/i, /run/i],

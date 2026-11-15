@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
-import { nearestSeat, sitDown, standUp } from '../src/interact/seats';
-import type { AvatarState } from '../src/avatar/controller';
-import { COLLIDERS, SEATS, seatApproach, type Seat } from '../src/world/layout';
+import { nearestSeat, sitDown, standUp } from '../src/seats';
+import type { AvatarState } from '../src/controller';
+import { COLLIDERS, SEATS, seatApproach, type Seat } from '../src/layout';
 
 const seats: Seat[] = [
   { id: 'a', pos: [0, 0, 0], facingY: 0, kind: 'sofa' },

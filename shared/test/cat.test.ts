@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
-import { catStep, initialCat, type CatState } from '../src/cat/brain';
-import { CAT_EDGES, CAT_SPOTS, COLLIDERS } from '../src/world/layout';
+import { catStep, initialCat, type CatState } from '../src/cat-brain';
+import { CAT_EDGES, CAT_SPOTS, COLLIDERS } from '../src/layout';
 
 function seeded(seed: number): () => number {
   let s = seed;

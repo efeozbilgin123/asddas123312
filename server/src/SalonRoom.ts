@@ -23,6 +23,7 @@ interface Track {
 
 export class SalonRoom extends Room<{ state: SalonState }> {
   maxClients = MAX_PLAYERS;
+  autoDispose = false;
   private reconnectSeconds = 10;
   private readonly tracks = new Map<string, Track>();
   private cat: CatState = initialCat(CAT_SPOTS, Math.random);

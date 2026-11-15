@@ -19,4 +19,6 @@ app.use(express.static(clientDist));
 const httpServer = http.createServer(app);
 const gameServer = createGameServer({}, httpServer);
 await gameServer.listen(port);
+// One shared salon that always exists; clients only `join` it (a full salon must not spawn a second one).
+await matchMaker.createRoom(ROOM_NAME, {});
 console.log(`Kahvehane sunucusu: http://localhost:${port}`);

@@ -61,3 +61,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #120c08; col
   border: 1px solid var(--line); background: #2a1d14; color: var(--ink); }
 .chat__emotes { display: flex; gap: 4px; }
 .chat__emotes button { font-size: 18px; background: #2a1d14; border: 1px solid var(--line); border-radius: 8px; padding: 2px 6px; cursor: pointer; }
+.join__card h3 { margin: 4px 0 0; font-size: 13px; opacity: .75; font-weight: 600; }
+.join__avatars { display: flex; gap: 8px; flex-wrap: wrap; }
+.join__avatar { font: 600 14px system-ui, sans-serif; color: var(--ink); background: #2a1d14; border: 2px solid var(--line);
+  border-radius: 10px; padding: 8px 12px; cursor: pointer; }
+.join__avatar.on { border-color: var(--accent); background: #3a2716; }
+.join__upload { border-style: dashed; }
+.join__credit { margin: 0; font-size: 11px; opacity: .55; }

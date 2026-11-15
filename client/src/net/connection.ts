@@ -8,6 +8,7 @@ export interface RemotePlayer {
   id: string;
   name: string;
   look: string;
+  avatar: string;
   x: number;
   z: number;
   facing: number;
@@ -42,6 +43,11 @@ export type ConnectError = { error: 'full' | 'name' | 'offline' };
 
 interface JoinableClient {
   join(name: string, options: object): Promise<unknown>;
+}
+
+/** HTTP(S) base of the game server (for avatar uploads/downloads). */
+export function serverHttpUrl(): string {
+  return defaultServerUrl().replace(/^ws/, 'http');
 }
 
 /** The server URL: ?server=… or the page's own origin. */
@@ -102,7 +108,7 @@ function wrap(room: SdkRoom): Session {
     players() {
       const out = new Map<string, RemotePlayer>();
       room.state.players?.forEach((p, id) =>
-        out.set(id, { id, name: p.name, look: p.look, x: p.x, z: p.z, facing: p.facing, speed: p.speed, seatId: p.seatId, away: p.away })
+        out.set(id, { id, name: p.name, look: p.look, avatar: p.avatar ?? 'mannequin', x: p.x, z: p.z, facing: p.facing, speed: p.speed, seatId: p.seatId, away: p.away })
       );
       return out;
     },
@@ -125,12 +131,12 @@ function wrap(room: SdkRoom): Session {
 }
 
 export async function connect(
-  opts: { url: string; name: string; look: string; timeoutMs?: number },
+  opts: { url: string; name: string; look: string; avatar?: string; timeoutMs?: number },
   deps: { client?: JoinableClient } = {}
 ): Promise<Session | ConnectError> {
   const client: JoinableClient = deps.client ?? (new Client(opts.url) as unknown as JoinableClient);
   const timeout = new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), opts.timeoutMs ?? 4000));
-  const joining = client.join(ROOM_NAME, { name: opts.name, look: opts.look });
+  const joining = client.join(ROOM_NAME, { name: opts.name, look: opts.look, avatar: opts.avatar ?? 'mannequin' });
   try {
     const result = await Promise.race([joining, timeout]);
     if (result === 'timeout') {

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { AvatarView } from './avatar/avatar';
+import type { AvatarLike } from './avatar/avatar';
+import { AvatarLibrary } from './avatar/library';
 import { followCamera } from './avatar/camera';
 import { step, type AvatarState } from '@kahvehane/shared';
 import { initialCat, catStep, type CatState } from '@kahvehane/shared';
@@ -11,7 +11,7 @@ import { nearestSeat, sitDown, standUp } from '@kahvehane/shared';
 import { Hud, readSetting, type CharacterId } from './ui/hud';
 import { loadAll, type AssetBank } from './world/assets';
 import { CAT_SPOTS, COLLIDERS, LOOKS, ROOM, SEAT_POSE, SEATS, SPAWN } from '@kahvehane/shared';
-import { connect, defaultServerUrl, offlineSession, type Session } from './net/connection';
+import { connect, defaultServerUrl, offlineSession, serverHttpUrl, type Session } from './net/connection';
 import { RemotePlayers, textSprite } from './net/remote';
 import { ChatPanel } from './ui/chat';
 import { EMOTES } from '@kahvehane/shared';
@@ -79,25 +79,30 @@ const snow = createSnow(quality);
 scene.add(snow.object);
 
 // ---------- avatars ----------
-const lookColor = (id: string) => LOOKS.find((l) => l.id === id)?.color;
-function makeAvatar(look: string): AvatarView | null {
-  const model = bank.models.get(`char-${character}`);
-  if (!model) return null;
-  return new AvatarView(scene, SkeletonUtils.clone(model), model.animations, { idle: 'idle', walk: 'walk', run: 'run' }, { tint: lookColor(look) });
-}
+const library = new AvatarLibrary(scene, bank.models.get(`char-${character}`), serverHttpUrl());
 
 let avatar: AvatarState = { x: SPAWN[0], z: SPAWN[2], facing: Math.PI, speed: 0, mode: 'walk', seatId: null };
-let avatarView: AvatarView | null = null;
+let avatarView: AvatarLike | null = null;
 let myLook: string = LOOKS[0].id;
+let myAvatar = 'mannequin';
+let spawnToken = 0;
 let corrections = 0;
 function spawnAvatar(): void {
+  const token = ++spawnToken;
   if (avatarView) scene.remove(avatarView.root);
-  avatarView = makeAvatar(myLook);
+  avatarView = library.mannequinView(myLook);
+  if (myAvatar === 'mannequin') return;
+  void library.vrmView(myAvatar).then((v) => {
+    if (!v) return hud.toast('Avatar yüklenemedi, manken kullanılıyor');
+    if (token !== spawnToken) return void scene.remove(v.root);
+    if (avatarView) scene.remove(avatarView.root);
+    avatarView = v;
+  });
 }
 
 // ---------- session ----------
 let session: Session = offlineSession();
-const remotes = new RemotePlayers(scene, makeAvatar);
+const remotes = new RemotePlayers(scene, { mannequin: (look) => library.mannequinView(look), vrm: (id) => library.vrmView(id) });
 
 function occupied(): Set<string> {
   return remotes.occupiedSeats(session);
@@ -118,12 +123,13 @@ function toggleSit(): void {
 
 async function joinSalon(): Promise<void> {
   const auto = params.get('name');
-  let choice: JoinChoice | null = auto ? { name: auto, look: params.get('look') ?? LOOKS[0].id } : null;
+  let choice: JoinChoice | null = auto ? { name: auto, look: params.get('look') ?? LOOKS[0].id, avatar: params.get('avatar') ?? 'mannequin' } : null;
   let message = '';
   for (;;) {
-    if (!choice) choice = await showJoin(hudRoot, message);
+    if (!choice) choice = await showJoin(hudRoot, message, serverHttpUrl());
     myLook = choice.look;
-    const result = await connect({ url: defaultServerUrl(), name: choice.name, look: choice.look });
+    myAvatar = choice.avatar;
+    const result = await connect({ url: defaultServerUrl(), name: choice.name, look: choice.look, avatar: choice.avatar });
     if ('error' in result) {
       if (result.error === 'offline') break;
       message = result.error === 'full' ? 'Salon dolu (15/15). Biraz sonra tekrar dene.' : 'Bir isim yaz';
@@ -132,7 +138,10 @@ async function joinSalon(): Promise<void> {
     }
     session = result;
     const me = session.players().get(session.selfId);
-    if (me) avatar = { ...avatar, x: me.x, z: me.z, facing: me.facing };
+    if (me) {
+      avatar = { ...avatar, x: me.x, z: me.z, facing: me.facing };
+      myAvatar = me.avatar; // the server may have replaced an unknown upload with the mannequin
+    }
     session.onCorrect((p) => {
       corrections += 1;
       avatar = { ...avatar, x: p.x, z: p.z };

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { SEAT_POSE, SEATS, type AvatarState } from '@kahvehane/shared';
-import type { AvatarView } from '../avatar/avatar';
+import type { AvatarLike } from '../avatar/avatar';
 import type { RemotePlayer, Session } from './connection';
 import { SnapshotBuffer } from './interpolation';
 
@@ -35,7 +35,7 @@ export function textSprite(text: string, opts: { height?: number; bg?: string; f
 }
 
 interface Entry {
-  view: AvatarView;
+  view: AvatarLike;
   buffer: SnapshotBuffer;
   tag: THREE.Sprite;
   tagText: string;
@@ -49,7 +49,7 @@ export class RemotePlayers {
 
   constructor(
     private readonly scene: THREE.Scene,
-    private readonly makeAvatar: (look: string) => AvatarView | null
+    private readonly avatars: { mannequin(look: string): AvatarLike | null; vrm(id: string): Promise<AvatarLike | null> }
   ) {}
 
   /** Ids that currently occupy a seat (other players only). */
@@ -68,11 +68,20 @@ export class RemotePlayers {
       if (p.id === session.selfId) continue;
       let e = this.entries.get(p.id);
       if (!e) {
-        const view = this.makeAvatar(p.look);
+        const view = this.avatars.mannequin(p.look); // shown until the VRM (if any) is ready
         if (!view) continue;
-        e = { view, buffer: new SnapshotBuffer(), tag: this.tag(p), tagText: tagText(p), bubble: null, last: '' };
+        const entry: Entry = { view, buffer: new SnapshotBuffer(), tag: this.tag(p), tagText: tagText(p), bubble: null, last: '' };
+        e = entry;
         this.scene.add(e.tag);
         this.entries.set(p.id, e);
+        if (p.avatar !== 'mannequin') {
+          void this.avatars.vrm(p.avatar).then((v) => {
+            if (!v) return; // load failed: keep the mannequin
+            if (this.entries.get(p.id) !== entry) return void this.scene.remove(v.root);
+            this.scene.remove(entry.view.root);
+            entry.view = v;
+          });
+        }
       }
       const key = `${p.x.toFixed(3)},${p.z.toFixed(3)},${p.facing.toFixed(3)},${p.speed.toFixed(2)}`;
       if (key !== e.last) {

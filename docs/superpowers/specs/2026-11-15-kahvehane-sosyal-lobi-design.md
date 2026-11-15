@@ -1,6 +1,6 @@
 # Kahvehane — Sosyal Lobi (Sıfırdan Yeniden Yazım) Tasarımı
 
-Tarih: 2026-11-15 · Durum: onaya sunuldu
+Tarih: 2026-11-15 · Durum: onaylandı (2026-11-15)
 
 ## 1. Niyet ve neden
 
@@ -284,7 +284,11 @@ geçmişinde ve `main`'de durur). Eski projeden yalnızca `public/assets/` dokul
 - Playwright ile duman testi: giriş, yürüme, oturma, bir eli botlarla bitirme, TV linki açma.
 - Telefon görünümünde performans kontrolü (hedef ≥ 30 FPS orta kalite).
 
-## 12. Açık karar: ekran paylaşımı nerede barınacak?
+## 12. Ekran paylaşımı barındırma
+
+Sahibinin zaten bir Oracle Cloud hesabı var; (a) en olası yol. Kesin karar 7. kilometre
+taşına (TV + müzik) ertelendi — o zamana kadar hiçbir şey buna bağlı değil.
+
 
 - **(a) Oracle Cloud "Always Free" sanal sunucu (önerilen):** kalıcı ücretsiz; LiveKit
   sunucusu + oyun sunucusu aynı makinede, uyku yok, oyunlar silinmez, kota yok. Sahibinin

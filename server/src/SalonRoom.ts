@@ -48,6 +48,10 @@ export class SalonRoom extends Room<{ state: SalonState }> {
     this.onMessage('stand', (client) => this.onStand(client));
     this.onMessage('chat', (client, msg: ChatMsg) => this.onChat(client, msg));
     this.onMessage('emote', (client, msg: EmoteMsg) => this.onEmote(client, msg));
+    this.onMessage('avatar', (client, msg: { id?: unknown }) => {
+      const p = this.state.players.get(client.sessionId);
+      if (p) p.avatar = sanitizeAvatar(msg?.id, this.avatarExists);
+    });
   }
 
   onJoin(client: Client, options: Partial<JoinOptions> = {}): void {

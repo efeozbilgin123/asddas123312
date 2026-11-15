@@ -7,11 +7,11 @@ import { AvatarView, type AvatarLike } from './avatar';
 import { retargetClip } from './retarget';
 import { VrmAvatarView, type VrmClips } from './vrmAvatar';
 
-export const AVATAR_LABELS: Record<string, string> = { twist: 'Aiko', seed: 'Seed-san', mannequin: 'Manken' };
+export const AVATAR_LABELS: Record<string, string> = { twist: 'Aiko', mannequin: 'Manken' };
 
 /** Where an avatar id's file lives: bundled assets, or uploads on the game server. */
 export function avatarUrl(id: string, serverHttp: string): string | null {
-  if (id === 'twist' || id === 'seed') return `./assets/models/avatars/${id}.vrm`;
+  if (id === 'twist') return `./assets/models/avatars/${id}.vrm`;
   const m = /^custom:([0-9a-f]{64})$/.exec(id);
   return m ? `${serverHttp}/avatars/${m[1]}.vrm` : null;
 }

@@ -232,10 +232,10 @@ describe('SalonRoom', () => {
 
 test('join keeps a builtin avatar and replaces an unknown upload with the mannequin', async () => {
   const room = await colyseus.createRoom<SalonRoom>('salon', {});
-  const a = await colyseus.connectTo(room, { name: 'Ayşe', look: 'kum', avatar: 'seed' });
+  const a = await colyseus.connectTo(room, { name: 'Ayşe', look: 'kum', avatar: 'twist' });
   const b = await colyseus.connectTo(room, { name: 'Mehmet', look: 'kum', avatar: `custom:${'c'.repeat(64)}` });
   await room.waitForNextPatch();
-  expect(room.state.players.get(a.sessionId)!.avatar).toBe('seed');
+  expect(room.state.players.get(a.sessionId)!.avatar).toBe('twist');
   expect(room.state.players.get(b.sessionId)!.avatar).toBe('mannequin');
 });
 
@@ -244,4 +244,19 @@ test('join keeps an uploaded avatar the server has (options reach the room)', as
   const a = await colyseus.connectTo(room, { name: 'Ayşe', look: 'kum', avatar: `custom:${'e'.repeat(64)}` });
   await room.waitForNextPatch();
   expect(room.state.players.get(a.sessionId)!.avatar).toBe(`custom:${'e'.repeat(64)}`);
+});
+
+test('a player can change avatar in the lobby; unknown uploads fall back to the mannequin', async () => {
+  const room = await colyseus.createRoom<SalonRoom>('salon', {});
+  const a = await colyseus.connectTo(room, { name: 'Ayşe', look: 'kum', avatar: 'twist' });
+  await room.waitForNextPatch();
+  a.send('avatar', { id: 'mannequin' });
+  await room.waitForMessage('avatar');
+  expect(room.state.players.get(a.sessionId)!.avatar).toBe('mannequin');
+  a.send('avatar', { id: `custom:${'e'.repeat(64)}` });
+  await room.waitForMessage('avatar');
+  expect(room.state.players.get(a.sessionId)!.avatar).toBe(`custom:${'e'.repeat(64)}`);
+  a.send('avatar', { id: `custom:${'f'.repeat(64)}` });
+  await room.waitForMessage('avatar');
+  expect(room.state.players.get(a.sessionId)!.avatar).toBe('mannequin');
 });

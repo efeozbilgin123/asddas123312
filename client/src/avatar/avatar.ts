@@ -5,7 +5,7 @@ import type { AvatarState } from '@kahvehane/shared';
 export interface ClipMap { idle: string; walk: string; run?: string; sit?: string }
 
 const HEIGHT = 1.72;
-const DEFAULT_SEAT = { height: 0.47, forward: 0 };
+export const DEFAULT_SEAT = { height: 0.47, forward: 0 };
 
 export interface AvatarOptions {
   /** Rotate the model 180° (Mixamo exports differ: some face +z, some −z). */
@@ -19,7 +19,7 @@ const _qp = new THREE.Quaternion();
 const _axis = new THREE.Vector3();
 
 /** Rotates a bone by `angle` about a world-space axis (rig-independent posing). */
-function rotateWorld(bone: THREE.Object3D, axis: THREE.Vector3, angle: number): void {
+export function rotateWorld(bone: THREE.Object3D, axis: THREE.Vector3, angle: number): void {
   if (!bone.parent) return;
   bone.parent.getWorldQuaternion(_qp);
   _q.setFromAxisAngle(axis, angle);
@@ -33,7 +33,13 @@ function rotateWorld(bone: THREE.Object3D, axis: THREE.Vector3, angle: number): 
  * A rigged character driven by AvatarState. Clips may come from another model with the same
  * (Mixamo) skeleton. Sitting is a procedural pose layered over the idle clip.
  */
-export class AvatarView {
+/** What every avatar view offers (mannequin or VRM). */
+export interface AvatarLike {
+  readonly root: THREE.Group;
+  update(s: AvatarState, dt: number, seat?: { height: number; forward: number }): void;
+}
+
+export class AvatarView implements AvatarLike {
   readonly root = new THREE.Group();
   private readonly model: THREE.Object3D;
   private readonly mixer: THREE.AnimationMixer;

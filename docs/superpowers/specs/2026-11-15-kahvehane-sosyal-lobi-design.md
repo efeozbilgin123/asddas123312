@@ -1,6 +1,6 @@
 # Kahvehane — Sosyal Lobi (Sıfırdan Yeniden Yazım) Tasarımı
 
-Tarih: 2026-11-15 · Durum: taslak, onay bekliyor
+Tarih: 2026-11-15 · Durum: onaya sunuldu
 
 ## 1. Niyet ve neden
 
@@ -28,9 +28,10 @@ Kod sıfırdan yazılır; eski koddan dosya kopyalanmaz. Oyun kurallarının **m
    seç, gir.
 3. **Avatarlar:** herkes salonda serbest dolaşır; masaya, kanepeye, soba başına
    oturabilir.
-4. **Dört oyun, ilk günden eksiksiz:** 101 Okey, Batak, Pişti, Papaz Kaçtı. Her biri:
-   tam kurallar, iyi bot, gerçek kayıt sesleri, masada 3D kart/taş animasyonu, el sonu
-   skor ekranı. Boş koltuklara bot oturur.
+4. **Dört oyun, ilk günden eksiksiz:** 101 Okey, Batak, Pişti, **Bilardo**. Her biri:
+   tam kurallar, iyi bot, gerçek kayıt sesleri, 3D animasyon, el/maç sonu skor ekranı.
+   Kart/taş masalarında boş koltuklara bot oturur. **Kurallar masa sahibince seçilir**
+   (bkz. §8.4 "Masa ayarları").
 5. **TV:** (a) desteklenen linkler için herkeste senkron oynatma — YouTube, Twitch,
    Kick, doğrudan `.m3u8`/`.mp4`; durdur/ileri sar herkese yansır. (b) Diğer her şey
    için **ekran paylaşımı**: bir kişi tarayıcı sekmesini TV'ye yansıtır.
@@ -43,7 +44,7 @@ Kod sıfırdan yazılır; eski koddan dosya kopyalanmaz. Oyun kurallarının **m
 
 - Satranç, UNO-benzeri, Tabu-benzeri vb. yeni oyunlar → sonraki sürümler (mimari
   yeni oyun eklemeyi kolaylaştırmalı). UNO/Tabu marka adıyla değil, kendi adımızla.
-- Poker, bilardo, tavla → ilk sürümde yok.
+- Papaz Kaçtı, poker, tavla → ilk sürümde yok (Papaz Kaçtı sahibinin isteğiyle Bilardo ile değiştirildi).
 - Hesap sistemi, kalıcı istatistik, herkese açık lobi/eşleştirme, birden çok oda.
 - Sipariş menüsü, kedi sevme gibi mini etkileşimler → ilk sürümde zorunlu değil (bkz. §9).
 
@@ -61,8 +62,11 @@ Kod sıfırdan yazılır; eski koddan dosya kopyalanmaz. Oyun kurallarının **m
   (hedef: ilk görüntü < ~10 MB, geri kalan arka planda).
 - Telefonlarda (orta seviye Android/iPhone) akıcı çalışmalı → kalite ayarı
   (gölge/çözünürlük düşürme) gerekir.
-- Barındırma: tek Node sunucusu (Render, eski projeyle aynı). Medya için LiveKit
-  (Cloud ücretsiz katmanı veya kendi sunucumuz).
+- **Her şey ücretsiz olmalı.** Barındırma: tek Node sunucusu, Render ücretsiz plan.
+  Bu plan ~15 dk kimse bağlı değilken uyur ve yeniden başlarken bellek silinir; bağlı
+  oyuncu varken WebSocket trafiği sunucuyu uyanık tutar. Kabul: salon boşaldıktan sonra
+  açık oyunlar/yazboz sıfırlanabilir. Medya: LiveKit Cloud ücretsiz katmanı.
+  Gürültü engelleme: RNNoise (WASM, ücretsiz) — Krisp ücretli olabileceği için.
 - Birçok site iframe içinde açılmayı engeller; DRM'li içerik (Netflix vb.) ekran
   paylaşımında siyah görünür. Bu bilinen ve kabul edilmiş bir sınırdır.
 - Varlık lisansları: yalnızca CC0 / CC-BY (atıf listesi tutulur).
@@ -89,7 +93,11 @@ Sahibi 1'i seçti. Neden: TV/link özelliği ve telefon desteği kilit; 2 bunlar
 - **Eski 3D modeller:** kullanılmaz.
 - **101 Okey kuralları:** eski projenin **güncel** halindeki kurallar; **12-13-1 seri
   dönüşü yok** (seriler 13'te biter).
-- **Oyunlar (ilk sürüm):** Batak, 101 Okey, Pişti, Papaz Kaçtı.
+- **Oyunlar (ilk sürüm):** Batak, 101 Okey, Pişti, Bilardo ("çok önemli"; Papaz Kaçtı'nın yerine).
+- **Batak:** ihaleli, eşli oynanıyor; koz kırılmadan koz açılamaz; en düşük ihale 3 mü 4 mü
+  hatırlanmıyor → masa ayarı.
+- **Oyun kuralları masa sahibince belirlenir** (masaya ilk oturan kişi ayarları seçer).
+- **Bütçe:** her şey ücretsiz.
 - **TV:** yol 3 — senkron link + ekran paylaşımı.
 - **Sesli sohbet:** eklensin, Krisp benzeri gürültü engelleme ile.
 - **Kişi sayısı:** 10–15, sahibi ve arkadaşları.
@@ -147,26 +155,52 @@ cezası; Katlamalı 101 seçeneği; tekli/eşli; el sonu puanlama (açmayan 202,
 açan ×2, okeyle bitiş ×2 vb.); yazboz (çok elli skor tablosu). Istaka üzerinde
 sürükle-bırak, otomatik dizme (seri/çift), canlı "açabilir misin" göstergesi.
 
-**Batak:** 4 kişi, 52 kart, el başına 13 kart. **İhaleli batak** (benim önerim; eski
-sürümde koz sabit maça ve basit tahmin vardı): ihale (en yüksek söyleyen kozu seçer),
-zorunlu renk/koz çakma/yükseltme kuralları, ihaleyi tutturamayan batar, skor tablosu.
-Tekli veya eşli seçeneği.
+**Batak (ihaleli, eşli varsayılan):** 4 kişi, 52 kart, 13'er kart. İhale turu: sırayla
+artırılır veya pas; en yüksek ihaleyi alan kozu seçer ve ilk kartı açar. Renk uymak
+zorunlu; uyulamıyorsa koz çakmak zorunlu; mümkünse yükseltmek zorunlu; koz kırılmadan
+koz ile açılamaz. Eşlide ihale takım hedefidir: tutturan takım aldığı el sayısı kadar
+(ihale × 10 değil, el başına 10 puan — kurucu yaygın kuralı seçer, masa ayarı ile
+değiştirilebilir) puan alır; tutturamayan takım ihale × 10 puan kaybeder (batar);
+karşı takım aldığı el kadar puan alır. Maç hedef puana ulaşınca biter.
 
-**Pişti:** 2 veya 4 kişi, standart kurallar: yerdeki kartla aynı değer ya da vale ile
+**Pişti:** 2 kişi, 4 kişi eşli veya 4 kişi tekli (masa ayarı), standart kurallar: yerdeki kartla aynı değer ya da vale ile
 alma; pişti 10 puan, vale ile pişti 20; as/vale 1, ♣2 = 2, ♦10 = 3; en çok kart +3;
 hedef skor (ör. 151) ile çok elli maç.
 
-**Papaz Kaçtı:** 2–4 kişi, bir papaz çıkarılmış deste (♠K tek kalır); çiftler atılır;
-sırayla soldakinden kapalı kart çekilir; sonunda papaz kimde kalırsa kaybeder. Kart
-seçerken karşı tarafın kartları 3D'de yelpaze olarak görünür.
+**Bilardo (8 top / Amerikan, benim kararım — eski projede de bu vardı):** ayrı, gerçekçi
+bilardo masası (masa modeli + istaka + toplar). 2 oyuncu (veya 2v2 sırayla). Kurallar:
+kırış, düz/çizgili grup belirleme, faul (beyaz top cebe, yanlış gruba ilk temas, hiçbir
+banda değmeme) → rakibe top elde, 8'i erken sokan kaybeder, cep söyleme (masa ayarı).
+Fizik sunucuda deterministik simülasyon; istemciler atış sonucunu oynatır (herkes aynı
+sonucu görür). Nişan: masaüstünde fare ile yön + güç çubuğu, telefonda sürükle-bırak;
+falso (spin) ayarı. Bot rakip (bilardoda boş koltuğa otomatik değil, isteğe bağlı).
+İzleyiciler masanın etrafında durup izleyebilir. Türk usulü 3 top (karambol) sonraki
+sürüm adayı.
 
 Her oyun için: bot (makul seviyede, "aptal" değil), gerçek ses, 3D kart/taş
 hareket animasyonları, oyun sonu ekranı, izleyici modu (masaya oturmadan bakma).
+
+**Masalar (benim kararım):** 4 kart/taş masası + 1 bilardo masası. Kart/taş masaları
+her oyunu barındırır; masaya ilk oturan (masa sahibi) oyunu seçer, masaya ıstaka/taş
+veya kart seti gelir. Aynı anda iki okey masası olabilir.
+
+**Masa ayarları (masa sahibi seçer, oyun başlamadan):**
+- 101 Okey: tekli/eşli, Katlamalı açık/kapalı, işlek cezası açık/kapalı, el sayısı.
+- Batak: eşli/tekli, en düşük ihale (3/4 vb.), hedef puan, puanlama varyantı.
+- Pişti: 2 kişi / 4 kişi eşli / 4 kişi tekli, hedef puan.
+- Bilardo: cep söyleme açık/kapalı, tekli/2v2.
+Sahip masadan kalkarsa sahiplik sıradaki oturan kişiye geçer.
 
 ### 8.5 TV ve müzik
 
 - TV'nin kumandası paylaşımlı: herkes link açabilir, durdurabilir (basit, arkadaş
   grubu). Son işlem kimin yaptığı ekranda kısa not olarak görünür.
+- Görüntü (benim kararım): YouTube/Twitch resmî gömülü oynatıcıları 3D TV'nin
+  tam üstüne yerleştirilir (CSS3D katmanı + WebGL'de "delik" tekniği, böylece önüne
+  geçen nesneler doğru örter). Ses seviyesi oynatıcıların kendi API'si ile mesafeye
+  göre ayarlanır. Doğrudan `.mp4`/`.m3u8` ve ekran paylaşımı gerçek doku olarak
+  TV'ye basılır. Telefonda TV'ye dokununca büyük izleme ekranı açılır. Kick'in resmi
+  oynatıcı API'si olmadığı için Kick → ekran paylaşımı ile izlenir.
 - Senkron oynatma: sunucu `{url, kaynak, oynuyor mu, konum, zaman damgası}` tutar;
   istemciler bu duruma göre kendi oynatıcılarını hizalar.
 - Ekran paylaşımı: LiveKit üzerinden; paylaşan kişi sekmesini seçer, görüntü + ses
@@ -179,8 +213,10 @@ hareket animasyonları, oyun sonu ekranı, izleyici modu (masaya oturmadan bakma
 
 - LiveKit ses odası; mikrofon varsayılan kapalı, "Bas-konuş" veya açık mikrofon.
 - Mesafeye göre ses seviyesi (aynı masadakiler net, uzaktakiler kısık/duyulmaz).
-- Gürültü engelleme: LiveKit Cloud'un Krisp filtresi (plan izin veriyorsa), değilse
-  tarayıcı içi RNNoise (WASM).
+- Gürültü engelleme: tarayıcı içi RNNoise (WASM) — ücretsiz; Krisp ücretli plan gerektirebilir.
+- Risk: LiveKit Cloud ücretsiz kotası 15 kişilik uzun ekran paylaşımına yetmezse,
+  kurucu kota aşımında ekran paylaşımını kalite düşürerek sürdürmenin yolunu arar ve
+  sahibine bildirir (ücretli plan seçeneği kullanılmaz).
 
 ### 8.7 Sesler
 
@@ -203,6 +239,7 @@ hareket animasyonları, oyun sonu ekranı, izleyici modu (masaya oturmadan bakma
 - Karakter modelinin kaynağı; gerçekçi insan modelleri tuhaf görünürse sahibine iki
   seçenek gösterilir.
 - Sipariş menüsü, kedi sevme gibi küçük etkileşimler: zaman kalırsa.
+- Batak puanlama ayrıntısı (en yaygın kural varsayılan; masa ayarı ile değiştirilebilir).
 
 ## 10. Test ve doğrulama
 

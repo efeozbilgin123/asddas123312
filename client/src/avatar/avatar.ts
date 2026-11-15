@@ -1,0 +1,110 @@
+import * as THREE from 'three';
+import type { AvatarState } from './controller';
+
+/** `sit`: a real seated clip (e.g. Mixamo "Sitting Idle"); without one a procedural pose is used. */
+export interface ClipMap { idle: string; walk: string; run?: string; sit?: string }
+
+const HEIGHT = 1.72;
+const SIT_DROP = 0.47; // hips go from standing height to seat height
+const SIT_BACK = 0.12;
+
+/**
+ * A rigged character driven by AvatarState. Clips may come from another model with the same
+ * (Mixamo) skeleton. Sitting is a procedural pose layered over the idle clip.
+ */
+export class AvatarView {
+  readonly root = new THREE.Group();
+  private readonly model: THREE.Object3D;
+  private readonly mixer: THREE.AnimationMixer;
+  private readonly actions: Partial<Record<'idle' | 'walk' | 'run' | 'sit', THREE.AnimationAction>> = {};
+  private current: THREE.AnimationAction | null = null;
+  private readonly bones = new Map<string, THREE.Bone>();
+  private sitBlend = 0;
+
+  constructor(scene: THREE.Scene, model: THREE.Object3D, clips: THREE.AnimationClip[], map: ClipMap) {
+    this.model = model;
+    const box = new THREE.Box3().setFromObject(model);
+    const h = box.max.y - box.min.y || 1;
+    model.scale.multiplyScalar(HEIGHT / h);
+    model.position.y -= box.min.y * (HEIGHT / h); // feet on the floor
+    model.rotation.y = Math.PI; // Mixamo exports face −z; our yaw convention looks along +z
+    model.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) {
+        m.castShadow = true;
+        m.receiveShadow = true;
+        m.frustumCulled = false; // skinned bounds don't follow the animation
+      }
+      const b = o as THREE.Bone;
+      if (b.isBone) this.bones.set(b.name.replace(/^mixamorig:?/, ''), b);
+    });
+    this.root.add(model);
+    scene.add(this.root);
+    this.mixer = new THREE.AnimationMixer(model);
+    for (const key of ['idle', 'walk', 'run', 'sit'] as const) {
+      const name = map[key];
+      const clip = name ? THREE.AnimationClip.findByName(clips, name) : undefined;
+      if (clip) this.actions[key] = this.mixer.clipAction(stripRootMotion(clip));
+    }
+  }
+
+  private play(key: 'idle' | 'walk' | 'run' | 'sit', timeScale = 1): void {
+    const next = this.actions[key] ?? this.actions.idle;
+    if (!next) return;
+    next.timeScale = timeScale;
+    if (next === this.current) return;
+    next.reset().fadeIn(0.25).play();
+    this.current?.fadeOut(0.25);
+    this.current = next;
+  }
+
+  update(s: AvatarState, dt: number): void {
+    const sitting = s.mode === 'sit';
+    const sitClip = sitting && this.actions.sit !== undefined;
+    if (sitClip) this.play('sit');
+    else if (sitting || s.speed < 0.15) this.play('idle');
+    else if (s.speed > 2.2 && this.actions.run) this.play('run', s.speed / 3.2);
+    else this.play('walk', Math.max(0.5, s.speed / 1.6));
+    this.mixer.update(dt);
+
+    this.sitBlend = THREE.MathUtils.damp(this.sitBlend, sitting ? 1 : 0, 10, dt);
+    const k = this.sitBlend;
+    this.root.position.set(s.x - Math.sin(s.facing) * SIT_BACK * k, -SIT_DROP * k, s.z - Math.cos(s.facing) * SIT_BACK * k);
+    this.root.rotation.y = s.facing;
+    if (k > 0.001 && !this.actions.sit) this.applySitPose(k);
+  }
+
+  /** Bends hips and knees ~90° (after the mixer has written the idle pose). */
+  private applySitPose(k: number): void {
+    for (const side of ['Left', 'Right']) {
+      this.bones.get(`${side}UpLeg`)?.rotateX(1.45 * k);
+      this.bones.get(`${side}Leg`)?.rotateX(-1.5 * k);
+      this.bones.get(`${side}Foot`)?.rotateX(-0.1 * k);
+    }
+    this.bones.get('Spine')?.rotateX(-0.08 * k);
+  }
+
+  /** Head position for cameras. */
+  headPosition(out = new THREE.Vector3()): THREE.Vector3 {
+    const head = this.bones.get('Head');
+    if (head) return head.getWorldPosition(out);
+    return out.set(this.root.position.x, 1.6, this.root.position.z);
+  }
+}
+
+/** Drops horizontal hips translation so clips play in place (the controller moves the root). */
+function stripRootMotion(clip: THREE.AnimationClip): THREE.AnimationClip {
+  const c = clip.clone();
+  for (const track of c.tracks) {
+    if (/Hips\.position$/.test(track.name)) {
+      const v = track.values;
+      const x0 = v[0]!;
+      const z0 = v[2]!;
+      for (let i = 0; i < v.length; i += 3) {
+        v[i] = x0;
+        v[i + 2] = z0;
+      }
+    }
+  }
+  return c;
+}

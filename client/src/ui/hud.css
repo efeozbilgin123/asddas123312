@@ -1,0 +1,31 @@
+:root { --ink: #f3e6d3; --panel: #1d140ee6; --line: #4a3426; --accent: #d9822b; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #120c08; color: var(--ink);
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-user-select: none; user-select: none; }
+#scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+.loading { position: fixed; inset: 0; display: grid; place-items: center; background: #120c08; z-index: 10;
+  transition: opacity .6s; }
+.loading.done { opacity: 0; pointer-events: none; }
+.loading__text { font-size: 18px; letter-spacing: .3px; }
+.loading__bar { width: 220px; height: 4px; background: #3a2a1e; border-radius: 2px; margin-top: 12px; overflow: hidden; }
+.loading__fill { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+.hud-btn { position: fixed; z-index: 5; font: 600 16px system-ui, sans-serif; color: #1a0f06; background: var(--accent);
+  border: 0; border-radius: 999px; padding: 12px 22px; box-shadow: 0 4px 14px #0008; cursor: pointer; }
+.hud-btn:active { transform: translateY(1px); }
+.sit-btn { right: max(18px, env(safe-area-inset-right)); bottom: max(22px, env(safe-area-inset-bottom)); }
+.gear { top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); background: var(--panel);
+  color: var(--ink); border: 1px solid var(--line); padding: 8px 14px; font-size: 14px; }
+.menu { position: fixed; z-index: 6; top: 56px; right: 12px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; padding: 12px 14px; font-size: 14px; min-width: 220px; }
+.menu h3 { margin: 0 0 8px; font-size: 13px; opacity: .75; font-weight: 600; }
+.menu .seg { display: flex; gap: 6px; margin-bottom: 12px; }
+.menu .seg button { flex: 1; font: 600 13px system-ui; color: var(--ink); background: #2a1d14; border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 8px; cursor: pointer; }
+.menu .seg button.on { background: var(--accent); color: #1a0f06; border-color: #f0a050; }
+.hint { position: fixed; z-index: 4; left: 50%; transform: translateX(-50%); top: max(14px, env(safe-area-inset-top));
+  background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 8px 16px; font-size: 14px;
+  transition: opacity .8s; white-space: nowrap; pointer-events: none; }
+.hint.gone { opacity: 0; }
+.joystick { position: fixed; z-index: 5; left: max(24px, env(safe-area-inset-left)); bottom: max(24px, env(safe-area-inset-bottom));
+  width: 120px; height: 120px; border-radius: 50%; background: #0005; border: 2px solid #fff3; touch-action: none; }
+.joystick__knob { position: absolute; left: 35px; top: 35px; width: 50px; height: 50px; border-radius: 50%;
+  background: #f3e6d3cc; pointer-events: none; }

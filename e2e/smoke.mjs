@@ -21,10 +21,20 @@ function check(name, ok, detail = '') {
   if (!ok) failures += 1;
 }
 
+// detached → own process group, so killing it also stops vite (not just npx)
 const server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], {
   cwd: path.join(root, 'client'),
-  stdio: 'ignore'
+  stdio: 'ignore',
+  detached: true
 });
+const stopServer = () => {
+  try {
+    process.kill(-server.pid, 'SIGTERM');
+  } catch {
+    /* already gone */
+  }
+};
+process.on('exit', stopServer);
 await new Promise((r) => setTimeout(r, 2500));
 
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
@@ -126,7 +136,7 @@ try {
   check('smoke run', false, err.message);
 } finally {
   await browser.close();
-  server.kill();
+  stopServer();
 }
 
 console.log(failures === 0 ? 'ALL OK' : `${failures} check(s) failed`);

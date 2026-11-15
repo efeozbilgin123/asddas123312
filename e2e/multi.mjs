@@ -28,7 +28,23 @@ async function waitFor(fn, timeoutMs, stepMs = 200) {
   }
 }
 
-const server = spawn('npx', ['tsx', 'src/index.ts'], { cwd: path.join(root, 'server'), env: { ...process.env, PORT: String(PORT) }, stdio: process.env.DEBUG_MOVES ? 'inherit' : 'ignore' });
+// detached → own process group, so killing it also stops the tsx child (not just npx)
+try {
+  await fetch(`${BASE}/health`);
+  console.log(`FAIL port ${PORT} already in use (stale server?)`);
+  process.exit(1);
+} catch {
+  /* port free */
+}
+const server = spawn('npx', ['tsx', 'src/index.ts'], { cwd: path.join(root, 'server'), env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore', detached: true });
+const stopServer = () => {
+  try {
+    process.kill(-server.pid, 'SIGTERM');
+  } catch {
+    /* already gone */
+  }
+};
+process.on('exit', stopServer);
 await waitFor(async () => {
   try {
     return (await fetch(`${BASE}/health`)).ok;
@@ -85,9 +101,7 @@ try {
       const a = await A.page.evaluate(() => __kh.avatar());
       if (Math.hypot(a.x - w[0], a.z - w[1]) < 0.15) break;
     }
-    console.log('DBG wp', w, JSON.stringify(await A.page.evaluate(() => [__kh.corrections(), ...[__kh.avatar(), __kh.session().players().get(__kh.session().selfId)].map((p) => [p.x.toFixed(2), p.z.toFixed(2), p.seatId])])));
   }
-  console.log('DBG seat', await A.page.evaluate(() => __kh.nearestFreeSeat()));
   await A.page.keyboard.press('e');
   await pump(A.page, 2);
   const seated = await waitFor(async () => {
@@ -136,7 +150,7 @@ try {
   check('multi run', false, err.message);
 } finally {
   await browser.close();
-  server.kill();
+  stopServer();
 }
 console.log(failures === 0 ? 'ALL OK' : `${failures} check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);

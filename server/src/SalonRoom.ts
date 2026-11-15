@@ -87,7 +87,6 @@ export class SalonRoom extends Room<{ state: SalonState }> {
     const now = Date.now();
     const ok = msg && typeof msg === 'object' && validateMove(t, msg, (now - t.at) / 1000, COLLIDERS);
     if (!ok) {
-      if (process.env.DEBUG_MOVES) console.log('reject', JSON.stringify({ from: [t.x, t.z], to: msg, dt: (now - t.at) / 1000 }));
       client.send('correct', { x: t.x, z: t.z });
       return;
     }

@@ -89,6 +89,7 @@ function makeAvatar(look: string): AvatarView | null {
 let avatar: AvatarState = { x: SPAWN[0], z: SPAWN[2], facing: Math.PI, speed: 0, mode: 'walk', seatId: null };
 let avatarView: AvatarView | null = null;
 let myLook: string = LOOKS[0].id;
+let corrections = 0;
 function spawnAvatar(): void {
   if (avatarView) scene.remove(avatarView.root);
   avatarView = makeAvatar(myLook);
@@ -133,6 +134,7 @@ async function joinSalon(): Promise<void> {
     const me = session.players().get(session.selfId);
     if (me) avatar = { ...avatar, x: me.x, z: me.z, facing: me.facing };
     session.onCorrect((p) => {
+      corrections += 1;
       avatar = { ...avatar, x: p.x, z: p.z };
     });
     session.onDenied((reason) => {
@@ -318,6 +320,7 @@ const debug = {
   walkTo(x: number, z: number) {
     autopilot = { x, z };
   },
+  corrections: () => corrections,
   nearestFreeSeat: () => nearestSeat(avatar, SEATS, occupied())?.id ?? null,
   hasBubble: (id: string) => remotes.hasBubble(id),
   teleport(x: number, z: number) {

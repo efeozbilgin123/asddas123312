@@ -28,7 +28,7 @@ async function waitFor(fn, timeoutMs, stepMs = 200) {
   }
 }
 
-const server = spawn('npx', ['tsx', 'src/index.ts'], { cwd: path.join(root, 'server'), env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });
+const server = spawn('npx', ['tsx', 'src/index.ts'], { cwd: path.join(root, 'server'), env: { ...process.env, PORT: String(PORT) }, stdio: process.env.DEBUG_MOVES ? 'inherit' : 'ignore' });
 await waitFor(async () => {
   try {
     return (await fetch(`${BASE}/health`)).ok;
@@ -85,7 +85,9 @@ try {
       const a = await A.page.evaluate(() => __kh.avatar());
       if (Math.hypot(a.x - w[0], a.z - w[1]) < 0.15) break;
     }
+    console.log('DBG wp', w, JSON.stringify(await A.page.evaluate(() => [__kh.corrections(), ...[__kh.avatar(), __kh.session().players().get(__kh.session().selfId)].map((p) => [p.x.toFixed(2), p.z.toFixed(2), p.seatId])])));
   }
+  console.log('DBG seat', await A.page.evaluate(() => __kh.nearestFreeSeat()));
   await A.page.keyboard.press('e');
   await pump(A.page, 2);
   const seated = await waitFor(async () => {

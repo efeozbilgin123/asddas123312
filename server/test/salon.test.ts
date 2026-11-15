@@ -6,7 +6,7 @@ import type { SalonRoom } from '../src/SalonRoom';
 
 let colyseus: ColyseusTestServer;
 beforeAll(async () => {
-  colyseus = await boot(createGameServer({ reconnectSeconds: 0 }));
+  colyseus = await boot(createGameServer({ reconnectSeconds: 0, avatarExists: (h) => h === 'e'.repeat(64) }));
 });
 afterAll(async () => colyseus.shutdown());
 beforeEach(async () => colyseus.cleanup());
@@ -237,4 +237,11 @@ test('join keeps a builtin avatar and replaces an unknown upload with the manneq
   await room.waitForNextPatch();
   expect(room.state.players.get(a.sessionId)!.avatar).toBe('seed');
   expect(room.state.players.get(b.sessionId)!.avatar).toBe('mannequin');
+});
+
+test('join keeps an uploaded avatar the server has (options reach the room)', async () => {
+  const room = await colyseus.createRoom<SalonRoom>('salon', {});
+  const a = await colyseus.connectTo(room, { name: 'Ayşe', look: 'kum', avatar: `custom:${'e'.repeat(64)}` });
+  await room.waitForNextPatch();
+  expect(room.state.players.get(a.sessionId)!.avatar).toBe(`custom:${'e'.repeat(64)}`);
 });

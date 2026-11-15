@@ -158,10 +158,10 @@ sürükle-bırak, otomatik dizme (seri/çift), canlı "açabilir misin" gösterg
 **Batak (ihaleli, eşli varsayılan):** 4 kişi, 52 kart, 13'er kart. İhale turu: sırayla
 artırılır veya pas; en yüksek ihaleyi alan kozu seçer ve ilk kartı açar. Renk uymak
 zorunlu; uyulamıyorsa koz çakmak zorunlu; mümkünse yükseltmek zorunlu; koz kırılmadan
-koz ile açılamaz. Eşlide ihale takım hedefidir: tutturan takım aldığı el sayısı kadar
-(ihale × 10 değil, el başına 10 puan — kurucu yaygın kuralı seçer, masa ayarı ile
-değiştirilebilir) puan alır; tutturamayan takım ihale × 10 puan kaybeder (batar);
-karşı takım aldığı el kadar puan alır. Maç hedef puana ulaşınca biter.
+koz ile açılamaz. Eşlide ihale takım hedefidir. Varsayılan puanlama (yaygın kural, masa
+ayarıyla değiştirilebilir): ihaleyi tutturan takım aldığı el × 10 puan alır; tutturamayan
+takım ihale × 10 puan kaybeder (batar); karşı takım aldığı el × 10 puan alır. Maç hedef
+puana ulaşınca biter.
 
 **Pişti:** 2 kişi, 4 kişi eşli veya 4 kişi tekli (masa ayarı), standart kurallar: yerdeki kartla aynı değer ya da vale ile
 alma; pişti 10 puan, vale ile pişti 20; as/vale 1, ♣2 = 2, ♦10 = 3; en çok kart +3;

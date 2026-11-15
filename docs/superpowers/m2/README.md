@@ -27,9 +27,18 @@ Geliştirirken: `npm run dev` (sunucu :2567 + Vite :5173, Vite istemcisini `?ser
 tek bir ücretsiz web servisi kurar. Ücretsiz planda kimse yokken ~15 dk sonra uyur; ilk giren
 ~1 dk bekler, açık oyunlar sıfırlanır.
 
-**Oracle Cloud (uyumayan):** VM'de Node 20 kur, repoyu çek, `npm install && npm run build`,
-`PORT=80 npm start` (veya nginx arkasında). TV/ekran paylaşımı aşamasında LiveKit de aynı
-makineye gelecek.
+**Oracle Cloud (uyumayan, otomatik güncellenen):** VM'ye SSH ile bağlan ve tek komut çalıştır:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/efeozbilgin123/asddas123312/claude/hopeful-keller-hzfh29/deploy/oracle/install.sh | sudo bash
+```
+
+Betik (`deploy/oracle/install.sh`) Node 20 + Caddy kurar, oyunu derleyip servis olarak başlatır,
+`https://<ip-tireli>.sslip.io` adresinde otomatik sertifikayla açar ve her 2 dakikada bir
+GitHub'daki dala bakan bir zamanlayıcı kurar: yeni commit → çek, derle, yeniden başlat; açılmazsa
+eski sürüme döner ve o commit'i tekrar denemez. Eski Minecraft sunucusunu bulup raporlar
+(`--stop-minecraft` ile kapatır). Bir kerelik elle yapılacak tek şey: Oracle konsolunda
+VCN → Security List'te TCP 80 ve 443'ü açmak.
 
 ## Testler
 

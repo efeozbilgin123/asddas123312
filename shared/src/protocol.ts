@@ -32,7 +32,7 @@ export interface EmoteMsg { id: string }
 export interface ChatBroadcast { from: string; name: string; text: string; at: number }
 export interface EmoteBroadcast { from: string; id: string }
 export interface CorrectMsg { x: number; z: number }
-export interface DeniedMsg { reason: 'seat-taken' | 'rate-limit' }
+export interface DeniedMsg { reason: 'seat-taken' | 'too-far' | 'rate-limit' }
 
 /** Server rejection texts; the client maps them back to error kinds. */
 export const JOIN_ERROR_NAME = 'İsim gerekli';
@@ -52,17 +52,42 @@ export const sanitizeName = (raw: unknown): string | null => clean(raw, 20);
 export const sanitizeChat = (raw: unknown): string | null => clean(raw, 200);
 
 // ---- move validation ----
-const SPEED_FACTOR = 1.5;
-const SLACK = 0.5;
+const SWEEP_STEP = 0.1;
 
-export function validateMove(prev: { x: number; z: number }, next: MoveMsg, elapsedSec: number, boxes: readonly Box2[]): boolean {
+/**
+ * Shape and geometry check for a move: finite numbers, inside the room, and the straight path from
+ * `prev` to `next` never passes through furniture. Speed is checked separately by MoveBudget.
+ */
+export function validateMove(prev: { x: number; z: number }, next: MoveMsg, boxes: readonly Box2[]): boolean {
   if (![next.x, next.z, next.facing, next.speed].every(Number.isFinite)) return false;
   if (Math.abs(next.x) > ROOM.width / 2 || Math.abs(next.z) > ROOM.depth / 2) return false;
   const dist = Math.hypot(next.x - prev.x, next.z - prev.z);
-  const budget = RUN_SPEED * SPEED_FACTOR * Math.max(0, elapsedSec);
-  // Slack absorbs jitter but never more than doubles the budget, so many tiny messages can't add up.
-  if (dist > budget + Math.min(SLACK, budget)) return false;
-  return !overlapsAny(next, AVATAR_RADIUS - 0.02, boxes);
+  const steps = Math.max(1, Math.ceil(dist / SWEEP_STEP));
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const p = { x: prev.x + (next.x - prev.x) * t, z: prev.z + (next.z - prev.z) * t };
+    if (overlapsAny(p, AVATAR_RADIUS - 0.02, boxes)) return false;
+  }
+  return true;
+}
+
+/** Allowed speed: run speed × 1.5. */
+export const MOVE_RATE = RUN_SPEED * 1.5;
+/** Short burst allowance (network stalls deliver queued moves together). */
+export const MOVE_BURST = 1.5;
+
+/** Token bucket of metres a player may move; refills at MOVE_RATE up to MOVE_BURST. */
+export class MoveBudget {
+  private tokens = MOVE_BURST;
+  constructor(private last: number) {}
+
+  spend(dist: number, nowMs: number): boolean {
+    this.tokens = Math.min(MOVE_BURST, this.tokens + (MOVE_RATE * Math.max(0, nowMs - this.last)) / 1000);
+    this.last = Math.max(this.last, nowMs);
+    if (!(dist <= this.tokens)) return false;
+    this.tokens -= dist;
+    return true;
+  }
 }
 
 // ---- rate limiting ----

@@ -8,7 +8,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@kahvehane/shared": "*"
+    "@colyseus/core": "^0.18.28",
+    "@colyseus/schema": "^5.0.48",
+    "@colyseus/ws-transport": "^0.18.5",
+    "@kahvehane/shared": "*",
+    "express": "^4.22.3",
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@colyseus/testing": "^0.18.6",

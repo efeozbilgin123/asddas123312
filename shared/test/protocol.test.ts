@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { EMOTES, LOOKS, MAX_PLAYERS, RateLimiter, sanitizeChat, sanitizeName, validateMove } from '../src/protocol';
+import { EMOTES, LOOKS, MAX_PLAYERS, MoveBudget, RateLimiter, sanitizeChat, sanitizeName, validateMove } from '../src/protocol';
 import { COLLIDERS, PLACEMENTS, ROOM } from '../src/layout';
 
 describe('sanitizeName', () => {
@@ -25,20 +25,44 @@ test('sanitizeChat limits to 200 code points and rejects empty', () => {
   expect(sanitizeChat({})).toBeNull();
 });
 
-describe('validateMove', () => {
+describe('validateMove (shape, room, path)', () => {
   const at = { x: 0, z: 4.6 };
   test('validateMove accepts a normal step', () => {
-    expect(validateMove(at, { x: 0, z: 4.52, facing: Math.PI, speed: 1.6 }, 0.05, COLLIDERS)).toBe(true);
-  });
-  test('validateMove allows a lag burst within slack', () => {
-    expect(validateMove(at, { x: 0, z: 0.1, facing: 0, speed: 3.2 }, 1, COLLIDERS)).toBe(true); // 4.5 m in 1 s
-    expect(validateMove(at, { x: 0, z: -1.4, facing: 0, speed: 3.2 }, 1, COLLIDERS)).toBe(false); // 6 m in 1 s
+    expect(validateMove(at, { x: 0, z: 4.52, facing: Math.PI, speed: 1.6 }, COLLIDERS)).toBe(true);
   });
   test('validateMove rejects NaN and outside room and into furniture', () => {
-    expect(validateMove(at, { x: NaN, z: 4.6, facing: 0, speed: 0 }, 1, COLLIDERS)).toBe(false);
-    expect(validateMove({ x: 0, z: ROOM.depth / 2 - 0.4 }, { x: 0, z: ROOM.depth / 2 + 0.2, facing: 0, speed: 1 }, 1, COLLIDERS)).toBe(false);
+    expect(validateMove(at, { x: NaN, z: 4.6, facing: 0, speed: 0 }, COLLIDERS)).toBe(false);
+    expect(validateMove({ x: 0, z: ROOM.depth / 2 - 0.4 }, { x: 0, z: ROOM.depth / 2 + 0.2, facing: 0, speed: 1 }, COLLIDERS)).toBe(false);
     const table = PLACEMENTS.find((p) => p.id === 'masa-3')!;
-    expect(validateMove({ x: table.pos[0], z: table.pos[2] + 1.6 }, { x: table.pos[0], z: table.pos[2], facing: 0, speed: 1 }, 1, COLLIDERS)).toBe(false);
+    expect(validateMove({ x: table.pos[0], z: table.pos[2] + 1.6 }, { x: table.pos[0], z: table.pos[2], facing: 0, speed: 1 }, COLLIDERS)).toBe(false);
+  });
+  test('validateMove rejects a path that passes through furniture even if the end is free', () => {
+    const table = PLACEMENTS.find((p) => p.id === 'masa-3')!;
+    expect(validateMove({ x: table.pos[0], z: table.pos[2] + 1.6 }, { x: table.pos[0], z: table.pos[2] - 1.6, facing: 0, speed: 1 }, COLLIDERS)).toBe(false);
+  });
+});
+
+describe('MoveBudget (distance allowance)', () => {
+  test('normal running at 10 Hz is always allowed', () => {
+    const b = new MoveBudget(0);
+    for (let i = 1; i <= 100; i++) expect(b.spend(0.32, i * 100), `step ${i}`).toBe(true);
+  });
+  test('a sustained 3x speed hack is capped at the allowed speed', () => {
+    const b = new MoveBudget(0);
+    let moved = 0;
+    for (let i = 1; i <= 20; i++) if (b.spend(0.9, i * 100)) moved += 0.9; // tries 18 m in 2 s
+    expect(moved).toBeLessThanOrEqual(3.2 * 1.5 * 2 + 1.5); // rate × time + burst
+  });
+  test('standing still does not bank a teleport', () => {
+    const b = new MoveBudget(0);
+    expect(b.spend(12, 2600)).toBe(false);
+    expect(b.spend(3, 10000)).toBe(false);
+  });
+  test('a short network stall delivered as a burst is allowed', () => {
+    const b = new MoveBudget(0);
+    for (let i = 1; i <= 10; i++) b.spend(0.16, i * 100); // walking
+    // 300 ms stall, then 3 queued walking messages arrive together
+    expect([b.spend(0.16, 1300), b.spend(0.16, 1300), b.spend(0.16, 1300)]).toEqual([true, true, true]);
   });
 });
 
@@ -56,16 +80,9 @@ test('LOOKS and EMOTES have unique ids and the planned sizes', () => {
   expect(LOOKS[0]).toEqual({ id: 'kiremit', label: 'Kiremit', color: '#c0583c' });
 });
 
-test('validateMove: rapid tiny messages cannot add up the slack into a speed hack', () => {
-  // 50 messages, 20 ms apart, 0.3 m each = 15 m/s
-  let p = { x: 0, z: 4.6 };
-  let accepted = 0;
-  for (let i = 0; i < 50; i++) {
-    const next = { x: 0, z: p.z - 0.3, facing: 0, speed: 3.2 };
-    if (validateMove(p, next, 0.02, [])) {
-      p = next;
-      accepted++;
-    }
-  }
-  expect(accepted).toBe(0);
+test('MoveBudget: rapid tiny messages cannot add up into a speed hack', () => {
+  const b = new MoveBudget(0);
+  let moved = 0;
+  for (let i = 1; i <= 50; i++) if (b.spend(0.3, i * 20)) moved += 0.3; // 15 m/s attempt over 1 s
+  expect(moved).toBeLessThan(6.5); // ≤ run speed × 1.5 + burst
 });

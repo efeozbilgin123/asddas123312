@@ -17,7 +17,7 @@ const nearSofa = { x: sofa.pos[0], z: -3.15, facing: Math.PI, speed: 0 };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Walks a client to a target in small validated steps. */
-const AROUND_SOFA = [{ x: -2.5, z: 0.5 }, { x: -2.5, z: -3.15 }];
+const AROUND_SOFA = [{ x: -2.8, z: 3.6 }, { x: -2.8, z: 0.5 }, { x: -2.5, z: -1.0 }, { x: -2.5, z: -3.15 }];
 
 async function walkVia(room: SalonRoom, client: Awaited<ReturnType<typeof join>>, to: { x: number; z: number }) {
   for (const w of AROUND_SOFA) await walkTo(room, client, w);
@@ -96,13 +96,68 @@ describe('SalonRoom', () => {
     expect(p.seatId).toBe('');
   });
 
-  test('sit far from the seat is ignored', async () => {
+  test('sit far from the seat is denied', async () => {
     const room = await colyseus.createRoom<SalonRoom>('salon', {});
     const c = await join(room);
     await room.waitForNextPatch();
+    const denied = c.waitForMessage('denied');
     c.send('sit', { seatId: 'sofa-l' });
-    await room.waitForMessage('sit');
+    expect(await denied).toEqual({ reason: 'too-far' });
     expect(room.state.players.get(c.sessionId)!.seatId).toBe('');
+  });
+
+  test('sit is accepted wherever the client offers it (behind a table chair)', async () => {
+    const room = await colyseus.createRoom<SalonRoom>('salon', {});
+    const c = await join(room);
+    await room.waitForNextPatch();
+    // masa-3 chair 1 sits at (-0.8, 2.35) facing the table; 1.7 m behind it is still within reach of its approach point
+    await walkTo(room, c, { x: -0.8, z: 4.05 });
+    c.send('sit', { seatId: 'masa-3-sandalye-1' });
+    await room.waitForMessage('sit');
+    expect(room.state.players.get(c.sessionId)!.seatId).toBe('masa-3-sandalye-1');
+  });
+
+  test('a sustained speed hack is corrected', async () => {
+    const room = await colyseus.createRoom<SalonRoom>('salon', {});
+    const c = await join(room);
+    await room.waitForNextPatch();
+    const p = room.state.players.get(c.sessionId)!;
+    const z0 = p.z;
+    for (let i = 1; i <= 15; i++) {
+      c.send('move', { x: p.x, z: z0 - 0.9 * i, facing: Math.PI, speed: 3.2 });
+      await sleep(100);
+    }
+    await room.waitForNextPatch();
+    expect(z0 - p.z).toBeLessThan(3.2 * 1.5 * 1.5 + 1.6); // ≤ allowed rate × elapsed + burst
+  });
+
+  test('standing still does not allow a teleport', async () => {
+    const room = await colyseus.createRoom<SalonRoom>('salon', {});
+    const c = await join(room);
+    await room.waitForNextPatch();
+    await sleep(2500);
+    const correction = c.waitForMessage('correct');
+    c.send('move', { x: 6.5, z: -4.0, facing: 0, speed: 3.2 });
+    await correction;
+    expect(room.state.players.get(c.sessionId)!.z).toBeCloseTo(SPAWN[2], 3);
+  });
+
+  test('a dropped player shows as away, then leaves and frees the seat', async () => {
+    const room = await colyseus.createRoom<SalonRoom>('salon', {});
+    room.reconnectSeconds = 1; // the suite's server defaults to 0
+    const a = await join(room, 'Ayşe');
+    await room.waitForNextPatch();
+    await walkVia(room, a, nearSofa);
+    a.send('sit', { seatId: 'sofa-l' });
+    await room.waitForMessage('sit');
+    const id = a.sessionId;
+    a.reconnection.enabled = false; // the SDK would otherwise reconnect on its own
+    (a as unknown as { connection: { close(code?: number): void } }).connection.close(4010); // unclean drop (4000 means "consented")
+    await sleep(300);
+    expect(room.state.players.get(id)?.away).toBe(true);
+    expect(room.state.players.get(id)?.seatId).toBe('sofa-l');
+    await sleep(1500);
+    expect(room.state.players.has(id)).toBe(false);
   });
 
   test('second sit on same seat is rejected', async () => {
@@ -119,6 +174,8 @@ describe('SalonRoom', () => {
     const seated = [...room.state.players.values()].filter((p) => p.seatId === 'sofa-l');
     expect(seated.length).toBe(1);
     expect(d).toEqual({ reason: 'seat-taken' });
+    const loser = [...room.state.players.values()].find((p) => p.seatId !== 'sofa-l')!;
+    expect(loser.seatId).toBe('');
   });
 
   test('chat is sanitized and broadcast to everyone', async () => {

@@ -1,7 +1,7 @@
 import { Room, type Client } from '@colyseus/core';
 import {
-  CAT_SPOTS, COLLIDERS, EMOTES, JOIN_ERROR_NAME, LOOKS, MAX_PLAYERS, RateLimiter, SEATS, SPAWN,
-  catStep, initialCat, sanitizeChat, sanitizeName, standUp, validateMove,
+  CAT_SPOTS, COLLIDERS, EMOTES, JOIN_ERROR_NAME, LOOKS, MAX_PLAYERS, MoveBudget, RateLimiter, SEATS, SIT_RADIUS, SPAWN,
+  catStep, initialCat, sanitizeChat, sanitizeName, seatReach, standUp, validateMove,
   type CatState, type ChatMsg, type EmoteMsg, type JoinOptions, type MoveMsg, type SitMsg
 } from '@kahvehane/shared';
 import { CatSchema, PlayerState, SalonState } from './schema';
@@ -11,20 +11,22 @@ export interface SalonOptions {
   reconnectSeconds?: number;
 }
 
-const SIT_REACH = 1.5;
+/** Client offers Sit within SIT_RADIUS; allow a little for positions still in flight. */
+const SIT_TOLERANCE = 0.3;
 const CAT_TICK_MS = 100;
 
 interface Track {
   x: number;
   z: number;
-  at: number;
+  budget: MoveBudget;
   limiter: RateLimiter;
 }
 
 export class SalonRoom extends Room<{ state: SalonState }> {
   maxClients = MAX_PLAYERS;
   autoDispose = false;
-  private reconnectSeconds = 10;
+  /** Seconds a dropped client may take to reconnect. */
+  reconnectSeconds = 10;
   private readonly tracks = new Map<string, Track>();
   private cat: CatState = initialCat(CAT_SPOTS, Math.random);
   private joined = 0;
@@ -55,7 +57,7 @@ export class SalonRoom extends Room<{ state: SalonState }> {
     p.facing = Math.PI;
     p.speed = 0;
     this.state.players.set(client.sessionId, p);
-    this.tracks.set(client.sessionId, { x: p.x, z: p.z, at: Date.now(), limiter: new RateLimiter(3, 2000) });
+    this.tracks.set(client.sessionId, { x: p.x, z: p.z, budget: new MoveBudget(Date.now()), limiter: new RateLimiter(3, 2000) });
   }
 
   async onDrop(client: Client): Promise<void> {
@@ -84,8 +86,8 @@ export class SalonRoom extends Room<{ state: SalonState }> {
     const p = this.state.players.get(client.sessionId);
     const t = this.tracks.get(client.sessionId);
     if (!p || !t || p.seatId) return;
-    const now = Date.now();
-    const ok = msg && typeof msg === 'object' && validateMove(t, msg, (now - t.at) / 1000, COLLIDERS);
+    const ok =
+      msg && typeof msg === 'object' && validateMove(t, msg, COLLIDERS) && t.budget.spend(Math.hypot(msg.x - t.x, msg.z - t.z), Date.now());
     if (!ok) {
       client.send('correct', { x: t.x, z: t.z });
       return;
@@ -94,14 +96,16 @@ export class SalonRoom extends Room<{ state: SalonState }> {
     p.z = t.z = msg.z;
     p.facing = msg.facing;
     p.speed = Math.max(0, Math.min(msg.speed, 3.2));
-    t.at = now;
   }
 
   private onSit(client: Client, msg: SitMsg): void {
     const p = this.state.players.get(client.sessionId);
     const seat = SEATS.find((s) => s.id === msg?.seatId);
     if (!p || !seat || p.seatId) return;
-    if (Math.hypot(p.x - seat.pos[0], p.z - seat.pos[2]) > SIT_REACH) return;
+    if (seatReach(p, seat) > SIT_RADIUS + SIT_TOLERANCE) {
+      client.send('denied', { reason: 'too-far' });
+      return;
+    }
     const taken = [...this.state.players.values()].some((o) => o.seatId === seat.id);
     if (taken) {
       client.send('denied', { reason: 'seat-taken' });
@@ -123,7 +127,6 @@ export class SalonRoom extends Room<{ state: SalonState }> {
     p.seatId = '';
     p.x = t.x = s.x;
     p.z = t.z = s.z;
-    t.at = Date.now();
   }
 
   private onChat(client: Client, msg: ChatMsg): void {

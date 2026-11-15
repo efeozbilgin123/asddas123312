@@ -293,7 +293,7 @@ function updateCamera(dt: number): void {
 }
 
 // ---------- loop ----------
-let autopilot: { x: number; z: number } | null = null;
+let autopilot: { x: number; z: number; run: boolean } | null = null;
 let fps = 60;
 function tick(dt: number): void {
   const kb = keyboard.read();
@@ -305,7 +305,7 @@ function tick(dt: number): void {
     const dx = autopilot.x - avatar.x;
     const dz = autopilot.z - avatar.z;
     const d = Math.hypot(dx, dz);
-    move = d < 0.1 ? { x: 0, z: 0, run: false } : { x: dx / d, z: dz / d, run: false };
+    move = d < 0.1 ? { x: 0, z: 0, run: false } : { x: dx / d, z: dz / d, run: autopilot.run };
     if (d < 0.1) autopilot = null;
   }
   // the cat is a small moving obstacle for the avatar (only once a cat model is in the room)
@@ -345,8 +345,8 @@ const debug = {
   fps: () => fps,
   session: () => session,
   chatText: () => chat?.text() ?? '',
-  walkTo(x: number, z: number) {
-    autopilot = { x, z };
+  walkTo(x: number, z: number, run = false) {
+    autopilot = { x, z, run };
   },
   corrections: () => corrections,
   nearestFreeSeat: () => nearestSeat(avatar, SEATS, occupied())?.id ?? null,

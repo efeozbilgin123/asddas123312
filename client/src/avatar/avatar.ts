@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { AvatarState } from '@kahvehane/shared';
+import { DisplaySmoother, LocomotionMixer } from './locomotion';
 
 /** `sit`: a real seated clip (e.g. Mixamo "Sitting Idle"); without one a procedural pose is used. */
 export interface ClipMap { idle: string; walk: string; run?: string; sit?: string }
@@ -42,9 +43,9 @@ export interface AvatarLike {
 export class AvatarView implements AvatarLike {
   readonly root = new THREE.Group();
   private readonly model: THREE.Object3D;
-  private readonly mixer: THREE.AnimationMixer;
-  private readonly actions: Partial<Record<'idle' | 'walk' | 'run' | 'sit', THREE.AnimationAction>> = {};
-  private current: THREE.AnimationAction | null = null;
+  private readonly loco: LocomotionMixer;
+  private readonly smooth = new DisplaySmoother();
+  private readonly sitAction: THREE.AnimationAction | null = null;
   private readonly bones = new Map<string, THREE.Bone>();
   private sitBlend = 0;
   private readonly hipY: number;
@@ -80,42 +81,29 @@ export class AvatarView implements AvatarLike {
     const hips = this.bones.get('Hips');
     const hipY = hips ? hips.getWorldPosition(new THREE.Vector3()).y : 0.95;
     this.hipY = hipY;
-    this.mixer = new THREE.AnimationMixer(model);
-    for (const key of ['idle', 'walk', 'run', 'sit'] as const) {
-      const name = map[key];
-      const clip = name ? THREE.AnimationClip.findByName(clips, name) : undefined;
-      if (clip) this.actions[key] = this.mixer.clipAction(stripRootMotion(clip));
-    }
+    const mixer = new THREE.AnimationMixer(model);
+    const get = (name?: string) => (name ? THREE.AnimationClip.findByName(clips, name) : undefined);
+    const strip = (c?: THREE.AnimationClip) => (c ? stripRootMotion(c) : undefined);
+    this.loco = new LocomotionMixer(mixer, { idle: strip(get(map.idle)), walk: strip(get(map.walk)), run: strip(get(map.run)) });
+    const sit = get(map.sit);
+    if (sit) this.sitAction = mixer.clipAction(stripRootMotion(sit));
   }
 
-  private play(key: 'idle' | 'walk' | 'run' | 'sit', timeScale = 1): void {
-    const next = this.actions[key] ?? this.actions.idle;
-    if (!next) return;
-    next.timeScale = timeScale;
-    if (next === this.current) return;
-    next.reset().fadeIn(0.25).play();
-    this.current?.fadeOut(0.25);
-    this.current = next;
-  }
-
-  /** `seat`: the sitting surface of the current seat (hips rest on it). */
   update(s: AvatarState, dt: number, seat: { height: number; forward: number } = DEFAULT_SEAT): void {
     const sitting = s.mode === 'sit';
-    const sitClip = sitting && this.actions.sit !== undefined;
-    if (sitClip) this.play('sit');
-    else if (sitting || s.speed < 0.15) this.play('idle');
-    else if (s.speed > 2.2 && this.actions.run) this.play('run', s.speed / 3.2);
-    else this.play('walk', Math.max(0.5, s.speed / 1.6));
-    this.mixer.update(dt);
+    if (this.sitAction) this.sitAction.setEffectiveWeight(sitting ? 1 : 0).play();
+    this.loco.update(s.speed, sitting, dt);
+    this.smooth.update(s.x, s.z, s.facing, dt);
 
     this.sitBlend = THREE.MathUtils.damp(this.sitBlend, sitting ? 1 : 0, 10, dt);
     const k = this.sitBlend;
     const fwd = seat.forward * k;
-    this.root.position.set(s.x + Math.sin(s.facing) * fwd, -Math.max(0, this.hipY - seat.height) * k, s.z + Math.cos(s.facing) * fwd);
-    this.root.rotation.y = s.facing;
-    if (k > 0.001 && !this.actions.sit) {
+    const yaw = this.smooth.yaw;
+    this.root.position.set(this.smooth.x + Math.sin(yaw) * fwd, -Math.max(0, this.hipY - seat.height) * k, this.smooth.z + Math.cos(yaw) * fwd);
+    this.root.rotation.y = yaw;
+    if (k > 0.001 && !this.sitAction) {
       this.root.updateMatrixWorld(true);
-      this.applySitPose(k, s.facing);
+      this.applySitPose(k, yaw);
     }
   }
 

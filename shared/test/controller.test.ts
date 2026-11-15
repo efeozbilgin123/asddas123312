@@ -81,3 +81,25 @@ test('avatar cannot walk through a dynamic obstacle such as the cat', () => {
   const s = run(start(0, 0), { x: 0, z: -1, run: false }, 2, [cat]);
   expect(s.z).toBeGreaterThan(-1 + 0.15 + 0.3 - 1e-6);
 });
+
+describe('natural turning', () => {
+  test('the avatar walks where it faces: reversing first turns, it never moonwalks backwards', () => {
+    let s = run(start(), { x: 0, z: -1, run: false }, 2); // walking toward −z at full speed
+    const z0 = s.z;
+    s = step(s, { x: 0, z: 1, run: false }, 1 / 60, []); // press the opposite direction
+    expect(s.z).toBeLessThanOrEqual(z0 + 1e-9); // does not instantly move toward +z
+  });
+
+  test('a full 180° turn takes a visible moment (≥ 0.25 s) and slows the avatar', () => {
+    let s = run(start(), { x: 0, z: -1, run: false }, 2);
+    let t = 0;
+    let minSpeed = s.speed;
+    while (Math.abs(Math.cos(s.facing) - 1) > 0.05 && t < 2) {
+      s = step(s, { x: 0, z: 1, run: false }, 1 / 60, []);
+      minSpeed = Math.min(minSpeed, s.speed);
+      t += 1 / 60;
+    }
+    expect(t).toBeGreaterThanOrEqual(0.25);
+    expect(minSpeed).toBeLessThan(1.0);
+  });
+});

@@ -66,11 +66,13 @@ export function mixamoToVrmBone(name: string): VRMHumanBoneName | null {
 const _restInv = new THREE.Quaternion();
 const _parentRest = new THREE.Quaternion();
 const _q = new THREE.Quaternion();
+const _v = new THREE.Vector3();
 
 /**
  * Converts a Mixamo clip (from `source`, the model it was authored on) to the VRM's normalized
  * humanoid bones — three-vrm's documented method: q' = parentRestWorld · q · restWorld⁻¹.
- * Root/hips translation is dropped: the controller moves the avatar, clips play in place.
+ * Hips keep only their vertical bob (scaled to the VRM's hip height); horizontal root motion is
+ * dropped because the controller moves the avatar.
  */
 export function retargetClip(clip: THREE.AnimationClip, source: THREE.Object3D, vrm: VRM): THREE.AnimationClip {
   source.updateMatrixWorld(true);
@@ -78,11 +80,24 @@ export function retargetClip(clip: THREE.AnimationClip, source: THREE.Object3D, 
   const vrm0 = vrm.meta?.metaVersion === '0';
   for (const track of clip.tracks) {
     const [boneName, property] = track.name.split('.');
-    if (property !== 'quaternion' || !boneName) continue;
+    if (!boneName || (property !== 'quaternion' && property !== 'position')) continue;
     const vrmBone = mixamoToVrmBone(boneName);
     const target = vrmBone ? vrm.humanoid?.getNormalizedBoneNode(vrmBone) : null;
     const node = source.getObjectByName(boneName);
     if (!target || !node?.parent) continue;
+    if (property === 'position') {
+      if (vrmBone !== 'hips') continue;
+      const srcRestY = node.getWorldPosition(_v).y;
+      const dstRestY = target.getWorldPosition(_v).y;
+      const scale = srcRestY > 1e-6 ? dstRestY / srcRestY : 1;
+      const out: number[] = [];
+      for (let i = 0; i < track.values.length; i += 3) {
+        _v.fromArray(track.values, i).applyMatrix4(node.parent.matrixWorld);
+        out.push(target.position.x, target.position.y + (_v.y - srcRestY) * scale, target.position.z);
+      }
+      tracks.push(new THREE.VectorKeyframeTrack(`${target.name}.position`, Array.from(track.times), out));
+      continue;
+    }
     node.getWorldQuaternion(_restInv).invert();
     node.parent.getWorldQuaternion(_parentRest);
     const values = Float32Array.from(track.values);

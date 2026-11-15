@@ -179,7 +179,7 @@ export function buildRoom(bank: AssetBank, q: QualityPreset): Room {
   const group = new THREE.Group();
   const W = ROOM.width, D = ROOM.depth, H = ROOM.height;
 
-  const floor = plane(W, D, pbr(bank.textures.get('brown_planks_07'), W / 0.9, D / 0.9, '#6e4a2c'), q.shadows);
+  const floor = plane(W, D, pbr(bank.textures.get('old_wooden_floor_01'), W / 2, D / 2, '#8a5a30'), q.shadows); // texture covers 2 × 2 m
   floor.rotation.x = -Math.PI / 2;
   group.add(floor);
 

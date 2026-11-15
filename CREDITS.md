@@ -5,10 +5,8 @@
 | Barrel Stove | MP | https://polyhaven.com/a/barrel_stove | CC0 |
 | Beam Wall 01 | Rob Tuytel | https://polyhaven.com/a/beam_wall_01 | CC0 |
 | Book Encyclopedia Set 01 | John Malcolm | https://polyhaven.com/a/book_encyclopedia_set_01 | CC0 |
-| Brass Candleholders | Tina | https://polyhaven.com/a/brass_candleholders | CC0 |
 | Brass Pot 01 | Rico Cilliers | https://polyhaven.com/a/brass_pot_01 | CC0 |
 | Brass Vase 01 | Rico Cilliers | https://polyhaven.com/a/brass_vase_01 | CC0 |
-| Brown Planks 07 | Rob Tuytel | https://polyhaven.com/a/brown_planks_07 | CC0 |
 | Carved Wooden Plate | Jan Martens | https://polyhaven.com/a/carved_wooden_plate | CC0 |
 | Ceramic Vase 02 | James Ray Cock | https://polyhaven.com/a/ceramic_vase_02 | CC0 |
 | Clay Plaster | Amal Kumar | https://polyhaven.com/a/clay_plaster | CC0 |
@@ -19,6 +17,7 @@
 | Jug 01 | Kuutti Siitonen | https://polyhaven.com/a/jug_01 | CC0 |
 | Lantern Chandelier 01 | Kirill Sannikov | https://polyhaven.com/a/lantern_chandelier_01 | CC0 |
 | Mantel Clock 01 | Yann Kervran, Rico Cilliers | https://polyhaven.com/a/mantel_clock_01 | CC0 |
+| Old Wooden Floor 01 | Charlotte Baglioni, Dario Barresi | https://polyhaven.com/a/old_wooden_floor_01 | CC0 |
 | Painted Wooden Bench | Kirill Sannikov | https://polyhaven.com/a/painted_wooden_bench | CC0 |
 | Painted Wooden Chair 01 | Kuutti Siitonen | https://polyhaven.com/a/painted_wooden_chair_01 | CC0 |
 | Potted Plant 01 | Rico Cilliers | https://polyhaven.com/a/potted_plant_01 | CC0 |

@@ -45,7 +45,7 @@ export const MANIFEST: AssetEntry[] = [
   model('fancy_picture_frame_01', true),
   model('carved_wooden_plate', true),
   model('wooden_stool_01', true),
-  texture('brown_planks_07'),
+  texture('old_wooden_floor_01'), // floor, 2 × 2 m per tile
   texture('clay_plaster'),
   texture('beam_wall_01'),
   texture('wooden_rough_planks'),

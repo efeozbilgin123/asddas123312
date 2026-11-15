@@ -13,7 +13,7 @@ const { chromium, devices } = require('playwright');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = path.join(root, 'docs/superpowers/m1');
 const PORT = 4179;
-const URL = `http://localhost:${PORT}/?still&q=low`;
+const URL = `http://localhost:${PORT}/?still&q=low&debug`;
 
 let failures = 0;
 function check(name, ok, detail = '') {
@@ -70,6 +70,17 @@ try {
     });
     await page.screenshot({ path: path.join(outDir, 'desktop.png'), timeout: 300000 });
     check('desktop: no page errors', errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  }
+
+  // ---------- production page exposes no debug hooks ----------
+  {
+    const ctx = await browser.newContext({ viewport: { width: 640, height: 360 } });
+    const page = await ctx.newPage();
+    await page.goto(URL.replace('&debug', ''));
+    await page.waitForSelector('.loading.done', { state: 'attached', timeout: 180000 });
+    const exposed = await page.evaluate(() => typeof window.__kh !== 'undefined');
+    check('no __kh debug hooks without ?debug', !exposed);
     await ctx.close();
   }
 

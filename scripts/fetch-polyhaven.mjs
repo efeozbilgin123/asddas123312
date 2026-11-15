@@ -81,7 +81,11 @@ for (const entry of entries) {
   rows.push(await fetchEntry(entry));
 }
 rows.sort();
-const own = ['| Kilim dokusu | Kahvehane (kendi çalışmamız) | scripts/make-kilim.mjs | CC0 |'];
+// Non-Poly Haven assets: kept here so regenerating CREDITS.md never drops them.
+const own = [
+  '| Kilim dokusu | Kahvehane (kendi çalışmamız) | scripts/make-kilim.mjs | CC0 |',
+  '| Soldier (geçici karakter) | three.js örnekleri; kaynak: Adobe Mixamo | https://github.com/mrdoob/three.js/tree/r170/examples/models/gltf | MIT (three.js) / Mixamo koşulları |'
+];
 await writeFile(
   path.join(root, 'CREDITS.md'),
   `# Varlık atıfları\n\n| Varlık | Yazar | Kaynak | Lisans |\n|---|---|---|---|\n${[...rows, ...own].join('\n')}\n`

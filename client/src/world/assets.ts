@@ -27,7 +27,32 @@ export interface Loaders {
 
 export const ASSET_ROOT = './assets';
 
+/**
+ * Static hosts that refuse some file types (.bin/.gltf/.hdr) get a "pack": those files are
+ * shipped base64-encoded inside JS files that fill window.__KH_PACK (scripts/pack-preview.mjs).
+ * Requests for packed files are redirected to blob URLs.
+ */
+function installPackResolver(): void {
+  const pack = (globalThis as { __KH_PACK?: Record<string, string> }).__KH_PACK;
+  if (!pack) return;
+  const blobs = new Map<string, string>();
+  THREE.DefaultLoadingManager.setURLModifier((url) => {
+    const i = url.indexOf('assets/');
+    const key = i >= 0 ? url.slice(i).replace(/\/\.\//g, '/') : url;
+    const b64 = pack[key];
+    if (!b64) return url;
+    let blobUrl = blobs.get(key);
+    if (!blobUrl) {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      blobUrl = URL.createObjectURL(new Blob([bytes]));
+      blobs.set(key, blobUrl);
+    }
+    return blobUrl;
+  });
+}
+
 export function realLoaders(): Loaders {
+  installPackResolver();
   const gltf = new GLTFLoader();
   const tex = new THREE.TextureLoader();
   const rgbe = new RGBELoader();

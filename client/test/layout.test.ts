@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  BILLIARD_AREA, CAT_SPOTS, COLLIDERS, FURNITURE_COLLIDERS, PLACEMENTS, ROOM, SEATS, SPAWN,
+  BILLIARD_AREA, CAT_EDGES, CAT_SPOTS, COLLIDERS, FURNITURE_COLLIDERS, PLACEMENTS, ROOM, SEATS, SPAWN,
   seatApproach, type Box2
 } from '../src/world/layout';
 import { MANIFEST } from '../src/world/manifest';
@@ -44,5 +44,39 @@ describe('layout', () => {
   test('there are 16 game chairs and at least 4 lounge seats', () => {
     expect(SEATS.filter((s) => s.kind === 'chair').length).toBe(16);
     expect(SEATS.filter((s) => s.kind !== 'chair').length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe('cat edges', () => {
+  test('every cat edge is a clear straight path (0.2 m from all colliders)', () => {
+    for (const [a, b] of CAT_EDGES) {
+      const p = CAT_SPOTS.find((s) => s.id === a)!.pos;
+      const q = CAT_SPOTS.find((s) => s.id === b)!.pos;
+      for (let t = 0; t <= 1; t += 0.01) {
+        const x = p[0] + (q[0] - p[0]) * t;
+        const z = p[2] + (q[2] - p[2]) * t;
+        for (const c of COLLIDERS) {
+          const dx = x - Math.max(c.minX, Math.min(x, c.maxX));
+          const dz = z - Math.max(c.minZ, Math.min(z, c.maxZ));
+          expect(Math.hypot(dx, dz), `${a}→${b} at t=${t.toFixed(2)}`).toBeGreaterThanOrEqual(0.2);
+        }
+      }
+    }
+  });
+
+  test('cat edge graph connects every spot', () => {
+    const seen = new Set([CAT_SPOTS[0]!.id]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const [a, b] of CAT_EDGES) {
+        if (seen.has(a) !== seen.has(b)) { seen.add(a); seen.add(b); grew = true; }
+      }
+    }
+    expect(seen.size).toBe(CAT_SPOTS.length);
+  });
+
+  test('the wicker basket has a collider', () => {
+    expect(PLACEMENTS.find((p) => p.id === 'basket')?.collider).toBeDefined();
   });
 });

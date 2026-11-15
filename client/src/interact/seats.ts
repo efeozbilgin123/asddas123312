@@ -2,14 +2,20 @@ import { resolveCircle } from '../avatar/collision';
 import { AVATAR_RADIUS, type AvatarState } from '../avatar/controller';
 import { seatApproach, type Box2, type Seat } from '../world/layout';
 
-/** Closest free seat within `radius` of either the seat or its approach point. */
+/**
+ * Closest free seat within `radius`. Distance is to the seat itself; game chairs (which face a
+ * table and are approached from behind) also count their approach point.
+ */
 export function nearestSeat(pos: { x: number; z: number }, seats: readonly Seat[], occupied: ReadonlySet<string>, radius = 1.2): Seat | null {
   let best: Seat | null = null;
   let bestD = radius;
   for (const seat of seats) {
     if (occupied.has(seat.id)) continue;
-    const a = seatApproach(seat);
-    const d = Math.min(Math.hypot(pos.x - seat.pos[0], pos.z - seat.pos[2]), Math.hypot(pos.x - a.x, pos.z - a.z));
+    let d = Math.hypot(pos.x - seat.pos[0], pos.z - seat.pos[2]);
+    if (seat.kind === 'chair') {
+      const a = seatApproach(seat);
+      d = Math.min(d, Math.hypot(pos.x - a.x, pos.z - a.z));
+    }
     if (d <= bestD) {
       best = seat;
       bestD = d;

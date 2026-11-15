@@ -55,7 +55,10 @@ const hud = new Hud(hudRoot, touch, qualityName, character, {
     spawnAvatar();
   }
 });
-keyboard.onInteract(() => toggleSit());
+let worldReady = false;
+keyboard.onInteract(() => {
+  if (worldReady) toggleSit(); // ignore E while the salon is still loading
+});
 
 // ---------- world ----------
 const bank: AssetBank = await loadAll(
@@ -148,7 +151,9 @@ function tick(dt: number): void {
   const kb = keyboard.read();
   const js = joystick.read();
   const raw = Math.hypot(js.x, js.z) > 0 ? js : kb;
-  avatar = step(avatar, cameraRelative(raw, orbit.yaw), dt, COLLIDERS);
+  // the cat is a small moving obstacle for the avatar (only once a cat model is in the room)
+  const obstacles = catView.present ? [...COLLIDERS, { minX: cat.x - 0.15, maxX: cat.x + 0.15, minZ: cat.z - 0.15, maxZ: cat.z + 0.15 }] : COLLIDERS;
+  avatar = step(avatar, cameraRelative(raw, orbit.yaw), dt, obstacles);
   cat = catStep(cat, dt, { spots: CAT_SPOTS, avatar, rng: Math.random });
   avatarView?.update(avatar, dt);
   catView.update(cat, dt);
@@ -179,11 +184,13 @@ const debug = {
     viewOverride = null;
   }
 };
-(window as unknown as { __kh: typeof debug }).__kh = debug;
+// Test/debug hooks only in development or with ?debug (they can teleport the avatar).
+if (import.meta.env.DEV || params.has('debug')) (window as unknown as { __kh: typeof debug }).__kh = debug;
 
 camera.position.set(avatar.x, 2.5, avatar.z + 3);
 updateCamera(1);
 hud.ready();
+worldReady = true;
 
 void loadAll(MANIFEST.filter((m) => m.deferred), '1k', undefined, undefined, bank).then(() => {
   addLoadedPlacements(room.furniture, bank, quality);

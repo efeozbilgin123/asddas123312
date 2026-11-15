@@ -75,3 +75,9 @@ test('moveCircle stays put instead of ending wedged between two close boxes', ()
   });
   expect(overlap).toBe(false);
 });
+
+test('avatar cannot walk through a dynamic obstacle such as the cat', () => {
+  const cat = box(0, -1, 0.15, 0.15);
+  const s = run(start(0, 0), { x: 0, z: -1, run: false }, 2, [cat]);
+  expect(s.z).toBeGreaterThan(-1 + 0.15 + 0.3 - 1e-6);
+});

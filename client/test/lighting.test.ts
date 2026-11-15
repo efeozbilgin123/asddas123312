@@ -17,3 +17,17 @@ test('flicker varies (not constant)', () => {
   const vals = Array.from({ length: 200 }, (_, i) => flicker(i * 0.1));
   expect(Math.max(...vals) - Math.min(...vals)).toBeGreaterThan(0.1);
 });
+
+import { fireColor } from '../src/world/flicker';
+
+test('fireColor is a warm orange that brightens with flicker', () => {
+  const dim = fireColor(0.75);
+  const bright = fireColor(1);
+  for (const c of [dim, bright]) {
+    expect(c.r).toBe(1);
+    expect(c.g).toBeGreaterThan(0.2);
+    expect(c.g).toBeLessThan(0.75);
+    expect(c.b).toBeLessThan(c.g);
+  }
+  expect(bright.g).toBeGreaterThan(dim.g);
+});

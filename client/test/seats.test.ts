@@ -45,3 +45,15 @@ test('nearestSeat measures from the seat approach point, so chairs are reachable
   const a = seatApproach(chair);
   expect(nearestSeat(a, [chair], new Set())?.id).toBe(chair.id);
 });
+
+test('standing behind the sofa back does not offer the sofa', () => {
+  const sofa = SEATS.find((s) => s.id === 'sofa-l')!;
+  // sofa faces −z (facingY = π); "behind" is +z. 0.8 m behind the back edge (z = −1.83).
+  expect(nearestSeat({ x: sofa.pos[0], z: -1.83 + 0.8 }, [sofa], new Set())).toBeNull();
+});
+
+test('sit reach is at most 1.2 m from the seat or (chairs only) its approach point', () => {
+  const sofa = SEATS.find((s) => s.id === 'sofa-l')!;
+  expect(nearestSeat({ x: sofa.pos[0], z: sofa.pos[2] - 1.25 }, [sofa], new Set())).toBeNull();
+  expect(nearestSeat({ x: sofa.pos[0], z: sofa.pos[2] - 1.15 }, [sofa], new Set())?.id).toBe('sofa-l');
+});

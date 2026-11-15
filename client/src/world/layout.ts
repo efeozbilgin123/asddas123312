@@ -44,7 +44,7 @@ function place(p: Placement): void {
 
 // ---- Oturma köşesi (back-left) ----
 place({ id: 'stove', asset: 'barrel_stove', pos: [-7.2, 0, -5.2], rotY: PI / 4, collider: box(-7.2, -5.2, 0.42, 0.42) });
-place({ id: 'basket', asset: 'wicker_basket_01', pos: [-7.45, 0, -4.25], rotY: 0.3 });
+place({ id: 'basket', asset: 'wicker_basket_01', pos: [-7.45, 0, -4.25], rotY: 0.3, collider: box(-7.45, -4.25, 0.22, 0.2) });
 place({ id: 'sofa', asset: 'sofa_03', pos: [-4.4, 0, -2.3], rotY: PI, collider: box(-4.4, -2.3, 1.38, 0.47) });
 place({ id: 'pillows', asset: 'throw_pillows_01', pos: [-4.4, 0.42, -2.25], rotY: PI });
 place({ id: 'coffee-table', asset: 'coffee_table_round_01', pos: [-4.4, 0, -3.7], rotY: 0, scale: 0.6, collider: box(-4.4, -3.7, 0.4, 0.4) });
@@ -115,8 +115,20 @@ export const CAT_SPOTS: readonly CatSpot[] = [
   { id: 'pencere', pos: [1.4, 0, -5.5], kind: 'sit' },
   { id: 'raf-onu', pos: [6.6, 0, -4.6], kind: 'sit' },
   { id: 'masalar-arasi', pos: [1.4, 0, -0.9], kind: 'wander' },
+  { id: 'koridor', pos: [1.4, 0, 3.6], kind: 'wander' },
   { id: 'giris', pos: [-2.5, 0, 3.6], kind: 'wander' },
   { id: 'yan-kanepe', pos: [-6.4, 0, 0.6], kind: 'wander' }
+];
+
+/** Straight, verified-clear paths the cat may walk (undirected). */
+export const CAT_EDGES: readonly (readonly [string, string])[] = [
+  ['soba-onu', 'kilim'],
+  ['kilim', 'pencere'],
+  ['pencere', 'raf-onu'],
+  ['pencere', 'masalar-arasi'],
+  ['masalar-arasi', 'koridor'],
+  ['koridor', 'giris'],
+  ['giris', 'yan-kanepe']
 ];
 
 export const FURNITURE_COLLIDERS: readonly Box2[] = placements.flatMap((p) => (p.collider ? [p.collider] : []));

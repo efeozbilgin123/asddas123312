@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { AssetBank } from './assets';
-import { flicker } from './flicker';
+import { fireColor, flicker } from './flicker';
 import { PLACEMENTS, ROOM, WINDOW } from './layout';
 import type { QualityPreset } from './quality';
 
@@ -46,6 +46,27 @@ export function createLighting(renderer: THREE.WebGLRenderer, scene: THREE.Scene
   shadowed(stoveLight);
   scene.add(stoveLight);
 
+  // Fire glow at the stove's front: a soft additive sprite whose colour follows the flicker.
+  const glowTex = (() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d')!;
+    const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.35, 'rgba(255,255,255,0.55)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    return new THREE.CanvasTexture(c);
+  })();
+  const fire = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: glowTex, color: '#ff7a24', blending: THREE.AdditiveBlending, depthWrite: false, transparent: true })
+  );
+  const front = { x: Math.sin(stove.rotY), z: Math.cos(stove.rotY) };
+  fire.position.set(stove.pos[0] + front.x * 0.33, 0.32, stove.pos[2] + front.z * 0.33);
+  fire.scale.setScalar(0.35);
+  scene.add(fire);
+
 
   PLACEMENTS.filter((p) => p.asset === 'lantern_chandelier_01').forEach((p, i) => {
     const l = new THREE.PointLight('#ffc27a', LAMP_LIGHT, 11, 2);
@@ -70,6 +91,9 @@ export function createLighting(renderer: THREE.WebGLRenderer, scene: THREE.Scene
     update(t: number) {
       const f = flicker(t);
       stoveLight.intensity = STOVE_LIGHT * f;
+      const c = fireColor(f);
+      fire.material.color.setRGB(c.r, c.g, c.b);
+      fire.scale.setScalar(0.3 + 0.08 * f);
     }
   };
 }

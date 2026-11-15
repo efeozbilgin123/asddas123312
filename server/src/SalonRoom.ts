@@ -1,7 +1,7 @@
 import { Room, type Client } from '@colyseus/core';
 import {
   CAT_SPOTS, COLLIDERS, EMOTES, JOIN_ERROR_NAME, LOOKS, MAX_PLAYERS, MoveBudget, RateLimiter, SEATS, SIT_RADIUS, SPAWN,
-  catStep, initialCat, sanitizeChat, sanitizeName, seatReach, standUp, validateMove,
+  catStep, initialCat, sanitizeAvatar, sanitizeChat, sanitizeName, seatReach, standUp, validateMove,
   type CatState, type ChatMsg, type EmoteMsg, type JoinOptions, type MoveMsg, type SitMsg
 } from '@kahvehane/shared';
 import { CatSchema, PlayerState, SalonState } from './schema';
@@ -9,6 +9,8 @@ import { CatSchema, PlayerState, SalonState } from './schema';
 export interface SalonOptions {
   /** Seconds a dropped client may take to reconnect (0 in tests). */
   reconnectSeconds?: number;
+  /** Whether an uploaded avatar with this sha256 exists. */
+  avatarExists?: (hash: string) => boolean;
 }
 
 /** Client offers Sit within SIT_RADIUS; allow a little for positions still in flight. */
@@ -31,8 +33,11 @@ export class SalonRoom extends Room<{ state: SalonState }> {
   private cat: CatState = initialCat(CAT_SPOTS, Math.random);
   private joined = 0;
 
+  private avatarExists: (hash: string) => boolean = () => false;
+
   onCreate(options: SalonOptions = {}): void {
     this.reconnectSeconds = options.reconnectSeconds ?? 10;
+    if (options.avatarExists) this.avatarExists = options.avatarExists;
     this.setState(new SalonState());
     this.state.cat = new CatSchema();
     this.writeCat();
@@ -52,6 +57,7 @@ export class SalonRoom extends Room<{ state: SalonState }> {
     const p = new PlayerState();
     p.name = name;
     p.look = look;
+    p.avatar = sanitizeAvatar(options.avatar, this.avatarExists);
     p.x = SPAWN[0] + ((this.joined++ % 5) - 2) * 0.6;
     p.z = SPAWN[2];
     p.facing = Math.PI;

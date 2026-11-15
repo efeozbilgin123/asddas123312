@@ -229,3 +229,12 @@ describe('SalonRoom', () => {
   });
 });
 
+
+test('join keeps a builtin avatar and replaces an unknown upload with the mannequin', async () => {
+  const room = await colyseus.createRoom<SalonRoom>('salon', {});
+  const a = await colyseus.connectTo(room, { name: 'Ayşe', look: 'kum', avatar: 'seed' });
+  const b = await colyseus.connectTo(room, { name: 'Mehmet', look: 'kum', avatar: `custom:${'c'.repeat(64)}` });
+  await room.waitForNextPatch();
+  expect(room.state.players.get(a.sessionId)!.avatar).toBe('seed');
+  expect(room.state.players.get(b.sessionId)!.avatar).toBe('mannequin');
+});

@@ -86,3 +86,22 @@ test('MoveBudget: rapid tiny messages cannot add up into a speed hack', () => {
   for (let i = 1; i <= 50; i++) if (b.spend(0.3, i * 20)) moved += 0.3; // 15 m/s attempt over 1 s
   expect(moved).toBeLessThan(6.5); // ≤ run speed × 1.5 + burst
 });
+
+import { BUILTIN_AVATARS, sanitizeAvatar } from '../src/protocol';
+
+describe('sanitizeAvatar', () => {
+  const hash = 'a'.repeat(64);
+  const exists = (h: string) => h === hash;
+  test('keeps builtin avatars', () => {
+    for (const id of BUILTIN_AVATARS) expect(sanitizeAvatar(id, exists)).toBe(id);
+  });
+  test('accepts an uploaded avatar that exists on the server', () => {
+    expect(sanitizeAvatar(`custom:${hash}`, exists)).toBe(`custom:${hash}`);
+  });
+  test('falls back to the mannequin for unknown, missing or malformed ids', () => {
+    expect(sanitizeAvatar(`custom:${'b'.repeat(64)}`, exists)).toBe('mannequin');
+    expect(sanitizeAvatar('custom:../../etc/passwd', exists)).toBe('mannequin');
+    expect(sanitizeAvatar('jane-doe', exists)).toBe('mannequin');
+    expect(sanitizeAvatar(undefined, exists)).toBe('mannequin');
+  });
+});

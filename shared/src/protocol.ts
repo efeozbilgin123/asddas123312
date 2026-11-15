@@ -23,8 +23,21 @@ export const EMOTES = [
   { id: 'alkis', emoji: '👏', label: 'Alkış' }
 ] as const satisfies readonly { id: string; emoji: string; label: string }[];
 
+/** Bundled avatars: two permissively licensed anime VRMs and the tinted mannequin. */
+export const BUILTIN_AVATARS = ['twist', 'seed', 'mannequin'] as const;
+export type BuiltinAvatar = (typeof BUILTIN_AVATARS)[number];
+const CUSTOM_AVATAR = /^custom:([0-9a-f]{64})$/;
+
+/** A valid avatar id: a builtin, or `custom:<sha256>` of an upload the server actually has. */
+export function sanitizeAvatar(raw: unknown, exists: (hash: string) => boolean): string {
+  if (typeof raw !== 'string') return 'mannequin';
+  if ((BUILTIN_AVATARS as readonly string[]).includes(raw)) return raw;
+  const m = CUSTOM_AVATAR.exec(raw);
+  return m && exists(m[1]!) ? raw : 'mannequin';
+}
+
 // ---- messages ----
-export interface JoinOptions { name: string; look: string }
+export interface JoinOptions { name: string; look: string; avatar?: string }
 export interface MoveMsg { x: number; z: number; facing: number; speed: number }
 export interface SitMsg { seatId: string }
 export interface ChatMsg { text: string }

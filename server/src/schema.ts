@@ -4,6 +4,7 @@ export const PlayerState = schema(
   {
     name: t.string(),
     look: t.string(),
+    avatar: t.string().default('mannequin'),
     x: t.number(),
     z: t.number(),
     facing: t.number(),
